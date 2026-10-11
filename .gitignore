@@ -1,0 +1,22 @@
+# Secretos
+.env
+*.jks
+*.keystore
+# Backend
+backend/build/
+backend/.gradle/
+# Web
+web/node_modules/
+web/dist/
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+local.properties
+# IDEs
+.idea/
+.vscode/
+*.iml
+# SO
+Thumbs.db
+.DS_Store
