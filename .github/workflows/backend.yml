@@ -36,4 +36,4 @@ jobs: # Agrupa las comprobaciones que deben pasar para backend.
       - name: Configurar Gradle y su caché # Reutiliza dependencias entre ejecuciones compatibles.
         uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3; SHA fijo de la acción.
       - name: Ejecutar las validaciones del backend # Incluye tests y cobertura mediante la tarea check existente.
-        run: bash ./gradlew -p backend check # Bash evita depender del bit ejecutable ausente en el wrapper versionado.
+        run: bash ./backend/gradlew -p backend check # Invoca el wrapper en backend/ desde la raíz del checkout.
