@@ -6,6 +6,26 @@ data class ImageDto(
     val alt: String?
 )
 
+data class OptionDto(
+    val id: String,
+    val name: String,
+    val priceDeltaMinor: Long,
+    val available: Boolean,
+    val isDefault: Boolean,
+    val sortOrder: Int
+)
+
+data class OptionGroupDto(
+    val id: String,
+    val name: String,
+    val selectionType: String,
+    val required: Boolean,
+    val minSelections: Int,
+    val maxSelections: Int,
+    val sortOrder: Int,
+    val options: List<OptionDto>
+)
+
 data class ProductDto(
     val id: String,
     val name: String,
@@ -15,7 +35,7 @@ data class ProductDto(
     val station: String,
     val allergens: List<String>,
     val image: ImageDto?,
-    val optionGroups: List<Any> = emptyList()
+    val optionGroups: List<OptionGroupDto> = emptyList()
 )
 
 data class CategoryDto(

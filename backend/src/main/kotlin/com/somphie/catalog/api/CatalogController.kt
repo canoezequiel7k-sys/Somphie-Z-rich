@@ -3,9 +3,12 @@ package com.somphie.catalog.api
 import com.somphie.catalog.domain.CategoryDto
 import com.somphie.catalog.domain.ImageDto
 import com.somphie.catalog.domain.MenuResponse
+import com.somphie.catalog.domain.OptionDto
+import com.somphie.catalog.domain.OptionGroupDto
 import com.somphie.catalog.domain.ProductDto
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
+import org.springframework.boot.json.JsonParserFactory
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -23,6 +26,7 @@ class CatalogController(
 ) {
 
     private val defaultRestaurantId = "6f2d8a41-3b9c-4e75-a1d0-5c7e9b3f2a68"
+    private val jsonParser = JsonParserFactory.getJsonParser()
 
     @GetMapping("/menu")
     fun getMenu(
@@ -51,7 +55,7 @@ class CatalogController(
             String::class.java
         ) ?: "ARS"
 
-        val catalogVersion = 1L
+        val catalogVersion = 2L
         val etag = "W/\"$catalogVersion-$effectiveLocale\""
 
         if (ifNoneMatch != null && ifNoneMatch.replace("W/", "") == etag.replace("W/", "")) {
@@ -61,7 +65,7 @@ class CatalogController(
                 .build()
         }
 
-        val categories = fetchCategories(targetRestaurantId)
+        val categories = fetchCategories(targetRestaurantId, effectiveLocale)
 
         val response = MenuResponse(
             catalogVersion = catalogVersion,
@@ -89,8 +93,10 @@ class CatalogController(
             throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Product not found")
         }
 
+        val effectiveLocale = lang ?: acceptLanguage?.split(",")?.firstOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: "es-AR"
+
         val sql = """
-            SELECT p.id, p.name, p.description, p.price_minor, p.available, s.code AS station_code,
+            SELECT p.id, p.name, p.name_i18n, p.description, p.description_i18n, p.price_minor, p.available, s.code AS station_code,
                    p.allergens, p.image_path, p.image_version, p.image_alt
             FROM product p
             JOIN station s ON p.station_id = s.id
@@ -98,6 +104,12 @@ class CatalogController(
         """
 
         val products = jdbc.query(sql, mapOf("id" to uuid.toString())) { rs, _ ->
+            val nameJson = rs.getString("name_i18n")
+            val resolvedName = resolveI18n(nameJson, effectiveLocale) ?: rs.getString("name")
+
+            val descJson = rs.getString("description_i18n")
+            val resolvedDesc = resolveI18n(descJson, effectiveLocale) ?: rs.getString("description")
+
             val imgPath = rs.getString("image_path")
             val image = if (imgPath != null) {
                 ImageDto(
@@ -110,15 +122,19 @@ class CatalogController(
             @Suppress("UNCHECKED_CAST")
             val allergensArray = rs.getArray("allergens")?.array as? Array<String> ?: emptyArray()
 
+            val productIdStr = rs.getString("id")
+            val optionGroups = fetchOptionGroupsForProduct(productIdStr, effectiveLocale)
+
             ProductDto(
-                id = rs.getString("id"),
-                name = rs.getString("name"),
-                description = rs.getString("description"),
+                id = productIdStr,
+                name = resolvedName,
+                description = resolvedDesc,
                 priceMinor = rs.getLong("price_minor"),
                 available = rs.getBoolean("available"),
                 station = rs.getString("station_code"),
                 allergens = allergensArray.toList(),
-                image = image
+                image = image,
+                optionGroups = optionGroups
             )
         }
 
@@ -126,19 +142,19 @@ class CatalogController(
         return ResponseEntity.ok(product)
     }
 
-    private fun fetchCategories(restaurantId: String): List<CategoryDto> {
+    private fun fetchCategories(restaurantId: String, locale: String): List<CategoryDto> {
         val catSql = """
-            SELECT c.id, c.name, c.sort_order
-            FROM category c
-            WHERE c.restaurant_id = CAST(:restaurantId AS UUID)
-            ORDER BY c.sort_order ASC
+            SELECT id, name, sort_order
+            FROM category
+            WHERE restaurant_id = CAST(:restaurantId AS UUID)
+            ORDER BY sort_order ASC
         """
 
         return jdbc.query(catSql, mapOf("restaurantId" to restaurantId)) { rs, _ ->
             val catId = rs.getString("id")
             val catName = rs.getString("name")
             val sortOrder = rs.getInt("sort_order")
-            val products = fetchProductsForCategory(catId)
+            val products = fetchProductsForCategory(catId, locale)
 
             CategoryDto(
                 id = catId,
@@ -149,9 +165,9 @@ class CatalogController(
         }
     }
 
-    private fun fetchProductsForCategory(categoryId: String): List<ProductDto> {
+    private fun fetchProductsForCategory(categoryId: String, locale: String): List<ProductDto> {
         val prodSql = """
-            SELECT p.id, p.name, p.description, p.price_minor, p.available, s.code AS station_code,
+            SELECT p.id, p.name, p.name_i18n, p.description, p.description_i18n, p.price_minor, p.available, s.code AS station_code,
                    p.allergens, p.image_path, p.image_version, p.image_alt
             FROM product p
             JOIN subcategory sub ON p.subcategory_id = sub.id
@@ -161,6 +177,12 @@ class CatalogController(
         """
 
         return jdbc.query(prodSql, mapOf("categoryId" to categoryId)) { rs, _ ->
+            val nameJson = rs.getString("name_i18n")
+            val resolvedName = resolveI18n(nameJson, locale) ?: rs.getString("name")
+
+            val descJson = rs.getString("description_i18n")
+            val resolvedDesc = resolveI18n(descJson, locale) ?: rs.getString("description")
+
             val imgPath = rs.getString("image_path")
             val image = if (imgPath != null) {
                 ImageDto(
@@ -173,16 +195,81 @@ class CatalogController(
             @Suppress("UNCHECKED_CAST")
             val allergensArray = rs.getArray("allergens")?.array as? Array<String> ?: emptyArray()
 
+            val productIdStr = rs.getString("id")
+            val optionGroups = fetchOptionGroupsForProduct(productIdStr, locale)
+
             ProductDto(
-                id = rs.getString("id"),
-                name = rs.getString("name"),
-                description = rs.getString("description"),
+                id = productIdStr,
+                name = resolvedName,
+                description = resolvedDesc,
                 priceMinor = rs.getLong("price_minor"),
                 available = rs.getBoolean("available"),
                 station = rs.getString("station_code"),
                 allergens = allergensArray.toList(),
-                image = image
+                image = image,
+                optionGroups = optionGroups
             )
+        }
+    }
+
+    private fun fetchOptionGroupsForProduct(productId: String, locale: String): List<OptionGroupDto> {
+        val sql = """
+            SELECT og.id, og.name, og.name_i18n, og.selection_type, og.required, og.min_selections, og.max_selections, og.sort_order
+            FROM option_group og
+            JOIN product_option_group pog ON og.id = pog.group_id
+            WHERE pog.product_id = CAST(:productId AS UUID)
+            ORDER BY pog.sort_order ASC
+        """
+
+        return jdbc.query(sql, mapOf("productId" to productId)) { rs, _ ->
+            val groupId = rs.getString("id")
+            val nameJson = rs.getString("name_i18n")
+            val resolvedName = resolveI18n(nameJson, locale) ?: rs.getString("name")
+            val options = fetchOptionsForGroup(groupId, locale)
+
+            OptionGroupDto(
+                id = groupId,
+                name = resolvedName,
+                selectionType = rs.getString("selection_type"),
+                required = rs.getBoolean("required"),
+                minSelections = rs.getInt("min_selections"),
+                maxSelections = rs.getInt("max_selections"),
+                sortOrder = rs.getInt("sort_order"),
+                options = options
+            )
+        }
+    }
+
+    private fun fetchOptionsForGroup(groupId: String, locale: String): List<OptionDto> {
+        val sql = """
+            SELECT id, name, name_i18n, price_delta_minor, available, is_default, sort_order
+            FROM product_option
+            WHERE group_id = CAST(:groupId AS UUID)
+            ORDER BY sort_order ASC
+        """
+
+        return jdbc.query(sql, mapOf("groupId" to groupId)) { rs, _ ->
+            val nameJson = rs.getString("name_i18n")
+            val resolvedName = resolveI18n(nameJson, locale) ?: rs.getString("name")
+
+            OptionDto(
+                id = rs.getString("id"),
+                name = resolvedName,
+                priceDeltaMinor = rs.getLong("price_delta_minor"),
+                available = rs.getBoolean("available"),
+                isDefault = rs.getBoolean("is_default"),
+                sortOrder = rs.getInt("sort_order")
+            )
+        }
+    }
+
+    private fun resolveI18n(jsonbStr: String?, locale: String): String? {
+        if (jsonbStr.isNullOrBlank()) return null
+        return try {
+            val map = jsonParser.parseMap(jsonbStr)
+            (map[locale] as? String) ?: (map["es-AR"] as? String)
+        } catch (e: Exception) {
+            null
         }
     }
 }

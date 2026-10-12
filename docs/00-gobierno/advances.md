@@ -490,6 +490,15 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Archivos:** `backend/src/main/resources/db/migration/V2__catalog.sql`, `backend/src/main/kotlin/com/somphie/catalog/`, `backend/src/test/kotlin/com/somphie/catalog/`, `backend/src/main/kotlin/com/somphie/shared/domain/DomainException.kt`, `backend/src/main/kotlin/com/somphie/shared/api/ApiExceptionHandler.kt` y esta bitácora.
 - **Qué estudiar:** Caché HTTP condicional con ETag (`If-None-Match` / `304 Not Modified`), multi-tenancy en endpoints públicos y migración Flyway versionada.
 
+### 2026-10-12 — WP-BE-32 ✅
+- **Qué hicimos:** Se implementó el soporte de opciones de productos y localización i18n (`Accept-Language` / `?lang=`) en el backend:
+  1. Migración Flyway `V3__options_and_i18n.sql` con tablas `option_group`, `product_option_group` y `product_option`, además de campos de traducción `name_i18n` (JSONB) y semilla para opciones de café (Tamaño, Leche).
+  2. Actualización de `CatalogModels.kt` con `OptionGroupDto` y `OptionDto`.
+  3. Actualización de `CatalogController.kt` para consultar y poblar grupos de opciones en `GET /menu` y `GET /products/{productId}`, resolviendo textos localizados con fallback a `es-AR`.
+- **Por qué:** Cumple con WP-BE-32 de la Fase 3 del roadmap (opciones, modificadores y i18n del menú).
+- **Archivos:** `backend/src/main/resources/db/migration/V3__options_and_i18n.sql`, `backend/src/main/kotlin/com/somphie/catalog/`, `backend/src/test/kotlin/com/somphie/catalog/` y esta bitácora.
+- **Qué estudiar:** Modificadores y deltas de precio en artículos de menú, y resolución de localización JSONB con fallback.
+
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)
 
