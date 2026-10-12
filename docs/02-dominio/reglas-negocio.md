@@ -190,10 +190,10 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 |---|---|---|
 | RN-ADJ-01 | Tipos: `DISCOUNT_PERCENT`, `DISCOUNT_AMOUNT`, `COURTESY_ITEM`, `MANUAL_ADJUSTMENT`. Todos **restan**; no hay recargos en el MVP | D |
 | RN-ADJ-02 | Solo personal con permiso, con sesión `OPEN`, con `reasonCode` obligatorio (+ texto opcional ≤ 140) | A |
-| RN-ADJ-03 | El importe se **calcula y congela al aplicar** (un porcentaje se calcula sobre `charges − adjustments` vigentes en ese instante). Pedidos posteriores **no** heredan el descuento | D |
+| RN-ADJ-03 | El importe se **calcula y congela al aplicar** (un porcentaje se calcula sobre `charges − adjustments` vigentes en ese instante y se **redondea al centavo más cercano**, la mitad hacia arriba). Pedidos posteriores **no** heredan el descuento | D |
 | RN-ADJ-04 | `COURTESY_ITEM` apunta a un ítem no cancelado y sin cortesía previa; importe = `lineTotalMinor` | A |
 | RN-ADJ-05 | Un ajuste no puede dejar el saldo negativo: `adjustment ≤ balance` (`ADJUSTMENT_EXCEEDS_BALANCE`). Compensar a quien ya pagó se hace con **reembolso** | A |
-| RN-ADJ-06 | `adjustment.apply` está limitado por `maxStaffDiscountPercent` (10 % de los cargos) y `maxStaffAdjustmentMinor`; superar el límite exige `adjustment.apply_any` (`ADJUSTMENT_LIMIT_EXCEEDED`) | A |
+| RN-ADJ-06 | `adjustment.apply` está limitado por `maxStaffDiscountPercent` (**15 %** de los cargos, D-confirmada) y `maxStaffAdjustmentMinor`; superar el límite exige `adjustment.apply_any` (`ADJUSTMENT_LIMIT_EXCEEDED`) | A |
 | RN-ADJ-07 | Se puede **anular** (`VOIDED`) con motivo mientras la sesión esté `OPEN`; el Mozo solo los suyos y dentro de 10 min, el Dueño cualquiera | A |
 | RN-ADJ-08 | Cancelar un ítem con cortesía **anula esa cortesía en la misma transacción** | A |
 | RN-ADJ-09 | Aplicar/anular toman lock `FOR UPDATE` de la sesión, son idempotentes y quedan auditados | A/DB |

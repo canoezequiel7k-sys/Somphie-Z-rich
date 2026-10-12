@@ -2,6 +2,8 @@
 
 Este archivo aplica a **todo agente o colaborador** (backend, web, android, UX, QA, DevOps, arquitecto) del proyecto **Somphie Zúrich**.
 
+> **Antes de empezar, lee `docs/00-gobierno/advances.md`**: dice en qué estado está el proyecto, qué se decidió recientemente, qué paso del plan está en curso y qué archivos se están tocando. Si vas a cambiar algo, anota ahí lo que haces (qué, por qué, qué estudiar).
+
 ## 1. Jerarquía de la verdad (si dos documentos se contradicen, gana el de arriba)
 
 1. `docs/00-gobierno/decisiones.md` y `adr/` — decisiones tomadas.

@@ -42,7 +42,7 @@ Leyenda: ✅ Confirmada (definida por ti en el plan maestro) · 🟢 Aceptada en
 
 ## 3. Propuestas de la v0.1 — resultado de tu validación
 
-Todas quedaron 🟢 **aceptadas** (D-101 a D-128), salvo **D-121**, que no traía marca: queda 🟡 a la espera de tu confirmación (recomiendo aceptarla).
+Todas quedaron 🟢 **aceptadas** (D-101 a D-128), salvo **D-121**, que no traía marca y quedó 🟡. Se confirmó después (ver D-154), por lo que ahora está 🟢.
 
 | ID | Decisión | Estado |
 |---|---|---|
@@ -66,7 +66,7 @@ Todas quedaron 🟢 **aceptadas** (D-101 a D-128), salvo **D-121**, que no traí
 | D-118 | SSE + `event_log` + `Last-Event-ID` | 🟢 |
 | D-119 | Horario de atención y `RESTAURANT_CLOSED` | 🟢 |
 | D-120 | Monorepo | 🟢 |
-| D-121 | Tests de contrato (`swagger-request-validator`) + mocks Prism | 🟡 **confirmar** |
+| D-121 | Tests de contrato (`swagger-request-validator`) + mocks Prism | 🟢 (confirmada en D-154) |
 | D-122 | APK por GitHub Releases | 🟢 |
 | D-123 | Notas por ítem (≤140). **Opciones/modificadores pasan de "reservadas" a incluidas en MVP** (ver D-129) | 🟢 |
 | D-124 | Participantes `HOST`/`MEMBER` | 🟢 |
@@ -83,7 +83,7 @@ Todas quedaron 🟢 **aceptadas** (D-101 a D-128), salvo **D-121**, que no traí
 | D-130 | **Propina libre**: monto voluntario que el participante adjunta a su pago (o paga solo propina). No reduce el saldo, no es cargo, se reporta aparte. Tope de cordura configurable para evitar errores de tipeo | Q-01 | 🟢 (tope 🟡) |
 | D-131 | **Descuentos, cortesías y ajustes manuales** en el alcance (los tres tipos). Motivo obligatorio, auditoría, límite para el Mozo y sin límite para el Dueño; importe congelado al aplicarlo | Q-03 | 🟢 (mecánica 🟡) |
 | D-132 | **Imágenes en carpeta**: puerto `ImageStorage` con adaptador de carpeta. En la demo, imágenes versionadas en el repo y servidas como estáticos | Q-04 | 🟢 |
-| D-133 | **Web (cliente + admin) en Vercel** mientras sea gratis. El backend y PostgreSQL **no** van en Vercel (ver Q-15) | Q-05 | 🟢 / 🔴 backend |
+| D-133 | **Web (cliente + admin) en Vercel** mientras sea gratis. El backend y PostgreSQL **no** van en Vercel (ver D-156) | Q-05 | 🟢 / 🔴 backend |
 | D-134 | Marca en `design/img/` (`ic_icon.png`, etc.) | Q-06 | 🟢 |
 | D-135 | Retención de datos: se adopta la propuesta de `modelo-datos.md` §5; nombres de invitados se anonimizan a los 12 meses (🟡 plazo) | Q-07 | 🟢 |
 | D-136 | Comprobante: leyenda "Comprobante no fiscal — no válido como factura" + datos ficticios del local | Q-08 | 🟢 |
@@ -92,6 +92,29 @@ Todas quedaron 🟢 **aceptadas** (D-101 a D-128), salvo **D-121**, que no traí
 | D-139 | Sin impresión de comandas por ahora; disponibilidad **manual** (sin stock real) | Q-11/Q-12 | 🟢 |
 | D-140 | **i18n en la web cliente**: es-AR + en desde el diseño; alemán después. Panel admin y app Android solo es-AR. Catálogo con traducciones por idioma | Q-13 | 🟢 (idiomas 🟡) |
 | D-141 | **Multi-sucursal simulada**: `restaurant_id` en todo y pruebas de aislamiento con dos restaurantes; sin UI multi-local | Q-14 | 🟢 |
+
+## 3.2 Decisiones tomadas por delegación del dueño (D-142 … D-157)
+
+El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable y bueno"*. Las toma el Arquitecto y el dueño puede **revocar cualquiera**. El detalle (alternativas descartadas y qué estudiar) está en `00-gobierno/advances.md` §2. Estado 🟢 (delegada) = tomada por delegación, revocable.
+
+| ID | Decisión | Origen | Estado |
+|---|---|---|---|
+| D-142 | **Descuentos del Mozo: hasta 15 %** acumulado de los cargos brutos de la sesión (suma de todos sus ajustes sin `adjustment.apply_any`). Configurable en `restaurant_settings.maxStaffDiscountPercent`; el tope absoluto `maxStaffAdjustmentMinor` es opcional. El Dueño no tiene límite. Reemplaza la propuesta de 10 % | Q-17 | 🟢 (delegada) |
+| D-143 | **HOST en sesiones abiertas por el personal**: la sesión nace sin HOST y el primero en unirse lo es; los siguientes son `MEMBER`. La unicidad la garantiza un índice único parcial en la base; si dos se unen a la vez, el segundo se inserta como `MEMBER` en la misma transacción. Mientras no haya HOST, el personal conserva `participant.revoke` y rotar código | H-03 | 🟢 (delegada) |
+| D-144 | **Restaurante en endpoints públicos**: con `tableCode` se toma de la mesa; en `GET /menu`, con token manda el del token y sin token se usa `restaurantId` o el predeterminado del despliegue (`DEFAULT_RESTAURANT_ID`); id desconocido → `404`. `PublicTable` suma `restaurantId` opcional | H-04 | 🟢 (delegada) |
+| D-145 | Campos `proposed` del contrato (`Participant.revoked`, `Order.rejection`, campos de `StaffTable` y `StaffOpenSessionResponse`) quedan **aceptados** | H-05 | 🟢 (delegada) |
+| D-146 | **Pago solo propina**: RN-BIL-03 aplica solo con `amountMinor > 0`; con `0` rige RN-TIP-01. Gana el contrato (ver D-130) | H-02 | 🟢 (delegada) |
+| D-147 | `TIP_NOT_ALLOWED` se mantiene en **409** (conflicto de estado), también en el contrato | H-08 | 🟢 (delegada) |
+| D-148 | **Redocly CLI** como única herramienta de lint, vista previa y empaquetado del contrato; reemplaza a Spectral | H-09 | 🟢 (delegada) |
+| D-149 | **Una sola copia** de cada documento: la oficial es la de `docs/` | H-10 | 🟢 (delegada) |
+| D-150 | `CHANGELOG.md` del contrato: más reciente arriba, con fecha; `0.x` = borrador, `1.0.0` = congelado al cerrar la Fase 1; `info.version` coincide con la última entrada | H-07 | 🟢 (delegada) |
+| D-151 | Nuevo `02-dominio/catalogo-auditoria.md` con el vocabulario cerrado de acciones de auditoría | — | 🟢 (delegada) |
+| D-152 | **Idiomas**: interfaz de la web cliente en `es-AR` y `en` en el MVP; traducciones del menú opcionales con fallback a `es-AR`; `de` después | Q-16 | 🟢 (delegada) |
+| D-153 | **Propina**: campo libre + montos rápidos como ayuda de UI (el servidor solo recibe `tipMinor`); sin atribución a un empleado en el MVP | Q-18 | 🟢 (delegada) |
+| D-154 | Se **confirma D-121** (tests de contrato + mocks Prism) | Q-19 | 🟢 (delegada) |
+| D-155 | **Imágenes**: subir desde el admin solo en local (`MEDIA_UPLOAD_ENABLED=true`); en la demo, imágenes versionadas en el repo | Q-20 | 🟢 (delegada) |
+| D-156 | **Backend como imagen Docker** configurada solo por variables de entorno, sin atarse a un proveedor. El hosting y PostgreSQL se eligen en la Fase 2 con el checklist de `nube.md` | Q-15 | 🟢 (delegada) / 🔴 proveedor |
+| D-157 | **Consolidar la documentación ("v0.3")** antes de la Fase 2: integrar en el cuerpo las secciones "v0.2" apendadas | H-06 | 🟢 (delegada) |
 
 ## 4. Preguntas
 
@@ -110,17 +133,17 @@ Todas quedaron 🟢 **aceptadas** (D-101 a D-128), salvo **D-121**, que no traí
 | Q-11, Q-12 | Posterior / manual → D-139 |
 | Q-13 | Sí → D-140 |
 | Q-14 | Simulada → D-141 |
+| Q-15 | Backend como imagen Docker, proveedor a elegir en Fase 2 → D-156 |
+| Q-16 | Interfaz `es-AR` + `en`, menú traducible de forma opcional → D-152 |
+| Q-17 | Mozo hasta 15 % acumulado, configurable → D-142 |
+| Q-18 | Campo libre + montos rápidos, sin atribución → D-153 |
+| Q-19 | D-121 confirmada → D-154 |
+| Q-20 | Subida de imágenes solo en local → D-155 |
 
-### 4.2 Nuevas pendientes 🔴
+### 4.2 Pendientes 🔴
 | ID | Pregunta | Impacto | Cuándo |
 |---|---|---|---|
-| Q-15 | **Dónde corre el backend y PostgreSQL** (Vercel no es adecuado para una app Spring Boot de larga duración ni para SSE). Verificar candidatos vigentes con plan gratuito | Despliegue, CORS, SSE | Fase 2 |
-| Q-16 | Idiomas de la web cliente: ¿`en` ya en el MVP y `de` después? ¿Hace falta **traducir el menú** o solo la interfaz? | Catálogo, admin | Antes de Fase 3 |
-| Q-17 | Descuentos: ¿límite del Mozo? Propuesta: **10 %** del total de cargos | Permisos, ajustes | Antes de Fase 7 |
-| Q-18 | Propina: ¿solo campo libre o también montos rápidos (sugeridos)? ¿Se atribuye a un empleado? Propuesta: campo libre + chips de ayuda; sin atribución | Cuenta, reportes | Antes de Fase 7 |
-| Q-19 | Confirmar **D-121** | Contrato | Antes de Fase 1 |
-| Q-20 | Imágenes: ¿se permite subir desde el admin en la demo (no persiste en hosting efímero) o solo imágenes del repo? | Admin, demo | Antes de Fase 8 |
-| Q-21 | Marca: ¿hay versión vectorial (SVG) además de `ic_icon.png`? ¿Logo horizontal? | Diseño | Fase 1 |
+| Q-21 | Marca: existen `ic_icon.svg` (1,54 MB) y `boceto_v.1.0.png`. Falta confirmar si el SVG es el isotipo **final**, si hay logo horizontal y cómo se generó (el tamaño es inusual: ¿imagen incrustada o vectorizado automático?). Puede requerir optimizarlo | Diseño (tokens, favicon, ícono Android) | Fase 1 |
 
 ## 5. Consultas abiertas (agentes → arquitecto)
 

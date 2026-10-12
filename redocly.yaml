@@ -1,0 +1,11 @@
+extends:
+  - recommended
+
+# Reglas apagadas a propósito (ver docs/04-api/openapi.yaml):
+# - info-license: el proyecto aún no define licencia.
+# - no-server-example-com: los servidores localhost son el backend local y el mock de Prism.
+# - operation-4xx-response: GET /version no tiene errores de cliente posibles.
+rules:
+  info-license: off
+  no-server-example-com: off
+  operation-4xx-response: off

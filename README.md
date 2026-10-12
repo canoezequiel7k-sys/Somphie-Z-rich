@@ -3,6 +3,7 @@
 > **Documentación v0.2 — Fase 0 (Especificación funcional).** Incluye tus decisiones sobre D-101…D-128 y Q-01…Q-14; ver `docs/00-gobierno/cambios-v0.2.md`.
 > Estado: **borrador para validación del dueño del proyecto**. Nada de lo descrito está implementado todavía.
 > Idioma de los documentos: español. Idioma del código, API y base de datos: inglés (ver D-103).
+> **¿Retomas el trabajo o eres un agente nuevo?** Lee primero `docs/00-gobierno/advances.md`: estado actual, decisiones D-142…D-157, plan paso a paso y bitácora.
 
 ## 1. Qué es este repositorio
 

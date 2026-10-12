@@ -15,3 +15,11 @@ Formato: [versión] fecha — tipo (`added` / `changed` / `deprecated` / `remove
 - changed: `balance = charges − adjustments − paid`; `payment.amountMinor` admite 0 si hay propina.
 - added: errores `OPTION_*`, `TIP_*`, `ADJUSTMENT_*`, `WAITER_CALL_*`, `TRANSLATION_INVALID`.
 - Impacto: Web, Android y Backend (todavía sin implementación; el `openapi.yaml` v0.1 nacerá ya con esto).
+
+## [0.2.1] — `openapi.yaml` completo (WP-ARQ-10)
+- added: paths del personal (tablero, sesión manual, pedido en nombre de la mesa, pagos en efectivo, anulación, reembolso, cierre, cierre forzado, ajustes, disponibilidad, llamados al mozo), `GET /events/stream`, `GET /version`, `GET /media/{path}`.
+- added: `components` completo (esquemas, parámetros, cabeceras, respuestas de error y ejemplos).
+- added: `SignedMoneyMinor` para `balanceMinor` (puede ser negativo); el resto del dinero usa `MoneyMinor` (nunca negativo).
+- changed: `GET /menu` devuelve `image: {path, version, alt}` (reemplaza `image.url`); `ETag` = `catalogVersion` + idioma, con `Vary: Accept-Language`.
+- proposed (confirmar con Web y Android): `Participant.revoked`, `Order.rejection`, campos de `StaffTable`, cuerpo de `StaffOpenSessionResponse`.
+- Impacto: Web y Android (generar tipos y mocks desde este archivo); Backend (contrato para tests con swagger-request-validator).

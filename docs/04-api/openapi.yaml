@@ -1,0 +1,2682 @@
+openapi: 3.1.0
+info:
+  title: Somphie Zúrich API
+  version: 0.2.1
+  summary: Contrato REST del backend de Somphie Zúrich (pedidos por QR, operación del personal, cuenta y pagos simulados).
+  description: |
+    Fuente de verdad del contrato (ADR-0008). Todo cambio se hace **primero aquí** y en `CHANGELOG.md`.
+    Documentos de apoyo: `endpoints.md`, `convenciones.md`, `catalogo-errores.md`, `eventos.md`, `idempotencia-concurrencia.md`.
+
+    ## Convenciones
+    - Base `/api/v1`. JSON UTF-8 en `camelCase`. IDs UUID. Fechas ISO-8601 UTC con `Z`.
+    - Dinero: enteros en centavos (`*Minor`). La moneda viaja en `currency` (ARS).
+    - Los campos opcionales **se omiten** (nunca se envía `null`).
+    - Los clientes deben tolerar valores de enum desconocidos y campos nuevos.
+    - El servidor calcula **todos** los precios y estados. Ningún request lleva precios unitarios.
+
+    ## Autenticación
+    - `guestToken`: token opaco de participante (acotado a su sesión).
+    - `staffJwt`: JWT de cuenta (personal/dueño), 15 min, con refresh rotativo.
+    - `x-permission` en cada operación indica el permiso requerido; el backend valida permiso **y** alcance.
+    - Recurso de otra sesión o restaurante: `404` (no `403`) para no revelar existencia.
+
+    ## Idempotencia
+    Las operaciones con el parámetro `Idempotency-Key` lo exigen (UUID v4 por intento lógico).
+    Mismo key y mismo cuerpo: misma respuesta con `Idempotent-Replayed: true`.
+    Mismo key y cuerpo distinto: `422 IDEMPOTENCY_KEY_REUSED`. Falta el header: `400 IDEMPOTENCY_KEY_REQUIRED`.
+    Misma key todavía en proceso: `409 IDEMPOTENCY_IN_PROGRESS` (reintentar en 1–2 s).
+
+    ## Errores
+    Todos los errores usan `application/problem+json` (RFC 7807 extendido, ver `Problem`).
+    Los clientes se programan contra `code`, nunca contra `title`/`detail`.
+
+    ## Alcance de esta versión
+    Incluye menú, acceso por QR, sesión, pedidos, cuenta, pagos (con propina), ajustes, llamados al mozo, autenticación del personal,
+    operación del personal, tiempo real y sistema. **Fuera de esta versión:** administración (`/admin/*`, Fase 8), registro de
+    clientes (Fase 9), encuesta, retiro por mostrador y el flujo `requireStaffToOpenSession` (falta definir su estado).
+  contact:
+    name: Somphie Zúrich
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Backend local
+  - url: http://localhost:4010/api/v1
+    description: Prism (mock desde este archivo)
+tags:
+  - name: Menu
+    description: Catálogo público
+  - name: Access
+    description: Acceso por QR, abrir sesión y unirse
+  - name: Session
+    description: Sesión actual y participantes (token de invitado)
+  - name: Orders
+    description: Pedidos del participante
+  - name: Billing
+    description: Cuenta, pagos y comprobante del participante
+  - name: WaiterCalls
+    description: Llamados al mozo
+  - name: Auth
+    description: Autenticación del personal
+  - name: StaffOrders
+    description: Cola de entrantes y decisión de pedidos
+  - name: Preparation
+    description: Estaciones, colas y transiciones de ítems
+  - name: StaffFloor
+    description: Tablero de mesas, sesiones y participantes
+  - name: StaffBilling
+    description: Cobros, reembolsos, ajustes y cierre
+  - name: Realtime
+    description: Eventos SSE
+  - name: System
+    description: Salud, versión y estáticos
+security: []
+paths:
+  /menu:
+    get:
+      tags: [Menu]
+      operationId: getMenu
+      summary: Menú con categorías, productos y opciones
+      description: |
+        Devuelve textos ya localizados (`Accept-Language` o `?lang=`; fallback `es-AR`) y el `locale` efectivo.
+        El restaurante se resuelve así: `restaurantId` si se envía; si no, el del token (invitado o personal);
+        si no, el restaurante por defecto del despliegue.
+        `ETag` débil = `catalogVersion` + idioma; la respuesta lleva `Vary: Accept-Language`.
+      security: [{}, {guestToken: []}, {staffJwt: []}]
+      x-permission: menu.read
+      parameters:
+        - $ref: '#/components/parameters/AcceptLanguage'
+        - $ref: '#/components/parameters/Lang'
+        - $ref: '#/components/parameters/RestaurantIdQuery'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Menú vigente
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+            Vary: {$ref: '#/components/headers/Vary'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MenuResponse'}
+              examples:
+                flatWhite:
+                  summary: Menú con opciones (v0.2)
+                  value:
+                    catalogVersion: 42
+                    locale: es-AR
+                    currency: ARS
+                    restaurantOpen: true
+                    categories:
+                      - id: 5c0f2a7e-3d41-4b8a-9a52-7e1d6f0a2b11
+                        name: Café de especialidad
+                        sortOrder: 1
+                        products:
+                          - id: 9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7
+                            name: Flat white
+                            description: Doble espresso con leche texturizada.
+                            priceMinor: 485000
+                            available: true
+                            station: BAR
+                            allergens: [MILK]
+                            image: {path: menu/flat-white.webp, version: 3, alt: Flat white en taza de cerámica}
+                            optionGroups:
+                              - id: 3f9e1d2c-4b5a-4687-9a0b-c1d2e3f4a5b6
+                                name: Tamaño
+                                selectionType: SINGLE
+                                required: true
+                                minSelections: 1
+                                maxSelections: 1
+                                options:
+                                  - {id: d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f70, name: Chico, priceDeltaMinor: 0, available: true, isDefault: true}
+                                  - {id: e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7081, name: Grande, priceDeltaMinor: 80000, available: true, isDefault: false}
+                              - id: 4a0f2e3d-5c6b-4798-8b1c-d2e3f4a5b6c7
+                                name: Leche
+                                selectionType: SINGLE
+                                required: false
+                                minSelections: 0
+                                maxSelections: 1
+                                options:
+                                  - {id: f6a7b8c9-d0e1-4f2a-8b3c-4d5e6f708192, name: Avena, priceDeltaMinor: 60000, available: true, isDefault: false}
+        '304':
+          description: Sin cambios (`If-None-Match` coincide)
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /products/{productId}:
+    get:
+      tags: [Menu]
+      operationId: getProduct
+      summary: Detalle de un producto
+      security: [{}, {guestToken: []}, {staffJwt: []}]
+      x-permission: menu.read
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/AcceptLanguage'
+        - $ref: '#/components/parameters/Lang'
+      responses:
+        '200':
+          description: Producto
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Product'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /public/tables/{tableCode}:
+    get:
+      tags: [Access]
+      operationId: getPublicTable
+      summary: Resolver el QR de una mesa
+      description: |
+        Solo expone etiqueta de mesa y si se puede abrir o unirse. Nunca revela pedidos, nombres ni saldo.
+        Errores: `TABLE_CODE_INVALID` (404), `TABLE_UNAVAILABLE` (409).
+      parameters:
+        - $ref: '#/components/parameters/TableCode'
+      responses:
+        '200':
+          description: Estado público de la mesa
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicTable'}
+              examples:
+                free:
+                  value: {tableLabel: Mesa 7, restaurantOpen: true, hasActiveSession: false, canOpen: true}
+                occupied:
+                  value: {tableLabel: Mesa 7, restaurantOpen: true, hasActiveSession: true, canOpen: false}
+                closed:
+                  value: {tableLabel: Mesa 7, restaurantOpen: false, opensAt: '2026-10-12T11:00:00Z', hasActiveSession: false, canOpen: false}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /public/tables/{tableCode}/sessions:
+    post:
+      tags: [Access]
+      operationId: openSession
+      summary: Abrir la sesión de una mesa libre
+      description: |
+        Crea la sesión `OPEN`, el participante `HOST`, el `joinCode` y el token de invitado.
+        Errores: `SESSION_ALREADY_OPEN` (carrera: la web pasa a unirse), `TABLE_UNAVAILABLE`, `RESTAURANT_CLOSED`, `TABLE_CODE_INVALID`.
+      x-permission: session.open
+      parameters:
+        - $ref: '#/components/parameters/TableCode'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OpenSessionRequest'}
+            example: {displayName: Clara}
+      responses:
+        '201':
+          description: Sesión abierta
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionAccessResponse'}
+              example:
+                session: {id: 5d3e8f10-2a4b-4c6d-9e8f-0a1b2c3d4e5f, status: OPEN, tableLabel: Mesa 7, openedAt: '2026-10-11T15:00:10Z', readOnly: false}
+                participant: {id: ab12cd34-ef56-4789-8abc-def012345678, displayName: Clara, role: HOST}
+                guestToken: gt_x8Jm3kQ0vZt9Lw2PfR7uYb1NcD4eHs6A
+                joinCode: K7M2QX
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Conflicto
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                sessionAlreadyOpen: {$ref: '#/components/examples/ProblemSessionAlreadyOpen'}
+                restaurantClosed: {$ref: '#/components/examples/ProblemRestaurantClosed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /public/tables/{tableCode}/join:
+    post:
+      tags: [Access]
+      operationId: joinSession
+      summary: Unirse a la sesión abierta con el código
+      description: |
+        Errores: `JOIN_CODE_REQUIRED`, `JOIN_CODE_INVALID`, `JOIN_CODE_RATE_LIMITED` (5 fallos/10 min por IP+mesa), `SESSION_FULL`, `SESSION_CLOSED`.
+        Si la sesión fue abierta por el personal y todavía no tiene `HOST`, el primero en unirse pasa a ser `HOST`.
+      x-permission: session.join
+      parameters:
+        - $ref: '#/components/parameters/TableCode'
+        - $ref: '#/components/parameters/IdempotencyKeyOptional'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/JoinSessionRequest'}
+            example: {displayName: Sofi, joinCode: K7M2QX}
+      responses:
+        '201':
+          description: Participante creado
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionAccessResponse'}
+              example:
+                session: {id: 5d3e8f10-2a4b-4c6d-9e8f-0a1b2c3d4e5f, status: OPEN, tableLabel: Mesa 7, openedAt: '2026-10-11T15:00:10Z', readOnly: false}
+                participant: {id: 0d1e2f3a-4b5c-4d6e-8f7a-8b9c0d1e2f3a, displayName: Sofi, role: MEMBER}
+                guestToken: gt_Qp4Zs8Vn1Mt6Xc3LjH9aBw2RuYe5DkF7
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403':
+          description: Código ausente o incorrecto
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                joinCodeInvalid: {$ref: '#/components/examples/ProblemJoinCodeInvalid'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /sessions/current:
+    get:
+      tags: [Session]
+      operationId: getCurrentSession
+      summary: Sesión actual del participante
+      description: |
+        Tras el cierre, el token pasa a solo lectura durante 24 h: responde `200` con `status: CLOSED` y `readOnly: true`
+        (la web muestra "Visita finalizada" y el comprobante). Pasadas las 24 h: `401 TOKEN_EXPIRED`.
+        El `joinCode` solo se incluye para el `HOST` mientras la sesión está `OPEN`.
+      security: [{guestToken: []}]
+      responses:
+        '200':
+          description: Sesión y participante actual
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CurrentSession'}
+              example:
+                session: {id: 5d3e8f10-2a4b-4c6d-9e8f-0a1b2c3d4e5f, status: OPEN, tableLabel: Mesa 7, openedAt: '2026-10-11T15:00:10Z', readOnly: false}
+                participant: {id: ab12cd34-ef56-4789-8abc-def012345678, displayName: Clara, role: HOST}
+                joinCode: K7M2QX
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /sessions/current/participants:
+    get:
+      tags: [Session]
+      operationId: listParticipants
+      summary: Participantes de la sesión
+      security: [{guestToken: []}]
+      responses:
+        '200':
+          description: Lista
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Participant'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /sessions/current/participants/{participantId}:
+    delete:
+      tags: [Session]
+      operationId: revokeParticipant
+      summary: Revocar a un participante (solo HOST)
+      description: |
+        Acceso retirado de inmediato; sus pedidos ya enviados se conservan. Error `HOST_CANNOT_BE_REVOKED` (409) si apunta al host.
+      security: [{guestToken: []}]
+      x-permission: participant.manage
+      parameters:
+        - $ref: '#/components/parameters/ParticipantId'
+      responses:
+        '200':
+          description: Participante revocado
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Participant'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /sessions/current/join-code/rotate:
+    post:
+      tags: [Session]
+      operationId: rotateJoinCode
+      summary: Rotar el código de la sesión (solo HOST)
+      description: Los ya unidos siguen; el código viejo falla con `JOIN_CODE_INVALID`.
+      security: [{guestToken: []}]
+      x-permission: participant.manage
+      responses:
+        '200':
+          description: Código nuevo
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JoinCodeResponse'}
+              example: {joinCode: R4T8WN}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /sessions/current/orders:
+    post:
+      tags: [Orders]
+      operationId: createOrder
+      summary: Enviar un pedido
+      description: |
+        En una transacción: valida producto, disponibilidad, opciones y límites; calcula precios; compara con `acknowledgedTotalMinor`;
+        crea pedido `PENDING_REVIEW` con snapshot por ítem.
+        Errores 409: `PRICE_CHANGED` (incluye precios vigentes; reenviar con **nueva** clave), `PRODUCT_UNAVAILABLE`, `OPTION_UNAVAILABLE`,
+        `ORDER_PENDING_LIMIT_REACHED`, `SESSION_CLOSED`, `RESTAURANT_CLOSED`.
+        Errores 422: `ORDER_EMPTY`, `ORDER_TOO_MANY_LINES`, `ORDER_QUANTITY_EXCEEDED`, `PRODUCT_NOT_FOUND`, `OPTION_NOT_FOUND`, `OPTION_SELECTION_INVALID`.
+      security: [{guestToken: []}]
+      x-permission: order.create
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateOrderRequest'}
+            examples:
+              simple:
+                value:
+                  items:
+                    - {productId: 9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7, quantity: 2, note: Sin azúcar}
+                    - {productId: 77cd1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f, quantity: 1}
+                  note: Gracias
+                  acknowledgedTotalMinor: 1450000
+              withOptions:
+                value:
+                  items:
+                    - {productId: 9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7, quantity: 1, optionIds: [e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7081, f6a7b8c9-d0e1-4f2a-8b3c-4d5e6f708192], note: Bien caliente}
+                  acknowledgedTotalMinor: 625000
+      responses:
+        '201':
+          description: Pedido creado
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+              example:
+                id: e91a7b3c-5d2f-4e8a-9b1c-3d5f7a9b1c2e
+                displayCode: '#042'
+                status: PENDING_REVIEW
+                version: 1
+                createdBy: {participantId: ab12cd34-ef56-4789-8abc-def012345678, displayName: Clara}
+                createdAt: '2026-10-11T15:03:22Z'
+                note: Gracias
+                items:
+                  - {id: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d, productId: 9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7, productName: Flat white, basePriceMinor: 485000, optionsDeltaMinor: 0, unitPriceMinor: 485000, quantity: 2, lineTotalMinor: 970000, station: BAR, status: PENDING, note: Sin azúcar}
+                  - {id: 2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e, productId: 77cd1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f, productName: Medialuna, basePriceMinor: 480000, optionsDeltaMinor: 0, unitPriceMinor: 480000, quantity: 1, lineTotalMinor: 480000, station: KITCHEN, status: PENDING}
+                totalMinor: 1450000
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409':
+          description: Conflicto
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                priceChanged: {$ref: '#/components/examples/ProblemPriceChanged'}
+                productUnavailable: {$ref: '#/components/examples/ProblemProductUnavailable'}
+                sessionClosed: {$ref: '#/components/examples/ProblemSessionClosed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    get:
+      tags: [Orders]
+      operationId: listSessionOrders
+      summary: Todos los pedidos de la sesión (cuenta compartida)
+      security: [{guestToken: []}]
+      x-permission: bill.read
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Pedidos de la sesión, del más reciente al más antiguo
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderPage'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /orders/{orderId}:
+    get:
+      tags: [Orders]
+      operationId: getOrder
+      summary: Detalle de un pedido de la sesión
+      description: Un pedido de otra sesión responde `404 ORDER_NOT_FOUND`.
+      security: [{guestToken: []}]
+      x-permission: bill.read
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Pedido
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /orders/{orderId}/cancel:
+    post:
+      tags: [Orders]
+      operationId: cancelOrder
+      summary: Cancelar un pedido pendiente (autor o HOST)
+      description: "Solo `PENDING_REVIEW`. Si ya fue decidido: `ORDER_NOT_CANCELLABLE` (409). Cancelar dos veces devuelve el estado actual."
+      security: [{guestToken: []}]
+      x-permission: order.cancel_own
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Pedido cancelado
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /sessions/current/bill:
+    get:
+      tags: [Billing]
+      operationId: getBill
+      summary: Cuenta derivada de la sesión
+      description: |
+        `balanceMinor = chargesMinor - adjustmentsMinor - paidMinor`. La propina (`tipsMinor`) **no** entra en el saldo.
+        Los ajustes se muestran con etiqueta genérica; el motivo interno solo lo ve el personal.
+        Usa precios históricos (snapshot), nunca el catálogo actual.
+      security: [{guestToken: []}]
+      x-permission: bill.read
+      responses:
+        '200':
+          description: Cuenta
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Bill'}
+              example:
+                currency: ARS
+                chargesMinor: 1450000
+                adjustmentsMinor: 145000
+                paidMinor: 500000
+                balanceMinor: 805000
+                tipsMinor: 50000
+                lines:
+                  - {orderCode: '#042', productName: Flat white, quantity: 2, unitPriceMinor: 485000, lineTotalMinor: 970000}
+                adjustments:
+                  - {id: 8a9b0c1d-2e3f-4a4b-9c5d-6e7f8a9b0c1d, kind: DISCOUNT_PERCENT, label: Descuento, amountMinor: 145000}
+                payments:
+                  - {id: 6e7f8a9b-0c1d-4e2f-8a3b-4c5d6e7f8a9b, kind: PAYMENT, method: SIMULATED_ONLINE, status: SUCCEEDED, amountMinor: 500000, tipMinor: 50000, payerName: Clara, createdAt: '2026-10-11T15:40:00Z'}
+                pendingOrdersNotIncluded:
+                  - {orderCode: '#043', totalMinor: 300000}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /sessions/current/payments:
+    post:
+      tags: [Billing]
+      operationId: createPayment
+      summary: Pagar (simulado, total o parcial, con propina opcional)
+      description: |
+        Con lock exclusivo de la sesión. `amountMinor` entre `minPaymentMinor` y el saldo; `0` solo si hay `tipMinor > 0` (pago solo propina).
+        La propina no reduce el saldo; si el monto principal falla, la propina tampoco se registra.
+        En modo demo, un importe terminado en `.13` simula rechazo: `422 PAYMENT_DECLINED` y queda un registro `FAILED` sin cambiar el saldo.
+        Nunca se piden ni guardan datos de tarjeta.
+        Errores: `PAYMENT_AMOUNT_INVALID`, `PAYMENT_NOTHING_TO_PAY`, `PAYMENT_EXCEEDS_BALANCE` (409, trae saldo actual), `PAYMENT_DECLINED`,
+        `TIP_INVALID`, `TIP_EXCEEDS_LIMIT`, `TIP_NOT_ALLOWED`, `SESSION_CLOSED`.
+      security: [{guestToken: []}]
+      x-permission: payment.create
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreatePaymentRequest'}
+            examples:
+              partial: {value: {amountMinor: 500000, tipMinor: 50000, method: SIMULATED_ONLINE}}
+              tipOnly: {value: {amountMinor: 0, tipMinor: 50000, method: SIMULATED_ONLINE}}
+      responses:
+        '201':
+          description: Pago registrado
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409':
+          description: Conflicto de saldo o sesión
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                exceedsBalance: {$ref: '#/components/examples/ProblemPaymentExceedsBalance'}
+                sessionClosed: {$ref: '#/components/examples/ProblemSessionClosed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    get:
+      tags: [Billing]
+      operationId: listPayments
+      summary: Historial de pagos de la sesión
+      security: [{guestToken: []}]
+      x-permission: bill.read
+      responses:
+        '200':
+          description: Pagos
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Payment'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /sessions/current/receipt.pdf:
+    get:
+      tags: [Billing]
+      operationId: getReceipt
+      summary: Comprobante PDF no fiscal (sesión cerrada)
+      description: "Solo `CLOSED`, con el token en lectura (24 h). Antes del cierre: `RECEIPT_NOT_AVAILABLE` (409)."
+      security: [{guestToken: []}]
+      responses:
+        '200':
+          description: PDF
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /sessions/current/waiter-calls:
+    post:
+      tags: [WaiterCalls]
+      operationId: createWaiterCall
+      summary: Llamar al mozo (incluye pedir la cuenta)
+      description: "Errores: `WAITER_CALL_ALREADY_ACTIVE` (409), `WAITER_CALL_COOLDOWN` (429, `retryAfterSec`), `SESSION_CLOSED`."
+      security: [{guestToken: []}]
+      x-permission: waiter_call.create
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateWaiterCallRequest'}
+            example: {reason: BILL}
+      responses:
+        '201':
+          description: Llamado creado
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WaiterCall'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    get:
+      tags: [WaiterCalls]
+      operationId: listSessionWaiterCalls
+      summary: Llamados de la sesión
+      security: [{guestToken: []}]
+      responses:
+        '200':
+          description: Llamados
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/WaiterCall'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Iniciar sesión (personal o dueño)
+      description: |
+        Respuesta idéntica para email inexistente y contraseña errónea (`INVALID_CREDENTIALS`).
+        Con contraseña temporal se emite sesión limitada y `mustChangePassword: true` (el resto de endpoints responde `PASSWORD_CHANGE_REQUIRED`).
+        Errores: `ACCOUNT_DISABLED`, `ACCOUNT_TEMPORARILY_LOCKED` (429, 5 fallos/15 min por cuenta+IP).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LoginRequest'}
+            example: {email: waiter@somphie.demo, password: demo-only-password}
+      responses:
+        '200':
+          description: Tokens y perfil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoginResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshTokens
+      summary: Rotar tokens
+      description: "Cada refresh es de un solo uso. Reutilizar uno ya usado revoca toda la familia: `401 REFRESH_TOKEN_REUSED`."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RefreshRequest'}
+      responses:
+        '200':
+          description: Tokens nuevos
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TokenPair'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Cerrar sesión (revoca el refresh)
+      security: [{staffJwt: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RefreshRequest'}
+      responses:
+        '204':
+          description: Sesión cerrada
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      operationId: changePassword
+      summary: Cambiar la contraseña (obligatorio con contraseña temporal)
+      description: Error `PASSWORD_TOO_WEAK` (422) si no cumple la política (mínimo 10 caracteres).
+      security: [{staffJwt: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChangePasswordRequest'}
+      responses:
+        '204':
+          description: Contraseña cambiada
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /me:
+    get:
+      tags: [Auth]
+      operationId: getMe
+      summary: Perfil, permisos y estaciones del usuario
+      description: La app Android arma sus pestañas desde `permissions` y `stations`, no desde el nombre del rol.
+      security: [{staffJwt: []}]
+      responses:
+        '200':
+          description: Usuario actual
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+              example:
+                id: 1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f
+                email: mateo@somphie.example
+                displayName: Mateo
+                roles: [WAITER]
+                permissions: [menu.read, order.read, order.accept, order.reject, order.cancel, order.create_on_behalf, item.deliver, item.undo, session.read, session.open_manual, session.close, participant.revoke, payment.register_cash, payment.void, payment.refund, availability.toggle, table.read, adjustment.apply, adjustment.void, waiter_call.handle]
+                stations: []
+                mustChangePassword: false
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/orders:
+    get:
+      tags: [StaffOrders]
+      operationId: listStaffOrders
+      summary: Pedidos del restaurante (cola de entrantes y consulta)
+      description: |
+        Para la cola de entrantes: `status=PENDING_REVIEW`, ordenados por antigüedad.
+        Cocina solo recibe pedidos con ítems de sus estaciones, **con esos ítems únicamente** y sin datos de participantes.
+      security: [{staffJwt: []}]
+      x-permission: order.read
+      parameters:
+        - name: status
+          in: query
+          description: Estados separados por coma
+          schema:
+            type: array
+            items: {$ref: '#/components/schemas/OrderStatus'}
+          style: form
+          explode: false
+        - name: sessionId
+          in: query
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Página de pedidos
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffOrderPage'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/orders/{orderId}:
+    get:
+      tags: [StaffOrders]
+      operationId: getStaffOrder
+      summary: Detalle de un pedido (con disponibilidad actual por ítem)
+      security: [{staffJwt: []}]
+      x-permission: order.read
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Pedido
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffOrder'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/orders/{orderId}/accept:
+    post:
+      tags: [StaffOrders]
+      operationId: acceptOrder
+      summary: Aceptar un pedido (con exclusiones opcionales)
+      description: |
+        Actualización condicional `PENDING_REVIEW -> ACCEPTED`: gana la primera decisión. Ítems a `QUEUED`; los excluidos a `CANCELLED` (no cobran).
+        Errores 409: `ORDER_ALREADY_DECIDED` (trae quién y cuándo), `ORDER_EXPIRED`. Error 422: `ORDER_ALL_ITEMS_EXCLUDED` (usar rechazo).
+      security: [{staffJwt: []}]
+      x-permission: order.accept
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AcceptOrderRequest'}
+            example:
+              excludedItems:
+                - {itemId: 2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e, reason: OUT_OF_STOCK}
+      responses:
+        '200':
+          description: Pedido aceptado
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffOrder'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Ya decidido o vencido
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                alreadyDecided: {$ref: '#/components/examples/ProblemOrderAlreadyDecided'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/orders/{orderId}/reject:
+    post:
+      tags: [StaffOrders]
+      operationId: rejectOrder
+      summary: Rechazar un pedido con motivo
+      description: "El pedido se conserva en el historial; sus ítems pasan a `CANCELLED`. Errores: `ORDER_ALREADY_DECIDED`, `ORDER_EXPIRED`."
+      security: [{staffJwt: []}]
+      x-permission: order.reject
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RejectOrderRequest'}
+            example: {reasonCode: OUT_OF_STOCK, reasonText: Se agotó la medialuna}
+      responses:
+        '200':
+          description: Pedido rechazado
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffOrder'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Ya decidido o vencido
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                alreadyDecided: {$ref: '#/components/examples/ProblemOrderAlreadyDecided'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/orders/{orderId}/deliver-ready:
+    post:
+      tags: [Preparation]
+      operationId: deliverReadyItems
+      summary: Entregar todos los ítems listos de un pedido
+      security: [{staffJwt: []}]
+      x-permission: item.deliver
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Pedido con los ítems entregados
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffOrder'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/stations:
+    get:
+      tags: [Preparation]
+      operationId: listStations
+      summary: Estaciones asignadas al usuario (el Dueño ve todas)
+      security: [{staffJwt: []}]
+      x-permission: item.prepare
+      responses:
+        '200':
+          description: Estaciones
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Station'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/stations/{stationId}/queue:
+    get:
+      tags: [Preparation]
+      operationId: getStationQueue
+      summary: Cola FIFO de una estación
+      description: Ítems `QUEUED` e `IN_PREPARATION` de pedidos aceptados, por `queuedAt`. `delayed` marca los que superan el SLA.
+      security: [{staffJwt: []}]
+      x-permission: item.prepare
+      parameters:
+        - $ref: '#/components/parameters/StationId'
+        - name: status
+          in: query
+          schema:
+            type: array
+            items: {$ref: '#/components/schemas/ItemStatus'}
+          style: form
+          explode: false
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Cola
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StationQueue'}
+              example:
+                items:
+                  - {itemId: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d, orderId: e91a7b3c-5d2f-4e8a-9b1c-3d5f7a9b1c2e, orderCode: '#042', tableLabel: Mesa 7, productName: Flat white, quantity: 2, optionsSummary: Grande · Avena, options: [{groupName: Tamaño, optionName: Grande, priceDeltaMinor: 80000}, {groupName: Leche, optionName: Avena, priceDeltaMinor: 60000}], note: Sin azúcar, status: QUEUED, queuedAt: '2026-10-11T15:04:01Z', delayed: false}
+                nextCursor: null
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/order-items/{itemId}/start:
+    post:
+      tags: [Preparation]
+      operationId: startItem
+      summary: Iniciar preparación (QUEUED -> IN_PREPARATION)
+      description: |
+        Solo estaciones asignadas (`ITEM_STATION_FORBIDDEN`). Transición inválida: `ITEM_INVALID_TRANSITION` (409, trae `currentStatus`).
+        Devuelve el pedido completo con el estado recalculado en la misma transacción.
+      security: [{staffJwt: []}]
+      x-permission: item.prepare
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': {$ref: '#/components/responses/ItemActionOk'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Transición inválida o sesión cerrada
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                invalidTransition: {$ref: '#/components/examples/ProblemItemInvalidTransition'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/order-items/{itemId}/ready:
+    post:
+      tags: [Preparation]
+      operationId: markItemReady
+      summary: Marcar listo (QUEUED o IN_PREPARATION -> READY)
+      security: [{staffJwt: []}]
+      x-permission: item.prepare
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': {$ref: '#/components/responses/ItemActionOk'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/order-items/{itemId}/deliver:
+    post:
+      tags: [Preparation]
+      operationId: deliverItem
+      summary: Entregar un ítem (READY -> DELIVERED)
+      security: [{staffJwt: []}]
+      x-permission: item.deliver
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': {$ref: '#/components/responses/ItemActionOk'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/order-items/{itemId}/cancel:
+    post:
+      tags: [Preparation]
+      operationId: cancelItem
+      summary: Cancelar un ítem aceptado (motivo obligatorio)
+      description: |
+        No se cancela un ítem `DELIVERED` (`ITEM_NOT_CANCELLABLE`). Baja el cargo; si hay una cortesía sobre el ítem, se anula en la misma transacción.
+        Si el saldo queda negativo, se resuelve con reembolso.
+      security: [{staffJwt: []}]
+      x-permission: order.cancel
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CancelItemRequest'}
+            example: {reason: Se cayó al piso}
+      responses:
+        '200': {$ref: '#/components/responses/ItemActionOk'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/order-items/{itemId}/undo:
+    post:
+      tags: [Preparation]
+      operationId: undoItem
+      summary: Revertir un paso de estado
+      description: Deshacer `DELIVERED -> READY` solo dentro de `deliveredUndoWindowMin` (`ITEM_UNDO_WINDOW_EXPIRED`).
+      security: [{staffJwt: []}]
+      x-permission: item.undo
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': {$ref: '#/components/responses/ItemActionOk'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/tables:
+    get:
+      tags: [StaffFloor]
+      operationId: listStaffTables
+      summary: Tablero de mesas con estado visible ya resuelto
+      description: |
+        `displayStatus` se calcula en el servidor con la prioridad de `estados-y-transiciones.md` §6.
+        La insignia `waiterCallActive` es un indicador adicional: no cambia `displayStatus`.
+      security: [{staffJwt: []}]
+      x-permission: table.read
+      responses:
+        '200':
+          description: Mesas del restaurante
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffTableBoard'}
+              example:
+                items:
+                  - {tableId: 3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f, label: Mesa 7, displayStatus: PENDING_ORDERS, sessionId: 5d3e8f10-2a4b-4c6d-9e8f-0a1b2c3d4e5f, openedAt: '2026-10-11T15:00:10Z', pendingOrdersCount: 1, balanceMinor: 1450000, waiterCallActive: true}
+                  - {tableId: 4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f70, label: Mesa 8, displayStatus: FREE, pendingOrdersCount: 0, waiterCallActive: false}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/sessions/{sessionId}:
+    get:
+      tags: [StaffFloor]
+      operationId: getStaffSession
+      summary: Detalle de una sesión (pedidos, cuenta y participantes)
+      security: [{staffJwt: []}]
+      x-permission: session.read
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Sesión
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffSessionDetail'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/tables/{tableId}/sessions:
+    post:
+      tags: [StaffFloor]
+      operationId: openSessionAsStaff
+      summary: Abrir una sesión desde el personal
+      description: |
+        La sesión nace sin `HOST`: el primer participante que se una con el `joinCode` pasa a serlo.
+        Errores 409: `SESSION_ALREADY_OPEN`, `TABLE_UNAVAILABLE`.
+      security: [{staffJwt: []}]
+      x-permission: session.open_manual
+      parameters:
+        - $ref: '#/components/parameters/TableId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Sesión abierta
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffOpenSessionResponse'}
+              example:
+                session: {id: 5d3e8f10-2a4b-4c6d-9e8f-0a1b2c3d4e5f, status: OPEN, tableLabel: Mesa 7, openedAt: '2026-10-11T15:00:10Z', readOnly: false}
+                joinCode: K7M2QX
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Ya hay sesión abierta o la mesa no está disponible
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                sessionAlreadyOpen: {$ref: '#/components/examples/ProblemSessionAlreadyOpen'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/sessions/{sessionId}/orders:
+    post:
+      tags: [StaffBilling]
+      operationId: createOrderOnBehalf
+      summary: Tomar un pedido en nombre de la mesa (nace ACCEPTED)
+      description: |
+        El pedido se auto-acepta y queda auditado con el actor. Fuera de horario el personal puede crear pedidos (RN-ORD-07).
+        `acknowledgedTotalMinor` es opcional: si se envía y no coincide, `409 PRICE_CHANGED`.
+      security: [{staffJwt: []}]
+      x-permission: order.create_on_behalf
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateStaffOrderRequest'}
+      responses:
+        '201':
+          description: Pedido creado y aceptado
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffOrder'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/sessions/{sessionId}/payments:
+    post:
+      tags: [StaffBilling]
+      operationId: registerCashPayment
+      summary: Registrar un pago en efectivo
+      description: Mismas reglas de monto y propina que el pago del participante (RN-BIL-03, RN-TIP-*). Método `CASH_COUNTER`.
+      security: [{staffJwt: []}]
+      x-permission: payment.register_cash
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateCashPaymentRequest'}
+            example: {amountMinor: 805000, tipMinor: 0, payerLabel: Mesa 7}
+      responses:
+        '201':
+          description: Pago registrado
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Conflicto de saldo o sesión
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                exceedsBalance: {$ref: '#/components/examples/ProblemPaymentExceedsBalance'}
+                sessionClosed: {$ref: '#/components/examples/ProblemSessionClosed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/payments/{paymentId}/void:
+    post:
+      tags: [StaffBilling]
+      operationId: voidPayment
+      summary: Anular un pago (y su propina)
+      description: Solo `SUCCEEDED` y sesión `OPEN`; motivo obligatorio. Error `PAYMENT_NOT_VOIDABLE` (409).
+      security: [{staffJwt: []}]
+      x-permission: payment.void
+      parameters:
+        - $ref: '#/components/parameters/PaymentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReasonRequest'}
+            example: {reason: Cobro duplicado}
+      responses:
+        '200':
+          description: Pago anulado
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/sessions/{sessionId}/refunds:
+    post:
+      tags: [StaffBilling]
+      operationId: createRefund
+      summary: Reembolsar (se usa cuando el saldo es negativo)
+      description: Monto ≤ pagado neto; motivo obligatorio. Los reembolsos no devuelven propina (RN-TIP-05). Error `REFUND_EXCEEDS_PAID` (409, trae `maxRefundMinor`).
+      security: [{staffJwt: []}]
+      x-permission: payment.refund
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateRefundRequest'}
+            example: {amountMinor: 485000, reason: Ítem cancelado tras el pago}
+      responses:
+        '201':
+          description: Reembolso registrado
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Excede lo pagado o la sesión está cerrada
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                refundExceedsPaid: {$ref: '#/components/examples/ProblemRefundExceedsPaid'}
+                sessionClosed: {$ref: '#/components/examples/ProblemSessionClosed'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/sessions/{sessionId}/close:
+    post:
+      tags: [StaffBilling]
+      operationId: closeSession
+      summary: Cierre normal de la sesión
+      description: |
+        Con lock exclusivo. Sin `Idempotency-Key`: es idempotente por naturaleza (ya cerrada devuelve `200`).
+        Errores 409: `SESSION_HAS_PENDING_ORDERS` (`orderIds`), `SESSION_HAS_ACTIVE_ITEMS` (`itemIds`), `SESSION_BALANCE_PENDING` (`balanceMinor`).
+      security: [{staffJwt: []}]
+      x-permission: session.close
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Sesión cerrada
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffSession'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Cierre bloqueado
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                balancePending: {$ref: '#/components/examples/ProblemSessionBalancePending'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/sessions/{sessionId}/force-close:
+    post:
+      tags: [StaffBilling]
+      operationId: forceCloseSession
+      summary: Cierre forzado con motivo
+      description: Cancela pedidos `PENDING_REVIEW` e ítems activos; el saldo se registra tal cual y el comprobante lo marca.
+      security: [{staffJwt: []}]
+      x-permission: session.force_close
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReasonRequest'}
+            example: {reason: El cliente se fue sin pagar}
+      responses:
+        '200':
+          description: Sesión cerrada por la fuerza
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffSession'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/sessions/{sessionId}/participants/{participantId}/revoke:
+    post:
+      tags: [StaffFloor]
+      operationId: revokeParticipantAsStaff
+      summary: Revocar a un participante
+      description: Error `HOST_CANNOT_BE_REVOKED` (409) si apunta al host.
+      security: [{staffJwt: []}]
+      x-permission: participant.revoke
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/ParticipantId'
+      responses:
+        '200':
+          description: Participante revocado
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Participant'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/sessions/{sessionId}/join-code/rotate:
+    post:
+      tags: [StaffFloor]
+      operationId: rotateJoinCodeAsStaff
+      summary: Rotar el código de la sesión
+      security: [{staffJwt: []}]
+      x-permission: participant.revoke
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Código nuevo
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JoinCodeResponse'}
+              example: {joinCode: R4T8WN}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/sessions/{sessionId}/adjustments:
+    post:
+      tags: [StaffBilling]
+      operationId: applyAdjustment
+      summary: Aplicar un descuento, cortesía o ajuste
+      description: |
+        Con lock exclusivo. El importe se calcula y congela al aplicar (RN-ADJ-03). Todos los ajustes restan.
+        `DISCOUNT_PERCENT` usa `percentBp` (1000 = 10 %); `DISCOUNT_AMOUNT` y `MANUAL_ADJUSTMENT` usan `amountMinor`; `COURTESY_ITEM` usa `orderItemId`.
+        `adjustment.apply` está limitado por el rol (el Mozo hasta el 15 % de los cargos); superar el límite exige `adjustment.apply_any` (`ADJUSTMENT_LIMIT_EXCEEDED`, 403).
+        El importe de un `DISCOUNT_PERCENT` se redondea al centavo más cercano (la mitad hacia arriba).
+        Errores: `ADJUSTMENT_INVALID` (422), `ADJUSTMENT_EXCEEDS_BALANCE` (409), `ADJUSTMENT_ITEM_INVALID` (409), `SESSION_CLOSED` (409).
+      security: [{staffJwt: []}]
+      x-permission: adjustment.apply
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateAdjustmentRequest'}
+            examples:
+              percent: {value: {kind: DISCOUNT_PERCENT, percentBp: 1000, reasonCode: SERVICE_ISSUE, reasonText: Demora en la entrega}}
+              courtesy: {value: {kind: COURTESY_ITEM, orderItemId: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d, reasonCode: COURTESY_HOUSE}}
+      responses:
+        '201':
+          description: Ajuste aplicado
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffAdjustment'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403':
+          description: Sin permiso o por encima del límite del rol
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                limitExceeded: {$ref: '#/components/examples/ProblemAdjustmentLimitExceeded'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    get:
+      tags: [StaffBilling]
+      operationId: listAdjustments
+      summary: Ajustes de la sesión (incluye el motivo interno)
+      security: [{staffJwt: []}]
+      x-permission: session.read
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Ajustes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/StaffAdjustment'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/adjustments/{adjustmentId}/void:
+    post:
+      tags: [StaffBilling]
+      operationId: voidAdjustment
+      summary: Anular un ajuste
+      description: Con motivo, sesión `OPEN`. El Mozo solo anula los suyos y dentro de 10 min; el Dueño cualquiera. Error `ADJUSTMENT_NOT_VOIDABLE` (409).
+      security: [{staffJwt: []}]
+      x-permission: adjustment.void
+      parameters:
+        - $ref: '#/components/parameters/AdjustmentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReasonRequest'}
+            example: {reason: Se aplicó por error}
+      responses:
+        '200':
+          description: Ajuste anulado
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffAdjustment'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/products/{productId}/availability:
+    patch:
+      tags: [StaffFloor]
+      operationId: setProductAvailability
+      summary: Marcar un producto como disponible o agotado
+      description: Valor absoluto (idempotente por naturaleza). Incrementa `catalogVersion` y emite `catalog.updated`.
+      security: [{staffJwt: []}]
+      x-permission: availability.toggle
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AvailabilityRequest'}
+            example: {available: false}
+      responses:
+        '200':
+          description: Disponibilidad actualizada
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AvailabilityResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/options/{optionId}/availability:
+    patch:
+      tags: [StaffFloor]
+      operationId: setOptionAvailability
+      summary: Marcar una opción como disponible o agotada
+      security: [{staffJwt: []}]
+      x-permission: availability.toggle
+      parameters:
+        - $ref: '#/components/parameters/OptionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AvailabilityRequest'}
+            example: {available: false}
+      responses:
+        '200':
+          description: Disponibilidad actualizada
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AvailabilityResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/waiter-calls:
+    get:
+      tags: [WaiterCalls]
+      operationId: listStaffWaiterCalls
+      summary: Llamados al mozo del restaurante
+      security: [{staffJwt: []}]
+      x-permission: waiter_call.handle
+      parameters:
+        - name: status
+          in: query
+          description: Estados separados por coma (por defecto `OPEN,ACKNOWLEDGED`)
+          schema:
+            type: array
+            items: {$ref: '#/components/schemas/WaiterCallStatus'}
+          style: form
+          explode: false
+      responses:
+        '200':
+          description: Llamados
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/StaffWaiterCall'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/waiter-calls/{waiterCallId}/acknowledge:
+    post:
+      tags: [WaiterCalls]
+      operationId: acknowledgeWaiterCall
+      summary: Tomar un llamado (OPEN -> ACKNOWLEDGED)
+      description: Si el estado no lo permite responde `STATE_CONFLICT` (409); si no existe, `WAITER_CALL_NOT_FOUND`.
+      security: [{staffJwt: []}]
+      x-permission: waiter_call.handle
+      parameters:
+        - $ref: '#/components/parameters/WaiterCallId'
+      responses:
+        '200':
+          description: Llamado tomado
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffWaiterCall'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /staff/waiter-calls/{waiterCallId}/resolve:
+    post:
+      tags: [WaiterCalls]
+      operationId: resolveWaiterCall
+      summary: Resolver un llamado (-> RESOLVED)
+      security: [{staffJwt: []}]
+      x-permission: waiter_call.handle
+      parameters:
+        - $ref: '#/components/parameters/WaiterCallId'
+      responses:
+        '200':
+          description: Llamado resuelto
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffWaiterCall'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /events/stream:
+    get:
+      tags: [Realtime]
+      operationId: streamEvents
+      summary: Flujo de eventos SSE (pistas, no datos)
+      description: |
+        `scope=session` exige token de invitado; `scope=staff` exige JWT. Un alcance ajeno: `403 STREAM_SCOPE_FORBIDDEN`.
+        Cada evento lleva `id` (`event_log.id`) para reanudar con `Last-Event-ID`; fuera de la retención de 48 h: `410 EVENT_ID_TOO_OLD`.
+        Heartbeat: comentario `:` cada 25 s. El sobre y el catálogo de eventos están en `eventos.md`; los clientes ignoran tipos desconocidos.
+      security: [{guestToken: []}, {staffJwt: []}]
+      parameters:
+        - name: scope
+          in: query
+          required: true
+          schema: {type: string, enum: [session, staff]}
+        - $ref: '#/components/parameters/LastEventId'
+      responses:
+        '200':
+          description: Flujo `text/event-stream`
+          content:
+            text/event-stream:
+              schema: {type: string}
+              example: |
+                id: 128
+                event: order.updated
+                data: {"eventId":128,"type":"order.updated","aggregateType":"ORDER","aggregateId":"e91a7b3c-5d2f-4e8a-9b1c-3d5f7a9b1c2e","version":4,"sessionId":"5d3e8f10-2a4b-4c6d-9e8f-0a1b2c3d4e5f","occurredAt":"2026-10-11T15:05:00Z"}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '410':
+          description: El `Last-Event-ID` está fuera de retención (`EVENT_ID_TOO_OLD`); hacer refresco completo
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /version:
+    get:
+      tags: [System]
+      operationId: getVersion
+      summary: Versión de build y de contrato
+      security: []
+      responses:
+        '200':
+          description: Versiones
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VersionInfo'}
+              example: {build: 0.1.0, contractVersion: 0.2.1}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /media/{path}:
+    get:
+      tags: [System]
+      operationId: getMedia
+      summary: Imagen del menú (solo desarrollo)
+      description: En producción las imágenes se sirven como estáticos desde `MEDIA_BASE_URL`; el cliente arma la URL con `image.path` y `image.version`.
+      security: []
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema: {type: string}
+          allowReserved: true
+          example: menu/flat-white.webp
+      responses:
+        '200':
+          description: Imagen
+          content:
+            image/webp: {schema: {type: string, format: binary}}
+            image/jpeg: {schema: {type: string, format: binary}}
+            image/png: {schema: {type: string, format: binary}}
+        '404': {$ref: '#/components/responses/NotFound'}
+components:
+  securitySchemes:
+    guestToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Token opaco de participante (256 bits), acotado a su sesión. Vence 24 h después del cierre (solo lectura).
+    staffJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT de cuenta de personal o dueño. Dura 15 min; se renueva con `/auth/refresh`.
+  parameters:
+    AcceptLanguage:
+      name: Accept-Language
+      in: header
+      description: Idioma preferido (`es-AR` por defecto; `en` disponible).
+      schema: {type: string}
+    Lang:
+      name: lang
+      in: query
+      description: Alternativa a `Accept-Language`.
+      schema: {type: string}
+    RestaurantIdQuery:
+      name: restaurantId
+      in: query
+      description: Restaurante del menú público (multi-sucursal simulada). Si falta, se usa el del token o el predeterminado del despliegue.
+      schema: {type: string, format: uuid}
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      schema: {type: string}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: UUID v4 por intento lógico; se reutiliza en los reintentos HTTP.
+      schema: {type: string, format: uuid}
+    IdempotencyKeyOptional:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Recomendada.
+      schema: {type: string, format: uuid}
+    LastEventId:
+      name: Last-Event-ID
+      in: header
+      description: Último `eventId` recibido, para reanudar el flujo.
+      schema: {type: string}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+    Cursor:
+      name: cursor
+      in: query
+      schema: {type: string}
+    TableCode:
+      name: tableCode
+      in: path
+      required: true
+      description: Código opaco del QR de la mesa (no deriva del número de mesa).
+      schema: {type: string}
+    ProductId:
+      name: productId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    OptionId:
+      name: optionId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    StationId:
+      name: stationId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    ParticipantId:
+      name: participantId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    TableId:
+      name: tableId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    AdjustmentId:
+      name: adjustmentId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    WaiterCallId:
+      name: waiterCallId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  headers:
+    ETag:
+      description: ETag débil del menú (`catalogVersion` + idioma).
+      schema: {type: string}
+    Vary:
+      description: Siempre `Accept-Language` en el menú.
+      schema: {type: string}
+    IdempotentReplayed:
+      description: "`true` si la respuesta es una repetición guardada."
+      schema: {type: string, enum: ['true']}
+    RetryAfter:
+      description: Segundos de espera antes de reintentar.
+      schema: {type: integer}
+  responses:
+    BadRequest:
+      description: Validación o cuerpo mal formado (`VALIDATION_FAILED`, `MALFORMED_REQUEST`, `IDEMPOTENCY_KEY_REQUIRED`)
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example:
+            type: https://api.somphiezurich.example/errors/validation-failed
+            title: Datos inválidos
+            status: 400
+            code: VALIDATION_FAILED
+            detail: Revisá los campos marcados.
+            traceId: 9f1c2a7e4b
+            fieldErrors:
+              - {field: 'items[0].quantity', code: MAX_EXCEEDED, message: Máximo 20 por producto}
+    Unauthorized:
+      description: No autenticado o token vencido/revocado (`UNAUTHENTICATED`, `TOKEN_EXPIRED`, `TOKEN_REVOKED`, `INVALID_CREDENTIALS`, `REFRESH_TOKEN_REUSED`)
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example:
+            type: https://api.somphiezurich.example/errors/token-expired
+            title: Sesión vencida
+            status: 401
+            code: TOKEN_EXPIRED
+            traceId: 9f1c2a7e4b
+    Forbidden:
+      description: Sin permiso o fuera de alcance (`FORBIDDEN`, `ITEM_STATION_FORBIDDEN`, `SESSION_ACCESS_REVOKED`, `PASSWORD_CHANGE_REQUIRED`, `ACCOUNT_DISABLED`, `STREAM_SCOPE_FORBIDDEN`)
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example:
+            type: https://api.somphiezurich.example/errors/forbidden
+            title: No tenés permiso
+            status: 403
+            code: FORBIDDEN
+            traceId: 9f1c2a7e4b
+    NotFound:
+      description: No existe o es de otra sesión o restaurante (`RESOURCE_NOT_FOUND` y los `*_NOT_FOUND` específicos)
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example:
+            type: https://api.somphiezurich.example/errors/order-not-found
+            title: Pedido no encontrado
+            status: 404
+            code: ORDER_NOT_FOUND
+            traceId: 9f1c2a7e4b
+    Conflict:
+      description: Conflicto de estado o concurrencia (`STATE_CONFLICT`, `OPTIMISTIC_LOCK_FAILED`, `IDEMPOTENCY_IN_PROGRESS` y los 409 específicos del catálogo de errores)
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example:
+            type: https://api.somphiezurich.example/errors/state-conflict
+            title: El estado cambió
+            status: 409
+            code: STATE_CONFLICT
+            traceId: 9f1c2a7e4b
+    Unprocessable:
+      description: Regla de negocio violada con datos válidos (`ORDER_EMPTY`, `PAYMENT_DECLINED`, `IDEMPOTENCY_KEY_REUSED`, `TIP_*`, `ADJUSTMENT_INVALID`, etc.)
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example:
+            type: https://api.somphiezurich.example/errors/order-empty
+            title: El pedido está vacío
+            status: 422
+            code: ORDER_EMPTY
+            traceId: 9f1c2a7e4b
+    TooManyRequests:
+      description: Límite de solicitudes o bloqueo temporal (`RATE_LIMITED`, `JOIN_CODE_RATE_LIMITED`, `ACCOUNT_TEMPORARILY_LOCKED`, `WAITER_CALL_COOLDOWN`)
+      headers:
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example:
+            type: https://api.somphiezurich.example/errors/rate-limited
+            title: Demasiadas solicitudes
+            status: 429
+            code: RATE_LIMITED
+            traceId: 9f1c2a7e4b
+    InternalError:
+      description: Error no previsto (`INTERNAL_ERROR`). Sin trazas ni datos internos.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example:
+            type: https://api.somphiezurich.example/errors/internal-error
+            title: Algo salió mal
+            status: 500
+            code: INTERNAL_ERROR
+            traceId: 9f1c2a7e4b
+    ServiceUnavailable:
+      description: Base o servicio no disponible (`SERVICE_UNAVAILABLE`)
+      headers:
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    ItemActionOk:
+      description: Pedido completo con el estado recalculado en la misma transacción
+      headers:
+        Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/StaffOrder'}
+  examples:
+    ProblemSessionAlreadyOpen:
+      value:
+        type: https://api.somphiezurich.example/errors/session-already-open
+        title: La mesa ya tiene una sesión abierta
+        status: 409
+        code: SESSION_ALREADY_OPEN
+        detail: Alguien abrió esta mesa hace unos segundos. Podés unirte con el código.
+        traceId: 9f1c2a7e4b
+    ProblemRestaurantClosed:
+      value:
+        type: https://api.somphiezurich.example/errors/restaurant-closed
+        title: El local está cerrado
+        status: 409
+        code: RESTAURANT_CLOSED
+        traceId: 9f1c2a7e4b
+        extra: {opensAt: '2026-10-12T11:00:00Z'}
+    ProblemJoinCodeInvalid:
+      value:
+        type: https://api.somphiezurich.example/errors/join-code-invalid
+        title: Código incorrecto
+        status: 403
+        code: JOIN_CODE_INVALID
+        traceId: 9f1c2a7e4b
+    ProblemPriceChanged:
+      value:
+        type: https://api.somphiezurich.example/errors/price-changed
+        title: Cambiaron algunos precios
+        status: 409
+        code: PRICE_CHANGED
+        traceId: 9f1c2a7e4b
+        extra:
+          currentTotalMinor: 1520000
+          items:
+            - {productId: 9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7, unitPriceMinor: 520000, available: true}
+    ProblemProductUnavailable:
+      value:
+        type: https://api.somphiezurich.example/errors/product-unavailable
+        title: Hay productos agotados
+        status: 409
+        code: PRODUCT_UNAVAILABLE
+        traceId: 9f1c2a7e4b
+        extra: {productIds: [77cd1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f]}
+    ProblemSessionClosed:
+      value:
+        type: https://api.somphiezurich.example/errors/session-closed
+        title: La visita ya finalizó
+        status: 409
+        code: SESSION_CLOSED
+        traceId: 9f1c2a7e4b
+    ProblemPaymentExceedsBalance:
+      value:
+        type: https://api.somphiezurich.example/errors/payment-exceeds-balance
+        title: El monto supera el saldo
+        status: 409
+        code: PAYMENT_EXCEEDS_BALANCE
+        traceId: 9f1c2a7e4b
+        extra: {balanceMinor: 805000}
+    ProblemOrderAlreadyDecided:
+      value:
+        type: https://api.somphiezurich.example/errors/order-already-decided
+        title: El pedido ya fue decidido
+        status: 409
+        code: ORDER_ALREADY_DECIDED
+        detail: Mateo aceptó este pedido hace unos segundos.
+        traceId: 9f1c2a7e4b
+        extra: {decidedBy: Mateo, decidedAt: '2026-10-11T15:03:22Z', currentStatus: ACCEPTED}
+    ProblemItemInvalidTransition:
+      value:
+        type: https://api.somphiezurich.example/errors/item-invalid-transition
+        title: Ese paso no es posible
+        status: 409
+        code: ITEM_INVALID_TRANSITION
+        traceId: 9f1c2a7e4b
+        extra: {currentStatus: READY}
+    ProblemSessionBalancePending:
+      value:
+        type: https://api.somphiezurich.example/errors/session-balance-pending
+        title: Queda saldo por cobrar
+        status: 409
+        code: SESSION_BALANCE_PENDING
+        traceId: 9f1c2a7e4b
+        extra: {balanceMinor: 805000}
+    ProblemRefundExceedsPaid:
+      value:
+        type: https://api.somphiezurich.example/errors/refund-exceeds-paid
+        title: El reembolso supera lo pagado
+        status: 409
+        code: REFUND_EXCEEDS_PAID
+        traceId: 9f1c2a7e4b
+        extra: {maxRefundMinor: 500000}
+    ProblemAdjustmentLimitExceeded:
+      value:
+        type: https://api.somphiezurich.example/errors/adjustment-limit-exceeded
+        title: Requiere autorización del Dueño
+        status: 403
+        code: ADJUSTMENT_LIMIT_EXCEEDED
+        traceId: 9f1c2a7e4b
+        extra: {limitPercent: 10, limitMinor: 500000}
+  schemas:
+    Uuid: {type: string, format: uuid}
+    Timestamp: {type: string, format: date-time}
+    Currency:
+      type: string
+      enum: [ARS]
+    MoneyMinor:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Importe en centavos. Nunca negativo.
+    SignedMoneyMinor:
+      type: integer
+      format: int64
+      description: Importe en centavos con signo. Solo para saldos (`balanceMinor`), que pueden ser negativos tras una cancelación con pagos hechos.
+    Problem:
+      type: object
+      description: RFC 7807 extendido. Los clientes se programan contra `code`.
+      required: [type, title, status, code]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer}
+        code: {type: string, description: Código estable del catálogo de errores. Tolerar valores desconocidos.}
+        detail: {type: string}
+        traceId: {type: string}
+        fieldErrors:
+          type: array
+          items: {$ref: '#/components/schemas/FieldError'}
+        extra:
+          type: object
+          additionalProperties: true
+    FieldError:
+      type: object
+      required: [field, code]
+      properties:
+        field: {type: string}
+        code: {type: string}
+        message: {type: string}
+    OrderStatus:
+      type: string
+      description: Los clientes toleran valores desconocidos.
+      enum: [PENDING_REVIEW, ACCEPTED, REJECTED, CANCELLED, EXPIRED, IN_PREPARATION, READY, DELIVERED]
+    ItemStatus:
+      type: string
+      enum: [PENDING, QUEUED, IN_PREPARATION, READY, DELIVERED, CANCELLED]
+    TableSessionStatus:
+      type: string
+      enum: [OPEN, CLOSED]
+    SessionCloseReason:
+      type: string
+      enum: [SETTLED, EMPTY, EXPIRED_EMPTY, FORCED]
+    ParticipantRole:
+      type: string
+      enum: [HOST, MEMBER]
+    TableDisplayStatus:
+      type: string
+      description: Prioridad si se cumplen varias `PENDING_ORDERS` > `IN_SERVICE` > `AWAITING_PAYMENT` > `READY_TO_CLOSE` > `OCCUPIED` > `FREE`.
+      enum: [FREE, OCCUPIED, PENDING_ORDERS, IN_SERVICE, AWAITING_PAYMENT, READY_TO_CLOSE]
+    PaymentKind:
+      type: string
+      enum: [PAYMENT, REFUND]
+    PaymentMethod:
+      type: string
+      enum: [SIMULATED_ONLINE, CASH_COUNTER]
+    PaymentStatus:
+      type: string
+      enum: [SUCCEEDED, FAILED, VOIDED]
+    AdjustmentKind:
+      type: string
+      enum: [DISCOUNT_PERCENT, DISCOUNT_AMOUNT, COURTESY_ITEM, MANUAL_ADJUSTMENT]
+    AdjustmentStatus:
+      type: string
+      enum: [APPLIED, VOIDED]
+    AdjustmentReasonCode:
+      type: string
+      enum: [COURTESY_HOUSE, SERVICE_ISSUE, PROMOTION, STAFF, ERROR_CORRECTION, OTHER]
+    RejectReasonCode:
+      type: string
+      enum: [OUT_OF_STOCK, KITCHEN_CLOSED, ITEM_UNAVAILABLE, OTHER]
+    WaiterCallReason:
+      type: string
+      enum: [BILL, WATER, HELP, OTHER]
+    WaiterCallStatus:
+      type: string
+      enum: [OPEN, ACKNOWLEDGED, RESOLVED, EXPIRED]
+    MenuResponse:
+      type: object
+      required: [catalogVersion, locale, currency, restaurantOpen, categories]
+      properties:
+        catalogVersion: {type: integer, format: int64}
+        locale: {type: string, description: Idioma efectivo tras el fallback.}
+        currency: {$ref: '#/components/schemas/Currency'}
+        restaurantOpen: {type: boolean}
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/Category'}
+    Category:
+      type: object
+      required: [id, name, sortOrder, products]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        name: {type: string}
+        sortOrder: {type: integer}
+        products:
+          type: array
+          items: {$ref: '#/components/schemas/Product'}
+    Product:
+      type: object
+      required: [id, name, priceMinor, available, station]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        name: {type: string}
+        description: {type: string}
+        priceMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        available: {type: boolean}
+        station: {type: string, description: "Código de estación (por ejemplo `BAR` o `KITCHEN`). Tolerar valores nuevos."}
+        allergens:
+          type: array
+          items: {type: string}
+        image: {$ref: '#/components/schemas/ProductImage'}
+        optionGroups:
+          type: array
+          items: {$ref: '#/components/schemas/OptionGroup'}
+    ProductImage:
+      type: object
+      description: La URL se arma con `MEDIA_BASE_URL` + `path`, usando `version` para invalidar caché.
+      required: [path, version, alt]
+      properties:
+        path: {type: string}
+        version: {type: integer}
+        alt: {type: string}
+    OptionGroup:
+      type: object
+      required: [id, name, selectionType, required, minSelections, maxSelections, options]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        name: {type: string}
+        selectionType: {type: string, enum: [SINGLE, MULTIPLE]}
+        required: {type: boolean}
+        minSelections: {type: integer, minimum: 0}
+        maxSelections: {type: integer, minimum: 1}
+        options:
+          type: array
+          items: {$ref: '#/components/schemas/Option'}
+    Option:
+      type: object
+      required: [id, name, priceDeltaMinor, available, isDefault]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        name: {type: string}
+        priceDeltaMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        available: {type: boolean}
+        isDefault: {type: boolean}
+    PublicTable:
+      type: object
+      required: [tableLabel, restaurantOpen, hasActiveSession, canOpen]
+      properties:
+        tableLabel: {type: string}
+        restaurantOpen: {type: boolean}
+        opensAt: {$ref: '#/components/schemas/Timestamp'}
+        hasActiveSession: {type: boolean}
+        canOpen: {type: boolean}
+    OpenSessionRequest:
+      type: object
+      required: [displayName]
+      properties:
+        displayName: {type: string, minLength: 1, maxLength: 30}
+    JoinSessionRequest:
+      type: object
+      required: [displayName, joinCode]
+      properties:
+        displayName: {type: string, minLength: 1, maxLength: 30}
+        joinCode: {type: string, minLength: 6, maxLength: 6}
+    Session:
+      type: object
+      required: [id, status, tableLabel, openedAt, readOnly]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        status: {$ref: '#/components/schemas/TableSessionStatus'}
+        tableLabel: {type: string}
+        openedAt: {$ref: '#/components/schemas/Timestamp'}
+        closedAt: {$ref: '#/components/schemas/Timestamp'}
+        readOnly: {type: boolean}
+    Participant:
+      type: object
+      required: [id, displayName, role]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        displayName: {type: string}
+        role: {$ref: '#/components/schemas/ParticipantRole'}
+        revoked: {type: boolean, description: "Propuesto: `true` si el acceso fue retirado. Confirmar con Web y Android."}
+    SessionAccessResponse:
+      type: object
+      required: [session, participant, guestToken]
+      properties:
+        session: {$ref: '#/components/schemas/Session'}
+        participant: {$ref: '#/components/schemas/Participant'}
+        guestToken: {type: string}
+        joinCode: {type: string, description: Solo para el `HOST` al abrir.}
+    CurrentSession:
+      type: object
+      required: [session, participant]
+      properties:
+        session: {$ref: '#/components/schemas/Session'}
+        participant: {$ref: '#/components/schemas/Participant'}
+        joinCode: {type: string}
+    JoinCodeResponse:
+      type: object
+      required: [joinCode]
+      properties:
+        joinCode: {type: string}
+    CreateOrderItem:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId: {$ref: '#/components/schemas/Uuid'}
+        quantity: {type: integer, minimum: 1, maximum: 20}
+        optionIds:
+          type: array
+          maxItems: 10
+          items: {$ref: '#/components/schemas/Uuid'}
+        note: {type: string, maxLength: 140}
+    CreateOrderRequest:
+      type: object
+      description: Ningún campo lleva precios unitarios; el servidor calcula todo.
+      required: [items, acknowledgedTotalMinor]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items: {$ref: '#/components/schemas/CreateOrderItem'}
+        note: {type: string, maxLength: 140}
+        acknowledgedTotalMinor: {$ref: '#/components/schemas/MoneyMinor'}
+    CreateStaffOrderRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items: {$ref: '#/components/schemas/CreateOrderItem'}
+        note: {type: string, maxLength: 140}
+        acknowledgedTotalMinor: {$ref: '#/components/schemas/MoneyMinor'}
+    OrderItemOption:
+      type: object
+      required: [groupName, optionName, priceDeltaMinor]
+      properties:
+        groupName: {type: string}
+        optionName: {type: string}
+        priceDeltaMinor: {$ref: '#/components/schemas/MoneyMinor'}
+    OrderItem:
+      type: object
+      required: [id, productId, productName, basePriceMinor, optionsDeltaMinor, unitPriceMinor, quantity, lineTotalMinor, station, status]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        productId: {$ref: '#/components/schemas/Uuid'}
+        productName: {type: string, description: Nombre en es-AR (snapshot).}
+        productNameI18n:
+          type: object
+          additionalProperties: {type: string}
+          description: Nombre por idioma (snapshot) para que el cliente vea su historial en su idioma.
+        basePriceMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        optionsDeltaMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        unitPriceMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        quantity: {type: integer, minimum: 1}
+        lineTotalMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        station: {type: string}
+        status: {$ref: '#/components/schemas/ItemStatus'}
+        note: {type: string}
+        options:
+          type: array
+          items: {$ref: '#/components/schemas/OrderItemOption'}
+    Order:
+      type: object
+      required: [id, displayCode, status, version, createdAt, items, totalMinor]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        displayCode: {type: string, description: "Código corto secuencial por día de negocio (por ejemplo `#042`)."}
+        status: {$ref: '#/components/schemas/OrderStatus'}
+        version: {type: integer, description: Permite descartar eventos o respuestas atrasadas.}
+        createdBy:
+          type: object
+          description: Se omite para Cocina (sin datos de participantes).
+          required: [participantId, displayName]
+          properties:
+            participantId: {$ref: '#/components/schemas/Uuid'}
+            displayName: {type: string}
+        createdAt: {$ref: '#/components/schemas/Timestamp'}
+        note: {type: string}
+        rejection:
+          type: object
+          description: "Propuesto: motivo visible cuando el pedido fue rechazado. Confirmar con Web y Android."
+          required: [reasonCode]
+          properties:
+            reasonCode: {$ref: '#/components/schemas/RejectReasonCode'}
+            reasonText: {type: string}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/OrderItem'}
+        totalMinor: {$ref: '#/components/schemas/MoneyMinor'}
+    OrderPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Order'}
+        nextCursor: {type: [string, 'null']}
+    StaffOrderItem:
+      allOf:
+        - $ref: '#/components/schemas/OrderItem'
+        - type: object
+          properties:
+            productCurrentlyAvailable: {type: boolean}
+    StaffOrder:
+      allOf:
+        - $ref: '#/components/schemas/Order'
+        - type: object
+          required: [sessionId, tableLabel]
+          properties:
+            sessionId: {$ref: '#/components/schemas/Uuid'}
+            tableLabel: {type: string}
+            decidedBy:
+              type: object
+              required: [displayName]
+              properties:
+                userId: {$ref: '#/components/schemas/Uuid'}
+                displayName: {type: string}
+            decidedAt: {$ref: '#/components/schemas/Timestamp'}
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/StaffOrderItem'}
+    StaffOrderPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/StaffOrder'}
+        nextCursor: {type: [string, 'null']}
+    AcceptOrderRequest:
+      type: object
+      properties:
+        excludedItems:
+          type: array
+          items:
+            type: object
+            required: [itemId, reason]
+            properties:
+              itemId: {$ref: '#/components/schemas/Uuid'}
+              reason: {$ref: '#/components/schemas/RejectReasonCode'}
+    RejectOrderRequest:
+      type: object
+      required: [reasonCode]
+      properties:
+        reasonCode: {$ref: '#/components/schemas/RejectReasonCode'}
+        reasonText: {type: string, maxLength: 140}
+    CancelItemRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 140}
+    ReasonRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 140}
+    Station:
+      type: object
+      required: [id, code, name]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        code: {type: string}
+        name: {type: string}
+    StationQueueItem:
+      type: object
+      required: [itemId, orderId, orderCode, tableLabel, productName, quantity, status, queuedAt, delayed]
+      properties:
+        itemId: {$ref: '#/components/schemas/Uuid'}
+        orderId: {$ref: '#/components/schemas/Uuid'}
+        orderCode: {type: string}
+        tableLabel: {type: string}
+        productName: {type: string}
+        quantity: {type: integer}
+        optionsSummary: {type: string}
+        options:
+          type: array
+          items: {$ref: '#/components/schemas/OrderItemOption'}
+        note: {type: string}
+        status: {$ref: '#/components/schemas/ItemStatus'}
+        queuedAt: {$ref: '#/components/schemas/Timestamp'}
+        delayed: {type: boolean}
+    StationQueue:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/StationQueueItem'}
+        nextCursor: {type: [string, 'null']}
+    BillLine:
+      type: object
+      required: [orderCode, productName, quantity, unitPriceMinor, lineTotalMinor]
+      properties:
+        orderCode: {type: string}
+        productName: {type: string}
+        quantity: {type: integer}
+        unitPriceMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        lineTotalMinor: {$ref: '#/components/schemas/MoneyMinor'}
+    BillAdjustment:
+      type: object
+      description: Vista del participante. El motivo interno no se expone.
+      required: [id, kind, label, amountMinor]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        kind: {$ref: '#/components/schemas/AdjustmentKind'}
+        label: {type: string}
+        amountMinor: {$ref: '#/components/schemas/MoneyMinor'}
+    Payment:
+      type: object
+      required: [id, kind, method, status, amountMinor, tipMinor, createdAt]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        kind: {$ref: '#/components/schemas/PaymentKind'}
+        method: {$ref: '#/components/schemas/PaymentMethod'}
+        status: {$ref: '#/components/schemas/PaymentStatus'}
+        amountMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        tipMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        payerName: {type: string}
+        payerLabel: {type: string}
+        createdAt: {$ref: '#/components/schemas/Timestamp'}
+    Bill:
+      type: object
+      description: "`balanceMinor = chargesMinor - adjustmentsMinor - paidMinor`; la propina no entra."
+      required: [currency, chargesMinor, adjustmentsMinor, paidMinor, balanceMinor, tipsMinor, lines, adjustments, payments]
+      properties:
+        currency: {$ref: '#/components/schemas/Currency'}
+        chargesMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        adjustmentsMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        paidMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        balanceMinor: {$ref: '#/components/schemas/SignedMoneyMinor'}
+        tipsMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        lines:
+          type: array
+          items: {$ref: '#/components/schemas/BillLine'}
+        adjustments:
+          type: array
+          items: {$ref: '#/components/schemas/BillAdjustment'}
+        payments:
+          type: array
+          items: {$ref: '#/components/schemas/Payment'}
+        pendingOrdersNotIncluded:
+          type: array
+          items:
+            type: object
+            required: [orderCode, totalMinor]
+            properties:
+              orderCode: {type: string}
+              totalMinor: {$ref: '#/components/schemas/MoneyMinor'}
+    CreatePaymentRequest:
+      type: object
+      description: "`amountMinor` entre `minPaymentMinor` y el saldo; `0` solo si `tipMinor > 0`."
+      required: [amountMinor, method]
+      properties:
+        amountMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        tipMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        method: {type: string, enum: [SIMULATED_ONLINE]}
+    CreateCashPaymentRequest:
+      type: object
+      required: [amountMinor]
+      properties:
+        amountMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        tipMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        payerLabel: {type: string}
+    CreateRefundRequest:
+      type: object
+      required: [amountMinor, reason]
+      properties:
+        amountMinor: {type: integer, format: int64, minimum: 1}
+        reason: {type: string, minLength: 1, maxLength: 140}
+    PaymentResult:
+      type: object
+      required: [payment, bill]
+      properties:
+        payment: {$ref: '#/components/schemas/Payment'}
+        bill: {$ref: '#/components/schemas/Bill'}
+    CreateAdjustmentRequest:
+      type: object
+      description: |
+        Según `kind`: `DISCOUNT_PERCENT` → `percentBp`; `DISCOUNT_AMOUNT` y `MANUAL_ADJUSTMENT` → `amountMinor`; `COURTESY_ITEM` → `orderItemId`.
+        El servidor rechaza combinaciones incoherentes con `ADJUSTMENT_INVALID`.
+      required: [kind, reasonCode]
+      properties:
+        kind: {$ref: '#/components/schemas/AdjustmentKind'}
+        percentBp: {type: integer, minimum: 1, maximum: 10000, description: "Puntos básicos (1000 = 10 %)."}
+        amountMinor: {type: integer, format: int64, minimum: 1}
+        orderItemId: {$ref: '#/components/schemas/Uuid'}
+        reasonCode: {$ref: '#/components/schemas/AdjustmentReasonCode'}
+        reasonText: {type: string, maxLength: 140}
+    StaffAdjustment:
+      type: object
+      description: Vista del personal; incluye el motivo interno.
+      required: [id, kind, status, amountMinor, reasonCode, appliedAt]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        kind: {$ref: '#/components/schemas/AdjustmentKind'}
+        status: {$ref: '#/components/schemas/AdjustmentStatus'}
+        amountMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        percentBp: {type: integer}
+        orderItemId: {$ref: '#/components/schemas/Uuid'}
+        reasonCode: {$ref: '#/components/schemas/AdjustmentReasonCode'}
+        reasonText: {type: string}
+        appliedBy: {type: string, description: Nombre visible de quien lo aplicó.}
+        appliedAt: {$ref: '#/components/schemas/Timestamp'}
+        voidedAt: {$ref: '#/components/schemas/Timestamp'}
+        voidReason: {type: string}
+    CreateWaiterCallRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {$ref: '#/components/schemas/WaiterCallReason'}
+        text: {type: string, maxLength: 80}
+    WaiterCall:
+      type: object
+      required: [id, reason, status, createdAt]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        reason: {$ref: '#/components/schemas/WaiterCallReason'}
+        text: {type: string}
+        status: {$ref: '#/components/schemas/WaiterCallStatus'}
+        createdAt: {$ref: '#/components/schemas/Timestamp'}
+        acknowledgedAt: {$ref: '#/components/schemas/Timestamp'}
+        resolvedAt: {$ref: '#/components/schemas/Timestamp'}
+    StaffWaiterCall:
+      allOf:
+        - $ref: '#/components/schemas/WaiterCall'
+        - type: object
+          required: [sessionId, tableLabel]
+          properties:
+            sessionId: {$ref: '#/components/schemas/Uuid'}
+            tableLabel: {type: string}
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, format: password}
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: {type: string}
+    TokenPair:
+      type: object
+      required: [accessToken, refreshToken, expiresInSec]
+      properties:
+        accessToken: {type: string}
+        refreshToken: {type: string}
+        expiresInSec: {type: integer}
+    LoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/TokenPair'
+        - type: object
+          required: [user]
+          properties:
+            user: {$ref: '#/components/schemas/Me'}
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: {type: string, format: password}
+        newPassword: {type: string, format: password, minLength: 10}
+    Me:
+      type: object
+      required: [id, email, displayName, roles, permissions, stations, mustChangePassword]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        email: {type: string, format: email}
+        displayName: {type: string}
+        roles:
+          type: array
+          items: {type: string}
+        permissions:
+          type: array
+          items: {type: string}
+        stations:
+          type: array
+          items: {$ref: '#/components/schemas/Station'}
+        mustChangePassword: {type: boolean}
+    StaffTable:
+      type: object
+      required: [tableId, label, displayStatus, pendingOrdersCount, waiterCallActive]
+      properties:
+        tableId: {$ref: '#/components/schemas/Uuid'}
+        label: {type: string}
+        displayStatus: {$ref: '#/components/schemas/TableDisplayStatus'}
+        sessionId: {$ref: '#/components/schemas/Uuid'}
+        openedAt: {$ref: '#/components/schemas/Timestamp'}
+        pendingOrdersCount: {type: integer, minimum: 0}
+        balanceMinor: {$ref: '#/components/schemas/SignedMoneyMinor'}
+        waiterCallActive: {type: boolean}
+    StaffTableBoard:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/StaffTable'}
+    StaffSession:
+      allOf:
+        - $ref: '#/components/schemas/Session'
+        - type: object
+          properties:
+            tableId: {$ref: '#/components/schemas/Uuid'}
+            closeReason: {$ref: '#/components/schemas/SessionCloseReason'}
+    StaffSessionDetail:
+      type: object
+      required: [session, participants, orders, bill]
+      properties:
+        session: {$ref: '#/components/schemas/StaffSession'}
+        participants:
+          type: array
+          items: {$ref: '#/components/schemas/Participant'}
+        orders:
+          type: array
+          items: {$ref: '#/components/schemas/StaffOrder'}
+        bill: {$ref: '#/components/schemas/Bill'}
+    StaffOpenSessionResponse:
+      type: object
+      required: [session, joinCode]
+      properties:
+        session: {$ref: '#/components/schemas/Session'}
+        joinCode: {type: string}
+    AvailabilityRequest:
+      type: object
+      required: [available]
+      properties:
+        available: {type: boolean}
+    AvailabilityResult:
+      type: object
+      required: [id, available]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        available: {type: boolean}
+    VersionInfo:
+      type: object
+      required: [build, contractVersion]
+      properties:
+        build: {type: string}
+        contractVersion: {type: string}
+
