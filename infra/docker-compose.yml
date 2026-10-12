@@ -1,0 +1,35 @@
+name: somphie-local # Mantiene nombres predecibles y separa estos contenedores de otros proyectos.
+
+services: # Declara solo las dependencias locales que WP-OPS-20 pide levantar.
+  postgres: # Provee PostgreSQL para el backend local y las pruebas futuras.
+    image: postgres:16.15-alpine # Fija la versión estable vigente verificada para evitar cambios inesperados.
+    environment: # Reutiliza las credenciales locales que también usará el backend.
+      POSTGRES_DB: ${DB_NAME:-somphie} # Crea la base local indicada o usa el nombre documentado.
+      POSTGRES_USER: ${DB_USER:-somphie} # Crea el usuario local o usa el valor seguro de desarrollo.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me-local-only} # Permite arrancar sin .env, solo para desarrollo.
+    ports: # Expone el puerto indicado en entorno-local.md.
+      - "5432:5432" # Permite conectar herramientas del host a PostgreSQL.
+    volumes: # Conserva datos entre reinicios del contenedor.
+      - postgres-data:/var/lib/postgresql/data # Aísla la persistencia en un volumen nombrado de Docker.
+    healthcheck: # Confirma que PostgreSQL acepta conexiones antes de considerarlo listo.
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""] # Usa las credenciales configuradas en el contenedor.
+      interval: 5s # Repite la comprobación con frecuencia durante el arranque.
+      timeout: 3s # Evita que una comprobación quede esperando indefinidamente.
+      retries: 10 # Da margen a equipos con un primer arranque más lento.
+
+  mailpit: # Captura correos de desarrollo sin enviarlos a destinatarios reales.
+    image: axllent/mailpit:v1.31.5 # Fija la versión local para que el entorno sea reproducible.
+    ports: # Publica SMTP y la interfaz web descritos en entorno-local.md.
+      - "1025:1025" # Recibe correo de prueba desde aplicaciones ejecutadas en el host.
+      - "8025:8025" # Permite revisar los mensajes capturados en el navegador.
+
+  prism: # Sirve el contrato OpenAPI como mock para clientes antes del backend funcional.
+    image: stoplight/prism:5.15.10 # Fija la versión disponible para que cada equipo use el mismo mock.
+    command: ["mock", "--host", "0.0.0.0", "--no-multiprocess", "/openapi/openapi.yaml"] # Evita el worker opcional que falla en el contenedor actual.
+    ports: # Expone el puerto de mock documentado para Web y Android.
+      - "4010:4010" # Permite probar las rutas mockeadas en localhost.
+    volumes: # Lee la fuente de verdad del contrato sin copiarla al contexto de build.
+      - ../docs/04-api/openapi.yaml:/openapi/openapi.yaml:ro # Monta el contrato en solo lectura para evitar divergencias.
+
+volumes: # Define almacenamiento administrado por Docker para la base local.
+  postgres-data: # Sobrevive a reinicios y a docker compose down sin -v.

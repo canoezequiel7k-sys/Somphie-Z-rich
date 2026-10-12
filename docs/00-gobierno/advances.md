@@ -21,12 +21,13 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Config de lint `redocly.yaml` | ✅ (clave corregida, H-09) | raíz |
 | `CHANGELOG.md` del contrato hasta 0.2.5 | ✅ | `docs/04-api/CHANGELOG.md` |
 | Estructura de carpetas y `AGENTS.md` por carpeta | ✅ | `backend/`, `web/`, `android/` |
+| Entorno local WP-OPS-20: Compose, variables de ejemplo y plantillas PR/issue | ✅ validado desde un clon temporal limpio en Windows | `infra/`, `.github/` |
 | Archivos de marca: `ic_icon.svg` (1,54 MB) y `boceto_v.1.0.png` (1,75 MB) | ✅ existen; **sin revisar** (superan el límite de lectura de 1 MB del agente) | `design/img/` |
 | Backend: **dominio puro** de WP-BE-10 (`Money`, `Payment`/`Bill`, ajustes, reembolsos/anulaciones, `Order`/`OrderItem`, `TableSession`, `JoinCode`). JDK 25, Gradle 9.8.1, Kotlin 2.4.0, JUnit 6.1.2 | ✅ 235 pruebas; 0 fallos, errores u omitidas; cobertura de líneas 97,61 % (corrida final del 2026-10-12) | `backend/` |
 
 ### 1.2 Qué NO existe todavía
 - Código de `web/` y `android/` (solo tienen `AGENTS.md`). En `backend/` existe únicamente el dominio puro: **no** hay Spring, base de datos, API ni persistencia (Fase 2). *(El texto original de esta línea decía que backend, web y android solo tenían `AGENTS.md`.)*
-- `infra/docker-compose.yml`, CI (`.github/`), plantillas de PR.
+- CI de WP-OPS-21.
 - Tokens de diseño (paleta, tipografía, espaciado) derivados de la marca. Los archivos de marca **sí existen** (ver 1.1), pero `design/img/README.md` todavía pide `ic_icon.png` y hoy el ícono es `ic_icon.svg`.
 - Catálogo de acciones de auditoría.
 - Pruebas de integración (PostgreSQL), de contrato, de arquitectura (ArchUnit), de concurrencia, web y Android. Hoy solo hay pruebas unitarias del dominio del backend.
@@ -396,6 +397,15 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Verificación final:** `.\backend\gradlew.bat -p backend clean check jacocoTestReport` → `BUILD SUCCESSFUL`; 235 pruebas, 0 fallos, errores u omitidas; 653/669 líneas cubiertas (**97,61 %**, umbral 90 %). `git diff --check` pasó. Redocly no está disponible; el lint del contrato 0.2.5 queda pendiente.
 - **Siguiente paso:** queda pendiente la revisión manual; no se hicieron commits ni pushes.
 - **Archivos:** `Bill.kt`, `CourtesyRules.kt`, `Payment.kt`, `Order.kt`, `TableSession.kt`, pruebas de billing/orders/floor, `backend-arquitectura.md`, `openapi.yaml`, `CHANGELOG.md` y esta bitácora.
+
+### 2026-10-12 — WP-OPS-20 ✅
+- **Qué:** se añadieron Compose para PostgreSQL 16.15, Mailpit 1.31.5 y Prism 5.15.10, `.env.example` comentado, instrucciones actuales para PowerShell/Bash y plantillas de PR, defecto y paquete de trabajo.
+- **Por qué:** es requisito previo documentado para el esqueleto funcional del backend; no se inicia CI ni otro paquete.
+- **Archivos:** `infra/docker-compose.yml`, `infra/.env.example`, `README.md`, `docs/07-despliegue/entorno-local.md`, `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/bug_report.md`, `.github/ISSUE_TEMPLATE/work_package.md` y esta bitácora. `.gitattributes` y `.gitignore` ya cumplían el objetivo y no se modificaron.
+- **Qué estudiar:** servicios locales aislados en contenedores y montaje de un contrato OpenAPI de solo lectura.
+- **Validación desde clon limpio de Windows:** se clonó el commit local en una carpeta temporal y se copiaron únicamente los archivos WP-OPS-20 pendientes de Git para probar la versión actual; no se copió ningún `.env` real. Con un `COMPOSE_PROJECT_NAME` aislado se ejecutaron `docker compose config` y `docker compose up -d`; PostgreSQL y Mailpit quedaron `healthy`, Prism quedó ejecutándose, `pg_isready` confirmó conexiones y Mailpit/Prism respondieron HTTP 2xx.
+- **Limpieza y alcance:** `docker compose down` retiró contenedores/red; se eliminó solo el volumen temporal aislado y la carpeta del clon. Se verificó que el volumen original `somphie-local_postgres-data` siguiera existiendo. `git diff --check` pasó e `infra/.env` está ignorado. No se hicieron commits ni pushes. Redocly y CI siguen fuera del alcance de WP-OPS-20.
+- **Siguiente paso:** WP-OPS-20 queda completo y su dependencia para WP-BE-20 está satisfecha; WP-OPS-21 permanece pendiente.
 
 ### Historial previo (resumen, para contexto)
 - **v0.1:** plan maestro convertido en 52 documentos (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes).

@@ -1,6 +1,6 @@
 # Entorno local (Windows + Git)
 
-> Objetivo: que cualquier persona clone el repo y levante todo con pocos comandos. Las versiones exactas se fijan en Fase 2 (verificar las estables vigentes).
+> Objetivo: que cualquier persona clone el repo y levante las dependencias locales con pocos comandos. Las versiones verificadas quedan fijadas en `infra/docker-compose.yml`.
 
 ## 1. Requisitos
 | Herramienta | Para qué | Nota |
@@ -17,21 +17,20 @@
 ## 2. Servicios locales (`infra/docker-compose.yml`)
 | Servicio | Puerto | Para qué |
 |---|---|---|
-| PostgreSQL | 5432 | Base de datos (volumen persistente) |
+| PostgreSQL | 5432 | Base local (volumen persistente `postgres-data`) |
 | Mailpit | 8025 (UI) / 1025 (SMTP) | Buzón de desarrollo |
 | Prism | 4010 | Mock desde `openapi.yaml` (para Web/Android sin backend) |
-| Backend | 8080 | API (también puede correr desde el IDE) |
-| Web (Vite) | 5173 | Cliente y admin |
+| Backend | 8080 | API cuando se implemente WP-BE-20; hoy no está en Compose |
+| Web (Vite) | 5173 | Cliente/admin cuando se implemente WP-WEB-20; hoy no está en Compose |
 
 ## 3. Primer arranque (esquema)
 ```bash
-git clone <repo> && cd somphie-zurich
-cp infra/.env.example infra/.env        # completar valores locales (NO se versiona .env)
-docker compose -f infra/docker-compose.yml up -d
-cd backend && ./gradlew bootRun         # perfil dev: aplica migraciones + semillas demo
-cd ../web && pnpm install && pnpm dev
-# Android: abrir /android en Android Studio; el emulador accede al backend en http://10.0.2.2:8080
+git clone <repo> && cd somphie-zurich   # Clona el monorepo y entra a su raíz.
+if [ ! -f infra/.env ]; then cp infra/.env.example infra/.env; fi # Crea variables locales sin sobrescribir las existentes.
+cd infra && docker compose up -d        # Inicia PostgreSQL, Mailpit y Prism desde su carpeta.
 ```
+
+En Windows PowerShell, el equivalente es `Copy-Item .\infra\.env.example .\infra\.env`, luego `Set-Location .\infra` y `docker compose up -d`. Para apagar el entorno sin borrar la base, usar `docker compose down` desde `infra/`. El backend funcional con Spring (`bootRun`), Web y Android todavía no están implementados.
 
 ## 4. Variables de entorno (`.env.example`)
 | Variable | Ejemplo | Notas |
