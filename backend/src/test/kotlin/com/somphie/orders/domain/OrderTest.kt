@@ -46,6 +46,35 @@ class OrderTest {
         assertEquals(ErrorCode.ORDER_EMPTY, error.code)
     }
 
+
+    @Test
+    fun `an order keeps its items when the original list is modified`() {
+        val originalItems = items(2).toMutableList()
+        val order = Order.create(UUID.randomUUID(), originalItems, T0)
+
+        originalItems.clear()
+
+        assertEquals(2, order.items.size)
+        assertEquals(
+            listOf(ItemStatus.PENDING, ItemStatus.PENDING),
+            statusesOf(order)
+        )
+    }
+
+    @Test
+    fun `the items list exposed by an order cannot be modified`() {
+        val order = newOrder()
+        val originalItems = order.items.toList()
+
+        assertThrows(UnsupportedOperationException::class.java) {
+            (order.items as MutableList<OrderItem>).clear()
+        }
+
+        assertEquals(originalItems, order.items)
+        assertEquals(2, order.items.size)
+    }
+
+
     @Test
     fun `items that are not pending or have repeated ids are programming errors`() {
         assertThrows(IllegalArgumentException::class.java) {

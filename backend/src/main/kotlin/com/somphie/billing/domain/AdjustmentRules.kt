@@ -25,8 +25,8 @@ enum class AdjustmentKind { DISCOUNT_PERCENT, DISCOUNT_AMOUNT, COURTESY_ITEM, MA
  * - `DISCOUNT_PERCENT`: [percentBp] en puntos básicos (1000 = 10 %).
  * - `DISCOUNT_AMOUNT` y `MANUAL_ADJUSTMENT`: [amount].
  * - `COURTESY_ITEM`: [itemLineTotal], el `lineTotalMinor` del ítem (RN-ADJ-04). Se obtiene con
- *   `CourtesyRules.lineTotalFor`, que responde `ADJUSTMENT_ITEM_INVALID` si el ítem está cancelado o
- *   ya tiene cortesía.
+ *   `CourtesyRules.lineTotalFor`, que responde `ADJUSTMENT_ITEM_INVALID` si el ítem aún no fue aceptado
+ *   (`PENDING`, H-29), está cancelado o ya tiene cortesía.
  */
 data class AdjustmentRequest(
     val kind: AdjustmentKind,

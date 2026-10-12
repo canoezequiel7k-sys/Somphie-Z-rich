@@ -4,6 +4,7 @@ import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
 import java.time.Duration
 import java.time.Instant
+import java.util.Collections
 import java.util.UUID
 
 /** Motivos de rechazo permitidos (RN-ORD-09). */
@@ -42,7 +43,7 @@ data class Rejection(val reason: RejectionReason, val text: String? = null) {
 class Order private constructor(
     val id: UUID,
     val status: OrderStatus,
-    val items: List<OrderItem>,
+    items: List<OrderItem>,
     val createdAt: Instant,
     /** Cuándo se aceptó. Define el orden FIFO de la cola de preparación (RN-PRE-08). */
     val acceptedAt: Instant?,
@@ -50,6 +51,13 @@ class Order private constructor(
     val decidedAt: Instant?,
     val rejection: Rejection?,
 ) {
+
+    /**
+     * Ítems del pedido: copia propia y de solo lectura en tiempo de ejecución. Se copia en el constructor,
+     * que es el único camino para crear un `Order`, así que ni la lista que entregó quien llamó ni un
+     * cast a `MutableList` pueden alterarla.
+     */
+    val items: List<OrderItem> = Collections.unmodifiableList(ArrayList<OrderItem>(items))
 
     /**
      * ¿Pasó el TTL sin decisión (RN-ORD-12)? El job de expiración usa esto para elegir pedidos.
@@ -150,7 +158,7 @@ class Order private constructor(
             if (items.isEmpty()) throw DomainException(ErrorCode.ORDER_EMPTY, "An order needs at least one item")
             require(items.all { it.status == ItemStatus.PENDING }) { "New order items must be PENDING" }
             require(items.map { it.id }.toSet().size == items.size) { "Order items must have distinct ids" }
-            return Order(id, OrderStatus.PENDING_REVIEW, items.toList(), now, null, null, null)
+            return Order(id, OrderStatus.PENDING_REVIEW, items, now, null, null, null)
         }
 
         /** Pedido tomado por el personal (RN-ORD-18): nace `ACCEPTED`. Reutiliza `create` + `accept`. */

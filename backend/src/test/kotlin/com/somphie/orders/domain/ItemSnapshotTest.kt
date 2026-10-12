@@ -2,8 +2,10 @@ package com.somphie.orders.domain
 
 import com.somphie.shared.domain.Money
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /** Pruebas del snapshot de una línea (RN-ORD-04, RN-OPT-04, RN-BIL-01). */
 class ItemSnapshotTest {
@@ -56,4 +58,95 @@ class ItemSnapshotTest {
             .queue(T0).start(T0).markReady(T0).deliver(T0)
         assertEquals(snapshot, delivered.snapshot)
     }
+
+    // ---------- inmutabilidad real de las colecciones ----------
+
+    private val fixedProductId: UUID = UUID.randomUUID()
+    private val fixedStationId: UUID = UUID.randomUUID()
+
+    private fun snapshotOf(options: List<OptionSnapshot> = emptyList(), i18n: Map<String, String> = emptyMap()) =
+        ItemSnapshot(
+            productId = fixedProductId,
+            productName = "Café",
+            productNameI18n = i18n,
+            stationId = fixedStationId,
+            quantity = 2,
+            basePrice = Money.of(485_000),
+            options = options,
+        )
+
+    @Test
+    fun `changing the original options list afterwards does not change the snapshot or its prices`() {
+        val source = mutableListOf(option(30_000))
+        val snapshot = sampleSnapshot(quantity = 2, options = source)
+
+        source.add(option(20_000))
+        assertEquals(1, snapshot.options.size)
+        assertEquals(Money.of(30_000), snapshot.optionsDelta)
+        assertEquals(Money.of(1_030_000), snapshot.lineTotal)
+
+        source.clear()
+        assertEquals(1, snapshot.options.size)
+        assertEquals(Money.of(1_030_000), snapshot.lineTotal)
+    }
+
+    @Test
+    fun `changing the original translations map afterwards does not change the snapshot`() {
+        val source = mutableMapOf("en" to "Coffee")
+        val snapshot = snapshotOf(i18n = source)
+
+        source["es"] = "Café"
+        source.remove("en")
+        assertEquals(mapOf("en" to "Coffee"), snapshot.productNameI18n)
+    }
+
+    @Test
+    fun `the exposed collections cannot be modified even through a cast`() {
+        val snapshot = snapshotOf(options = listOf(option(30_000)), i18n = mapOf("en" to "Coffee"))
+        val options = snapshot.options as MutableList<OptionSnapshot>
+        val i18n = snapshot.productNameI18n as MutableMap<String, String>
+
+        assertThrows(UnsupportedOperationException::class.java) { options.add(option(1)) }
+        assertThrows(UnsupportedOperationException::class.java) { options.clear() }
+        assertThrows(UnsupportedOperationException::class.java) { i18n.put("es", "Café") }
+        assertThrows(UnsupportedOperationException::class.java) { i18n.clear() }
+        assertEquals(Money.of(1_030_000), snapshot.lineTotal)
+    }
+
+    @Test
+    fun `snapshots with the same values are equal even if built from different collections`() {
+        val a = snapshotOf(
+            options = listOf(option(30_000)),
+            i18n = mapOf("en" to "Coffee")
+        )
+        val b = snapshotOf(
+            options = mutableListOf(option(30_000)),
+            i18n = mutableMapOf("en" to "Coffee")
+        )
+
+        assertEquals(a, b)
+        assertEquals(a.hashCode(), b.hashCode())
+
+        assertNotEquals(
+            a,
+            snapshotOf(options = listOf(option(31_000)), i18n = mapOf("en" to "Coffee"))
+        )
+        assertNotEquals(
+            a,
+            snapshotOf(options = listOf(option(30_000)), i18n = emptyMap())
+        )
+    }
+
+    @Test
+    fun `the hash code does not change when the original collections are modified`() {
+        val source = mutableListOf(option(30_000))
+        val snapshot = snapshotOf(options = source)
+        val before = snapshot.hashCode()
+
+        source.add(option(1))
+
+        assertEquals(before, snapshot.hashCode())
+        assertEquals(snapshotOf(options = listOf(option(30_000))), snapshot)
+    }
+
 }
