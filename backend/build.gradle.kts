@@ -1,4 +1,4 @@
-// Backend de Somphie Zúrich (ADR-0001, D-149: un solo módulo Gradle, un paquete por módulo de negocio).
+// Backend de Somphie Zúrich (ADR-0001, ADR-0002: un solo módulo Gradle, un paquete por módulo de negocio).
 // Versiones verificadas el 2026-10-11 (ver docs/00-gobierno/advances.md, Paso 9).
 // Spring Boot, JPA, Flyway, etc. se agregan en la Fase 2 (WP-BE-20): el dominio puro no los necesita.
 

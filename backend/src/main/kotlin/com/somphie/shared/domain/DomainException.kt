@@ -8,9 +8,33 @@ package com.somphie.shared.domain
  * no se inventan (AGENTS.md §2, regla 2).
  */
 enum class ErrorCode {
+    // --- Ítems de pedido (catálogo §4) ---
     ITEM_INVALID_TRANSITION,
     ITEM_NOT_CANCELLABLE,
     ITEM_UNDO_WINDOW_EXPIRED,
+
+    // --- Pagos (catálogo §5) ---
+    PAYMENT_AMOUNT_INVALID,
+    PAYMENT_EXCEEDS_BALANCE,
+    PAYMENT_NOTHING_TO_PAY,
+
+    // --- Propina (catálogo §7.1, v0.2) ---
+    TIP_INVALID,
+    TIP_EXCEEDS_LIMIT,
+    TIP_NOT_ALLOWED,
+
+    // --- Ajustes de cuenta (catálogo §7.1, v0.2) ---
+    ADJUSTMENT_INVALID,
+    ADJUSTMENT_EXCEEDS_BALANCE,
+    ADJUSTMENT_LIMIT_EXCEEDED,
+    ADJUSTMENT_NOT_VOIDABLE,
+
+    // --- Anulación y reembolso de pagos (catálogo §5) ---
+    PAYMENT_NOT_VOIDABLE,
+    REFUND_EXCEEDS_PAID,
+
+    // --- Genérico (catálogo §1): falta de permiso o de alcance sobre el recurso ---
+    FORBIDDEN,
 }
 
 /**
