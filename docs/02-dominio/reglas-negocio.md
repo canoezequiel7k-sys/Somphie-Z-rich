@@ -2,7 +2,7 @@
 
 Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A = aplicación/caso de uso, DB = restricción de base de datos, UI = solo ayuda visual). Si una regla crítica solo está en UI, es un defecto.
 
-**Valores por defecto configurables** (`restaurant_settings`, 🟡 D-106): `maxLinesPerOrder=30`, `maxQtyPerLine=20`, `maxNoteLength=140`, `maxPendingOrdersPerSession=3`, `maxParticipants=12`, `orderPendingTtlMin=15`, `sessionIdleTtlMin=30`, `deliveredUndoWindowMin=5`, `closedSessionReadHours=24`, `minPaymentMinor=100`, `delayedItemSlaMin=10`, `businessDayCutoff=04:00`.
+**Valores por defecto configurables** (`restaurant_settings`, D-106): `maxLinesPerOrder=30`, `maxQtyPerLine=20`, `maxNoteLength=140`, `maxPendingOrdersPerSession=3`, `maxParticipants=12`, `orderPendingTtlMin=15`, `sessionIdleTtlMin=30`, `deliveredUndoWindowMin=5`, `closedSessionReadHours=24`, `minPaymentMinor=100`, `delayedItemSlaMin=10`, `businessDayCutoff=04:00`. Desde v0.2 se suman: `maxTipPercent=100` (RN-TIP-03), `maxStaffDiscountPercent=15` (RN-ADJ-06, D-142) y `maxStaffAdjustmentMinor` (opcional, **sin tope por defecto**, D-142).
 
 ---
 ## RN-ACC — Acceso por QR y participantes (módulo `floor`)
@@ -18,10 +18,12 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 | RN-ACC-07 | `joinCode`: 6 caracteres sin ambiguos; válido solo con sesión `OPEN`; rotable por host/personal; 5 intentos fallidos / 10 min por IP+mesa → bloqueo 10 min (`JOIN_CODE_RATE_LIMITED`) | A |
 | RN-ACC-08 | Token de invitado: 256 bits, se guarda **hasheado**, atado a (sesión, participante); vence a las 24 h del cierre (lectura); revocable | D/DB |
 | RN-ACC-09 | Máximo de participantes por sesión (`SESSION_FULL`) | A |
-| RN-ACC-10 | El `HOST` (quien abrió) y el personal pueden revocar participantes y rotar el código. **El host no puede revocarse a sí mismo** (`HOST_CANNOT_BE_REVOKED`) | A |
+| RN-ACC-10 | El `HOST` (si existe) y el personal pueden revocar participantes y rotar el código. **El host no puede revocarse a sí mismo** (`HOST_CANNOT_BE_REVOKED`). Mientras una sesión no tiene HOST (RN-ACC-14), esas acciones las conserva el personal | A |
 | RN-ACC-11 | Un participante revocado pierde acceso inmediato; sus pedidos ya enviados **se conservan** | A |
 | RN-ACC-12 | `displayName` del invitado: 1–30 caracteres, sin HTML; se muestra en "pedido de X" | A |
 | RN-ACC-13 | Si dos personas escanean a la vez una mesa libre, **una** abre la sesión y la otra recibe `SESSION_ALREADY_OPEN` y el flujo de unirse | DB |
+| RN-ACC-14 | Una sesión abierta **por el personal** (CU-30, D-114) nace **sin HOST**. El primer participante que se une pasa a ser `HOST`; los siguientes son `MEMBER` (D-143). En una sesión abierta por QR, quien la abre es el `HOST` | A |
+| RN-ACC-15 | A lo sumo **un** `HOST` por sesión, garantizado por un índice único parcial (`WHERE role = 'HOST'`). Si dos personas se unen a la vez a una sesión sin HOST, gana una; la otra queda como `MEMBER` **en la misma transacción**, sin error (se intenta insertar y se maneja el conflicto; no se consulta primero para insertar después) | DB |
 
 ## RN-SES — Sesiones y mesas
 
@@ -32,7 +34,7 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 | RN-SES-03 | La sesión agrupa pedidos, pagos y participantes; una visita nueva no hereda nada | D |
 | RN-SES-04 | Motivos de cierre: `SETTLED`, `EMPTY`, `EXPIRED_EMPTY`, `FORCED` | D |
 | RN-SES-05 | Cierre normal exige: sin pedidos `PENDING_REVIEW`, sin ítems `QUEUED/IN_PREPARATION/READY`, `balance == 0` | A (bajo `FOR UPDATE`) |
-| RN-SES-06 | Cierre forzado: solo `session.force_close`, motivo obligatorio, cancela pendientes y ítems activos, queda auditado y marcado en el comprobante | A |
+| RN-SES-06 | Cierre forzado: solo `session.force_close`, motivo obligatorio, cancela pendientes y ítems activos, queda auditado y marcado en el comprobante. **Pagos y propinas:** los pagos `SUCCEEDED` y sus propinas **se conservan** (no se anulan solos). Si queda saldo > 0, se registra como **no cobrado** en la auditoría y en el comprobante. 🟡 Si tras cancelar queda saldo < 0, debe resolverse con reembolso (RN-BIL-07); la mecánica exacta está pendiente (H-14) | A |
 | RN-SES-07 | Sesión `CLOSED`: no admite pedidos, pagos ni participantes. Solo lectura con token 24 h | D/A |
 | RN-SES-08 | Expira sola si no hay pedidos facturables ni pendientes y pasaron `sessionIdleTtlMin` sin **actividad** (crear pedido, unirse, acción del personal). Consultar/poll **no** cuenta como actividad | A (job) |
 | RN-SES-09 | Mesa y sesión se identifican con IDs distintos en toda API | D |
@@ -43,9 +45,9 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 | ID | Regla | Dónde |
 |---|---|---|
 | RN-ORD-01 | Un pedido pertenece a una sesión `OPEN`; lo crea un participante de ella o el personal | A |
-| RN-ORD-02 | Validaciones: ≥ 1 línea; ≤ `maxLinesPerOrder`; cantidad 1..`maxQtyPerLine`; producto existe, `active` y `available`; nota ≤ `maxNoteLength` | A |
-| RN-ORD-03 | **El servidor calcula todos los precios.** El cliente envía `acknowledgedTotalMinor`; si no coincide con el cálculo → `409 PRICE_CHANGED` con precios vigentes; no se crea nada | A |
-| RN-ORD-04 | **Snapshot** por ítem: `productName`, `unitPriceMinor`, `stationId` (y `optionsSnapshot`) se copian al crear. Cambios de catálogo posteriores no afectan | D |
+| RN-ORD-02 | Validaciones: ≥ 1 línea; ≤ `maxLinesPerOrder`; cantidad 1..`maxQtyPerLine`; producto existe, `active` y `available`; nota ≤ `maxNoteLength`; **opciones** válidas según RN-OPT-03 (grupo asignado al producto, activas, disponibles, reglas del grupo) y como máximo 10 por línea (RN-OPT-06) | A |
+| RN-ORD-03 | **El servidor calcula todos los precios**, incluido el de las opciones (`unitPriceMinor = precio base + Σ deltas`, RN-OPT-04). El cliente envía `acknowledgedTotalMinor`; si no coincide con el cálculo → `409 PRICE_CHANGED` con precios vigentes (un cambio en una opción o en su precio también lo dispara, RN-OPT-07); no se crea nada | A |
+| RN-ORD-04 | **Snapshot** por ítem: `productName` (y `productNameI18n`, RN-I18N-05), `stationId`, `basePriceMinor`, `optionsDeltaMinor`, `unitPriceMinor` y `optionsSnapshot` (RN-OPT-04) se copian al crear. Cambios de catálogo posteriores (producto, precio u opciones) no afectan | D |
 | RN-ORD-05 | Se crea en `PENDING_REVIEW`; sus ítems en `PENDING` | D |
 | RN-ORD-06 | Máx. `maxPendingOrdersPerSession` pedidos `PENDING_REVIEW` por sesión (`ORDER_PENDING_LIMIT_REACHED`) | A |
 | RN-ORD-07 | Fuera de horario de atención, un cliente no puede crear pedidos (`RESTAURANT_CLOSED`). El personal sí puede (con aviso) | A |
@@ -84,13 +86,13 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 |---|---|---|
 | RN-BIL-01 | `charges = Σ lineTotalMinor` de ítems no cancelados de pedidos `ACCEPTED…DELIVERED` (`lineTotalMinor = unitPriceMinor × quantity`, y `unitPriceMinor` ya incluye opciones, RN-OPT-04). Usa **precios históricos**, nunca el catálogo actual | D |
 | RN-BIL-02 | `balance = charges − adjustments − paid` (v0.2) calculado **dentro de la transacción** con la sesión bloqueada. La propina **no** entra en esta fórmula (RN-TIP-02) | A/DB |
-| RN-BIL-03 | Pago: entero `minPaymentMinor ≤ amount ≤ balance`; si `balance ≤ 0` → `PAYMENT_NOTHING_TO_PAY`; si excede → `PAYMENT_EXCEEDS_BALANCE` (devuelve saldo actual) | A |
+| RN-BIL-03 | Pago con monto principal (**`amountMinor > 0`**): entero `minPaymentMinor ≤ amount ≤ balance`; si `balance ≤ 0` → `PAYMENT_NOTHING_TO_PAY`; si excede → `PAYMENT_EXCEEDS_BALANCE` (devuelve saldo actual). **Con `amountMinor = 0` (pago solo propina) esta regla no aplica**: rige RN-TIP-01/RN-TIP-04 y no se rechaza por saldo 0 (D-146) | A |
 | RN-BIL-04 | Pago idempotente por `Idempotency-Key`; un doble toque **no** cuenta dos veces. Dos pagos **intencionales** distintos del mismo monto son válidos si el saldo alcanza | A/DB |
-| RN-BIL-05 | `SimulatedPaymentProvider` aprueba siempre, salvo en modo demo donde un importe terminado en `.13` simula rechazo (`PAYMENT_DECLINED`, queda registro `FAILED` y no altera saldo) (🟡 D-125). Efectivo (`CASH_COUNTER`) lo registra el personal | A |
-| RN-BIL-06 | Anular un pago: solo `SUCCEEDED`, sesión `OPEN`, motivo obligatorio; el saldo se recalcula | A |
-| RN-BIL-07 | Reembolso: `payment.refund`, sesión `OPEN`, monto ≤ pagado neto, motivo obligatorio. Se usa cuando `balance < 0` | A |
+| RN-BIL-05 | `SimulatedPaymentProvider` aprueba siempre, salvo en modo demo donde un **monto principal** (`amountMinor`) con centavos terminados en `13` simula rechazo (`PAYMENT_DECLINED`, queda registro `FAILED` y no altera saldo); la propina no se evalúa y un pago solo propina nunca se rechaza por esta regla (D-125). Efectivo (`CASH_COUNTER`) lo registra el personal | A |
+| RN-BIL-06 | Anular un pago: solo `SUCCEEDED`, sesión `OPEN`, motivo obligatorio; el saldo se recalcula y **su propina también se anula** (RN-TIP-05) | A |
+| RN-BIL-07 | Reembolso: `payment.refund`, sesión `OPEN`, monto ≤ pagado neto, motivo obligatorio. Se usa cuando `balance < 0`. **No devuelve propina** (RN-TIP-05) | A |
 | RN-BIL-08 | Sesión `CLOSED` no admite pagos | A |
-| RN-BIL-09 | Comprobante PDF **no fiscal**: solo para sesiones `CLOSED`; incluye negocio, fecha/hora, id de visita, mesa, ítems con precios históricos, totales, pagos, y marca "cierre forzado" si aplica | A |
+| RN-BIL-09 | Comprobante PDF **no fiscal**: solo para sesiones `CLOSED`; incluye negocio, fecha/hora, id de visita, mesa, ítems con precios históricos (y sus opciones), ajustes con su etiqueta pública (RN-ADJ-10), totales, pagos, **propina en línea aparte** (RN-TIP-07), y marca "cierre forzado" (con saldo no cobrado, si lo hubo) si aplica | A |
 | RN-BIL-10 | Dividir la cuenta es una **ayuda de UI** (sugerir partes iguales; el resto al primero). El servidor no guarda asignaciones por persona | UI |
 | RN-BIL-11 | Un pago registra `payerParticipantId` (si lo hizo un participante) o `payerLabel` libre (efectivo) | D |
 | RN-BIL-12 | Nunca se solicita ni almacena número de tarjeta, CVV ni vencimiento | A |
@@ -106,7 +108,7 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 | RN-CAT-05 | Cualquier cambio de catálogo incrementa `catalogVersion` (ETag del menú) | A |
 | RN-CAT-06 | Una categoría con productos activos no se archiva (`CATEGORY_NOT_EMPTY`) | A |
 | RN-CAT-07 | Imagen: ≤ 1 MB procesada, formatos webp/jpg/png; **texto alternativo obligatorio** | A |
-| RN-CAT-08 | Alérgenos: de una lista controlada (Q-09) | A |
+| RN-CAT-08 | Alérgenos: de una lista controlada de 14 (D-137); verificarla contra el Código Alimentario Argentino antes de publicar | A |
 
 ## RN-IDN — Identidad
 
@@ -176,12 +178,12 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 |---|---|---|
 | RN-TIP-01 | La propina es **libre y voluntaria**: `tipMinor ≥ 0` adjunta a un pago, o un pago **solo propina** (`amountMinor = 0`, `tipMinor > 0`) | A |
 | RN-TIP-02 | La propina **no reduce el saldo** ni es un cargo; se registra aparte | D |
-| RN-TIP-03 | Tope de cordura: `tipMinor ≤ maxTipPercent × charges` (por defecto 100 %) → `TIP_EXCEEDS_LIMIT`. Sin cargos no se acepta propina (`TIP_NOT_ALLOWED`) | A |
-| RN-TIP-04 | Si `amountMinor > 0` aplican las reglas RN-BIL-03; si es 0, `tipMinor > 0` es obligatorio | A |
+| RN-TIP-03 | Tope de cordura: `tipMinor ≤ maxTipPercent × charges` (por defecto 100 %; `charges` = **cargos brutos**, sin descontar ajustes) → `TIP_EXCEEDS_LIMIT`. Sin cargos no se acepta propina (`TIP_NOT_ALLOWED`) | A |
+| RN-TIP-04 | Si `amountMinor > 0` aplican las reglas de RN-BIL-03 (el mínimo `minPaymentMinor` es del monto principal, no de la propina); si es 0, `tipMinor > 0` es obligatorio y **no** se rechaza por saldo 0 (D-146) | A |
 | RN-TIP-05 | Anular un pago anula también su propina. Los reembolsos **no** devuelven propina | A |
 | RN-TIP-06 | Sesión cerrada no admite propina | A |
 | RN-TIP-07 | El comprobante muestra la propina **separada** de la cuenta | A |
-| RN-TIP-08 | Reportes: propinas se informan aparte de las ventas. Sin atribución a empleado (🟡 Q-18) | A |
+| RN-TIP-08 | Reportes: propinas se informan aparte de las ventas. Sin atribución a empleado en el MVP (D-153); la UI ofrece montos rápidos como ayuda, el servidor solo recibe `tipMinor` | A |
 | RN-TIP-09 | Mismas garantías de idempotencia y bloqueo que cualquier pago; si el monto principal falla, **la propina tampoco** se registra (operación atómica) | A/DB |
 
 ## RN-ADJ — Descuentos, cortesías y ajustes
@@ -193,7 +195,7 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 | RN-ADJ-03 | El importe se **calcula y congela al aplicar** (un porcentaje se calcula sobre `charges − adjustments` vigentes en ese instante y se **redondea al centavo más cercano**, la mitad hacia arriba). Pedidos posteriores **no** heredan el descuento | D |
 | RN-ADJ-04 | `COURTESY_ITEM` apunta a un ítem no cancelado y sin cortesía previa; importe = `lineTotalMinor` | A |
 | RN-ADJ-05 | Un ajuste no puede dejar el saldo negativo: `adjustment ≤ balance` (`ADJUSTMENT_EXCEEDS_BALANCE`). Compensar a quien ya pagó se hace con **reembolso** | A |
-| RN-ADJ-06 | `adjustment.apply` está limitado por `maxStaffDiscountPercent` (**15 %** de los cargos, D-confirmada) y `maxStaffAdjustmentMinor`; superar el límite exige `adjustment.apply_any` (`ADJUSTMENT_LIMIT_EXCEEDED`) | A |
+| RN-ADJ-06 | `adjustment.apply` está limitado por `maxStaffDiscountPercent` (**15 %**, D-142). Es un límite **acumulado**: la suma de los ajustes vigentes (no anulados) que ese Mozo aplicó sin `adjustment.apply_any` no puede superar ese porcentaje de los **cargos brutos** (`charges`) de la sesión. `maxStaffAdjustmentMinor` es un tope absoluto **opcional** (sin tope por defecto). Superar el límite exige `adjustment.apply_any` (`ADJUSTMENT_LIMIT_EXCEEDED`); el Dueño no tiene límite | A |
 | RN-ADJ-07 | Se puede **anular** (`VOIDED`) con motivo mientras la sesión esté `OPEN`; el Mozo solo los suyos y dentro de 10 min, el Dueño cualquiera | A |
 | RN-ADJ-08 | Cancelar un ítem con cortesía **anula esa cortesía en la misma transacción** | A |
 | RN-ADJ-09 | Aplicar/anular toman lock `FOR UPDATE` de la sesión, son idempotentes y quedan auditados | A/DB |
@@ -230,7 +232,7 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 |---|---|
 | RN-IMG-01 | Puerto `ImageStorage`; adaptador de **carpeta** (`media/`, servida por el backend en dev) |
 | RN-IMG-02 | El producto guarda `imagePath` relativo + `imageVersion`; el cliente arma la URL con `MEDIA_BASE_URL` |
-| RN-IMG-03 | En la demo las imágenes se **versionan en el repo** y se sirven como estáticos del front. Subir desde el admin puede no persistir en hosting efímero (limitación documentada, Q-20) |
+| RN-IMG-03 | En la demo las imágenes se **versionan en el repo** y se sirven como estáticos del front. Subir desde el admin puede no persistir en hosting efímero (limitación documentada, D-155). Subir imágenes desde el admin solo se habilita en local (`MEDIA_UPLOAD_ENABLED=true`) |
 | RN-IMG-04 | Se mantienen RN-CAT-07 (≤ 1 MB, formatos, **alt obligatorio**) |
 | RN-IMG-05 | Imagen faltante → placeholder de marca |
 
@@ -238,5 +240,13 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 
 | ID | Regla |
 |---|---|
-| RN-TEN-01 | Toda consulta y escritura se filtra por el `restaurantId` del actor; un recurso de otro restaurante responde `404` |
+| RN-TEN-01 | Toda consulta y escritura se filtra por el `restaurantId` del actor (para un actor anónimo, el que fija RN-TEN-03); un recurso de otro restaurante responde `404` |
 | RN-TEN-02 | Las pruebas de integración siembran **dos restaurantes** y verifican que nunca se cruzan datos |
+| RN-TEN-03 | **Cómo se resuelve el restaurante en endpoints públicos** (D-144): (a) los endpoints con `tableCode` toman el restaurante **de la mesa**, nunca de un parámetro; (b) `GET /menu` con token usa el restaurante del token (si `restaurantId` difiere → `404`); sin token usa `restaurantId` y, si falta, el predeterminado del despliegue (`DEFAULT_RESTAURANT_ID`); un id desconocido → `404`; (c) el cliente nunca elige libremente de qué restaurante es un dato |
+
+---
+## Historial de cambios de este documento
+
+| Fecha | Paso | Cambio | Decisión / hallazgo |
+|---|---|---|---|
+| 2026-10-11 | Paso 2 | RN-BIL-03 solo con `amountMinor > 0`; nuevas RN-ACC-14/15 (HOST en sesión abierta por el personal) y RN-TEN-03; RN-SES-06, RN-ORD-02/03/04, RN-BIL-05/06/07/09, RN-TIP-03/04/08, RN-ADJ-06, RN-CAT-08 e RN-IMG-03 alineadas; valores por defecto v0.2 agregados | D-142, D-143, D-144, D-146, D-137, D-153, D-155 · H-02, H-03, H-04, H-06 |

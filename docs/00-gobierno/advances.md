@@ -132,6 +132,8 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | H-10 | Archivos duplicados en la raíz | 7 |
 | H-11 | Q-16…Q-20 siguen abiertas en `decisiones.md` | 1 (✅ resuelto) |
 | H-12 | `AGENTS.md` §1 punto 3 dice que `openapi.yaml` "cuando exista, Fase 1" y que antes rige `endpoints.md`, pero el contrato ya existe (0.2.1). El encabezado del `README.md` solo cita D-101…D-128 y Q-01…Q-14 | 8 |
+| H-13 | **Regla del pago mínimo con saldo chico.** RN-BIL-03 exige `amount ≥ minPaymentMinor` (100 centavos por defecto) y `amount ≤ balance`. Si el saldo es menor al mínimo (ej. quedan 50 centavos) ninguna cantidad cumple las dos condiciones y la cuenta no se puede saldar por esta vía. Propuesta: `amount ≥ min(minPaymentMinor, balance)`. Falta confirmar con el contrato y decidir | 3 (decisión) y 4 |
+| H-14 | **Cierre forzado con saldo negativo** (RN-SES-06): si al cancelar ítems activos los pagos ya hechos superan los cargos, no está definido si se reembolsa antes, durante o después del cierre, ni qué código de error aplica | 3 |
 
 ---
 ## 4. Plan paso a paso
@@ -142,7 +144,7 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 |---|---|---|---|---|---|
 | 0 | ✅ | Crear este archivo (estado, decisiones, plan) | `docs/00-gobierno/advances.md` | El archivo existe y el dueño lo aprobó | `docs(governance): add advances log` |
 | 1 | ✅ | Registrar D-142…D-157; cerrar Q-15…Q-20; dejar Q-21; enlazar `advances.md` desde `AGENTS.md` y `README.md` | `docs/00-gobierno/decisiones.md`, `AGENTS.md`, `README.md` | Cada decisión tiene ID, estado y motivo; no quedan preguntas contradictorias | `docs(governance): record decisions D-142..D-157` |
-| 2 | ⬜ | Corregir reglas de negocio (H-02, H-03, H-04, H-06) y agregar la regla de HOST y RN-TEN-03 | `docs/02-dominio/reglas-negocio.md` | Ninguna regla contradice a otra ni al contrato | `docs(domain): align business rules with contract` |
+| 2 | ✅ | Corregir reglas de negocio (H-02, H-03, H-04, H-06) y agregar la regla de HOST y RN-TEN-03 | `docs/02-dominio/reglas-negocio.md` (+ `docs/00-gobierno/advances.md` para anotar) | Ninguna regla contradice a otra ni al contrato | `docs(domain): align business rules with contract` |
 | 3 | ⬜ | Propagar a documentos que dependen de esas reglas (H-01, H-03): estados §1, casos de uso (CU-02/03/30), modelo de datos, roles (15 %), casos límite nuevos, errores, criterios de aceptación | `estados-y-transiciones.md`, `casos-de-uso.md`, `modelo-datos.md`, `actores-y-roles.md`, `casos-limite.md`, `catalogo-errores.md`, `criterios-aceptacion.md` | Cada regla modificada se refleja en todos los documentos que la mencionan | `docs(domain): propagate rule changes` |
 | 4 | ⬜ | Contrato **0.2.2**: ejemplo 15 %, quitar "proposed", `PublicTable.restaurantId`, `TIP_NOT_ALLOWED` en 409, `x-permission` del recibo, regla del HOST en `join`, etiqueta del pedido a nombre de la mesa. Reordenar `CHANGELOG.md` (H-05, H-07, H-08) | `docs/04-api/openapi.yaml`, `docs/04-api/CHANGELOG.md` | `info.version` = última entrada del changelog; todos los cambios son **compatibles** | `docs(api): contract 0.2.2` |
 | 5 | ⬜ | Redocly: corregir `redocly.yaml` (H-09) y reemplazar Spectral en los documentos (D-148). **El dueño corre** `npx @redocly/cli lint docs/04-api/openapi.yaml` y pega el resultado | `redocly.yaml`, ADR-0008, `estrategia.md`, `nube.md`, `convenciones.md`, `devops.md` | El lint corre sin errores de configuración | `chore(api): standardize on redocly` |
@@ -185,6 +187,21 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Qué NO se hizo (a propósito):** no se tocaron `reglas-negocio.md` ni `openapi.yaml`, ni los textos de H-01 (15 % vs 10 %), que siguen vigentes hasta los pasos 2–4. D-134 todavía nombra `ic_icon.png` (Paso 9). La copia duplicada de `decisiones.md` en la raíz **no** se actualizó: ya diverge de la oficial, y eso es justo lo que el Paso 7 va a resolver.
 - **Qué estudiar:** *ADR / registro de decisiones* (qué distingue "decidido" de "registrado"); *trazabilidad* (cada pregunta cerrada apunta a su decisión y cada decisión a su origen); por qué las referencias a algo ya cerrado ("ver Q-15") quedan como *enlaces rotos* conceptuales.
 - **Archivos tocados:** `docs/00-gobierno/decisiones.md`, `AGENTS.md`, `README.md`, `docs/00-gobierno/advances.md`.
+
+### 2026-10-11 — Paso 2 ✅ — Se alinean las reglas de negocio con las decisiones y el contrato
+- **Qué** (todo en `docs/02-dominio/reglas-negocio.md`):
+  - **H-02 / D-146:** RN-BIL-03 aplica solo con `amountMinor > 0`; el pago solo propina ya no choca con RN-TIP-01. RN-TIP-04 lo refuerza.
+  - **H-03 / D-143:** RN-ACC-10 ajustada ("HOST si existe") y nuevas **RN-ACC-14** (sesión abierta por el personal nace sin HOST; el primero en unirse lo es) y **RN-ACC-15** (un solo HOST garantizado por la base; si dos entran a la vez, el segundo queda como MEMBER sin error).
+  - **H-04 / D-144:** nueva **RN-TEN-03** (cómo se resuelve el restaurante en endpoints públicos) y RN-TEN-01 la referencia.
+  - **H-06:** RN-CAT-08 cita D-137 en vez de Q-09; RN-ORD-02/03/04 mencionan opciones y el snapshot completo; RN-SES-06 dice qué pasa con pagos y propinas; RN-BIL-05 aclara que el `.13` se evalúa sobre el monto principal; RN-BIL-06/07/09 mencionan propina y ajustes; RN-TIP-03 aclara "cargos brutos"; el encabezado de valores por defecto incluye los parámetros de v0.2.
+  - **D-142:** RN-ADJ-06 pasa a límite **acumulado** del 15 % sobre cargos brutos, con tope absoluto opcional y sin límite para el Dueño.
+  - Se quitaron marcas 🟡 y referencias a preguntas ya cerradas (D-106, D-125, Q-18 → D-153, Q-20 → D-155).
+  - Se agregó al final del documento una tabla **Historial de cambios**.
+- **Por qué:** las reglas son el segundo escalón de la jerarquía de la verdad (`AGENTS.md` §1). Si dos reglas se contradicen, un agente implementa una y rompe la otra. Según `decisiones.md` §6, un cambio se hace **primero en las reglas**, después en los documentos derivados y por último en el contrato.
+- **Hallazgos nuevos (no se resolvieron en silencio):** **H-13** (pago mínimo mayor que un saldo chico) y **H-14** (cierre forzado con saldo negativo). Ambos son huecos que ya existían; los descubrí al redactar RN-BIL-03 y RN-SES-06.
+- **Qué NO se hizo:** no se tocaron estados, casos de uso, modelo de datos ni contrato (pasos 3 y 4). RN-SES-06 quedó con una parte 🟡 a propósito: la mecánica del saldo negativo falta decidirla.
+- **Qué estudiar:** *regla general vs. regla específica* (RN-BIL-03 era general y RN-TIP-01 específica: la general debe nombrar sus excepciones); *invariantes* ("un solo HOST" es una invariante: se protege en la base, no solo en el código); *casos borde en límites numéricos* (H-13 es un caso clásico: un mínimo que choca con un máximo); *saldo acumulado vs. por operación* (D-142).
+- **Archivos tocados:** `docs/02-dominio/reglas-negocio.md`, `docs/00-gobierno/advances.md`.
 
 ### Historial previo (resumen, para contexto)
 - **v0.1:** plan maestro convertido en 52 documentos (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes).
