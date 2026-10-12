@@ -17,9 +17,9 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Documentación v0.2 (opciones de producto, propina, ajustes, i18n, llamados al mozo, imágenes en carpeta, multi-sucursal simulada) | ✅ | secciones "v0.2" dentro de cada doc |
 | Decisiones D-101…D-141 y preguntas Q-01…Q-14 resueltas | ✅ | `docs/00-gobierno/decisiones.md` |
 | ADRs 0001–0009 (propuestas) | ✅ | `docs/00-gobierno/adr/` |
-| Contrato `openapi.yaml` **0.2.1** (WP-ARQ-10) | ✅ (sin validar con lint) | `docs/04-api/openapi.yaml` |
+| Contrato `openapi.yaml` **0.2.2** (WP-ARQ-10) | ✅ (sin validar con lint) | `docs/04-api/openapi.yaml` |
 | Config de lint `redocly.yaml` | ✅ (con una posible clave mal escrita, ver H-09) | raíz |
-| `CHANGELOG.md` del contrato hasta 0.2.1 | ✅ | `docs/04-api/CHANGELOG.md` |
+| `CHANGELOG.md` del contrato hasta 0.2.2 | ✅ | `docs/04-api/CHANGELOG.md` |
 | Estructura de carpetas y `AGENTS.md` por carpeta | ✅ | `backend/`, `web/`, `android/` |
 | Archivos de marca: `ic_icon.svg` (1,54 MB) y `boceto_v.1.0.png` (1,75 MB) | ✅ existen; **sin revisar** (superan el límite de lectura de 1 MB del agente) | `design/img/` |
 
@@ -132,21 +132,25 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 
 | ID | Hallazgo | Paso |
 |---|---|---|
-| H-01 | 15 % vs 10 % (reglas y contrato dicen 15 %; el ejemplo de error del contrato dice 10; Q-17 sigue abierta en decisiones) | 1 ✅, 3 ✅; **queda el ejemplo del contrato (Paso 4)** |
+| H-01 | 15 % vs 10 % (reglas y contrato dicen 15 %; el ejemplo de error del contrato dice 10; Q-17 sigue abierta en decisiones) | 1 ✅, 3 ✅, 4 ✅ |
 | H-02 | RN-BIL-03 contradice el pago solo propina | 2 |
 | H-03 | Regla de HOST en sesión abierta por el personal no está documentada (choca con RN-ACC-10, estados §1, modelo de datos, CU-30) | 2 ✅, 3 ✅ |
-| H-04 | Resolución del restaurante en `GET /menu` no está en RN-TEN | 2, 4 |
-| H-05 | Campos marcados `proposed` en el contrato | 4 |
+| H-04 | Resolución del restaurante en `GET /menu` no está en RN-TEN | 2 ✅, 4 ✅ |
+| H-05 | Campos marcados `proposed` en el contrato | 4 ✅ |
 | H-06 | RN-CAT-08 cita Q-09; RN-ORD-02/03/04 sin opciones; RN-SES-06 sin pagos/propinas; RN-BIL-06/07/09 sin propina; RN-TIP-03 sin "bruto"; RN-BIL-05 sin aclarar `.13` sobre el monto principal; encabezado de valores por defecto sin los parámetros v0.2 | 2 |
-| H-07 | `CHANGELOG.md` en orden inverso al estándar, sin fechas, con una nota obsoleta | 4 |
-| H-08 | `TIP_NOT_ALLOWED` y `getReceipt` (sin `x-permission`) en el contrato; etiqueta del pedido a nombre de la mesa | 4 |
+| H-07 | `CHANGELOG.md` en orden inverso al estándar, sin fechas, con una nota obsoleta | 4 ✅ |
+| H-08 | `TIP_NOT_ALLOWED` y `getReceipt` (sin `x-permission`) en el contrato; etiqueta del pedido a nombre de la mesa | 4 ✅ (ver H-16) |
 | H-09 | `redocly.yaml`: la clave `no-server-example-com` posiblemente es `no-server-example.com` | 5 |
 | H-10 | Archivos duplicados en la raíz | 7 |
 | H-11 | Q-16…Q-20 siguen abiertas en `decisiones.md` | 1 (✅ resuelto) |
 | H-12 | `AGENTS.md` §1 punto 3 dice que `openapi.yaml` "cuando exista, Fase 1" y que antes rige `endpoints.md`, pero el contrato ya existe (0.2.1). El encabezado del `README.md` solo cita D-101…D-128 y Q-01…Q-14 | 8 |
-| H-13 | **Regla del pago mínimo con saldo chico.** RN-BIL-03 exigía `amount ≥ minPaymentMinor` y `amount ≤ balance`; con saldo menor al mínimo ninguna cantidad servía. **Resuelto con D-158** | 3 ✅ (contrato: Paso 4) |
-| H-14 | **Cierre forzado con saldo negativo** (RN-SES-06): no estaba definido qué pasaba. **Resuelto con D-159** (reembolso simulado automático) | 3 ✅ (contrato: Paso 4) |
+| H-13 | **Regla del pago mínimo con saldo chico.** RN-BIL-03 exigía `amount ≥ minPaymentMinor` y `amount ≤ balance`; con saldo menor al mínimo ninguna cantidad servía. **Resuelto con D-158** | 3 ✅, 4 ✅ |
+| H-14 | **Cierre forzado con saldo negativo** (RN-SES-06): no estaba definido qué pasaba. **Resuelto con D-159** (reembolso simulado automático) | 3 ✅, 4 ✅ |
 | H-15 | **Documentos que no revisé en el Paso 3** y pueden seguir mencionando el 10 %, el mínimo fijo de 100 o un HOST siempre presente: `04-api/endpoints.md`, `05-diseno/mapa-pantallas.md`, `08-agentes/*`, ADRs y `01-producto/alcance.md`. Mi herramienta busca nombres de archivo, no contenido, así que no pude comprobarlo. **El dueño puede verificarlo con** `git grep -n -E "10 ?%|Q-15|Q-17|Q-18|Q-20|HOST" -- docs` | 8 |
+| H-16 | **`Order.createdBy` en un pedido tomado por el personal** (`createOrderOnBehalf`, CU-31). El contrato solo dice que `createdBy` "se omite para Cocina"; no dice qué lleva (o si se omite) cuando no hay participante. Encontrado al revisar H-08 | A decidir (dueño) |
+| H-17 | **Operaciones del invitado sin `x-permission`:** `getCurrentSession`, `listParticipants` y `listSessionWaiterCalls` (verificado leyendo el YAML). `info.description` dice que cada operación lo indica | A decidir (dueño) |
+| H-18 | **Reembolso automático del cierre forzado (D-159):** `Payment` no tiene un campo que lo distinga (la marca "automático por cierre forzado" vive solo en la auditoría). El contrato documenta que queda como `REFUND` | A decidir antes de la Fase 7 |
+| H-19 | **`limitMinor` de `ADJUSTMENT_LIMIT_EXCEEDED`:** `catalogo-errores.md` lo lista como extra pero no define qué representa. En el ejemplo se asumió "15 % de los cargos brutos" (ver Paso 4) | A decidir (dueño) |
 
 ---
 ## 4. Plan paso a paso
@@ -159,7 +163,7 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | 1 | ✅ | Registrar D-142…D-157; cerrar Q-15…Q-20; dejar Q-21; enlazar `advances.md` desde `AGENTS.md` y `README.md` | `docs/00-gobierno/decisiones.md`, `AGENTS.md`, `README.md` | Cada decisión tiene ID, estado y motivo; no quedan preguntas contradictorias | `docs(governance): record decisions D-142..D-157` |
 | 2 | ✅ | Corregir reglas de negocio (H-02, H-03, H-04, H-06) y agregar la regla de HOST y RN-TEN-03 | `docs/02-dominio/reglas-negocio.md` (+ `docs/00-gobierno/advances.md` para anotar) | Ninguna regla contradice a otra ni al contrato | `docs(domain): align business rules with contract` |
 | 3 | ✅ | Propagar a documentos que dependen de esas reglas (H-01, H-03): estados §1, casos de uso (CU-02/03/30), modelo de datos, roles (15 %), casos límite nuevos, errores, criterios de aceptación | `estados-y-transiciones.md`, `casos-de-uso.md`, `modelo-datos.md`, `actores-y-roles.md`, `casos-limite.md`, `catalogo-errores.md`, `criterios-aceptacion.md`; además `decisiones.md` y `reglas-negocio.md` (D-158 y D-159, que cierran H-13 y H-14) | Cada regla modificada se refleja en todos los documentos que la mencionan | `docs(domain): propagate rule changes` |
-| 4 | ⬜ | Contrato **0.2.2**: ejemplo 15 %, quitar "proposed", `PublicTable.restaurantId`, `TIP_NOT_ALLOWED` en 409, `x-permission` del recibo, regla del HOST en `join`, etiqueta del pedido a nombre de la mesa; **y reflejar D-158** (`minMinor` del pago calculado con el saldo) **y D-159** (efectos del `force-close`). Reordenar `CHANGELOG.md` (H-05, H-07, H-08) | `docs/04-api/openapi.yaml`, `docs/04-api/CHANGELOG.md` | `info.version` = última entrada del changelog; todos los cambios son **compatibles** | `docs(api): contract 0.2.2` |
+| 4 | ✅ | Contrato **0.2.2**: ejemplo 15 %, quitar "proposed", `PublicTable.restaurantId`, `TIP_NOT_ALLOWED` en 409, `x-permission` del recibo, regla del HOST en `join`, etiqueta del pedido a nombre de la mesa; **y reflejar D-158** (`minMinor` del pago calculado con el saldo) **y D-159** (efectos del `force-close`). Reordenar `CHANGELOG.md` (H-05, H-07, H-08) | `docs/04-api/openapi.yaml`, `docs/04-api/CHANGELOG.md` | `info.version` = última entrada del changelog; todos los cambios son **compatibles** | `docs(api): contract 0.2.2` |
 | 5 | ⬜ | Redocly: corregir `redocly.yaml` (H-09) y reemplazar Spectral en los documentos (D-148). **El dueño corre** `npx @redocly/cli lint docs/04-api/openapi.yaml` y pega el resultado | `redocly.yaml`, ADR-0008, `estrategia.md`, `nube.md`, `convenciones.md`, `devops.md` | El lint corre sin errores de configuración | `chore(api): standardize on redocly` |
 | 6 | ⬜ | Catálogo de acciones de auditoría (D-151) | `docs/02-dominio/catalogo-auditoria.md` | Cada acción citada en reglas/estados tiene su código | `docs(domain): add audit action catalog` |
 | 7 | ⬜ | Comparar duplicados de la raíz con los de `docs/` y reportar diferencias; el dueño borra (H-10) | raíz | Un solo archivo oficial por documento | `chore: remove duplicated docs` |
@@ -231,6 +235,32 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Qué NO se hizo:** no se tocó `openapi.yaml` (Paso 4); se amplió la descripción del Paso 4 para incluir D-158 y D-159. No pude verificar con búsqueda de contenido que no queden menciones viejas en otros documentos (**H-15**).
 - **Qué estudiar:** *trazabilidad regla → caso límite → criterio de aceptación → prueba*; *`INSERT … ON CONFLICT DO NOTHING`* y por qué evita la condición de carrera; *transacción única* (el reembolso automático y el cierre ocurren juntos o no ocurren); *por qué un valor derivado (el saldo no cobrado) no se guarda sino que se calcula*; *pruebas de integración con base real* (AC-CU-03-e).
 - **Archivos tocados:** `decisiones.md`, `reglas-negocio.md`, `estados-y-transiciones.md`, `casos-de-uso.md`, `modelo-datos.md`, `actores-y-roles.md`, `catalogo-errores.md`, `casos-limite.md`, `criterios-aceptacion.md`, `advances.md`.
+
+### 2026-10-11 — Paso 4 ✅ — Contrato 0.2.2 y `CHANGELOG.md`
+- **Qué** (todo compatible; detalle en `docs/04-api/CHANGELOG.md`):
+  - `openapi.yaml` 0.2.1 → **0.2.2** (`info.version` y ejemplo de `GET /version`).
+  - D-142: el ejemplo `ADJUSTMENT_LIMIT_EXCEEDED` pasa a `limitPercent: 15`; `applyAdjustment` aclara que el límite es acumulado sobre cargos brutos.
+  - D-143: `joinSession` documenta la regla del HOST, con un segundo ejemplo (`firstJoinerBecomesHost`); `ParticipantRole` tiene descripción.
+  - D-144: `PublicTable.restaurantId` opcional (y en los 3 ejemplos); la descripción de `GET /menu` y del parámetro `restaurantId` se corrigió para coincidir con RN-TEN-03.
+  - D-145: se quitaron las marcas "Propuesto" de `Participant.revoked` y `Order.rejection`.
+  - D-147: `TIP_NOT_ALLOWED` queda en la **409** de `createPayment` y `registerCashPayment` (con ejemplo); la 422 genérica ya no dice `TIP_*`.
+  - D-158: mínimo `min(minPaymentMinor, saldo)` en `createPayment`, `registerCashPayment` y `CreatePaymentRequest`; `PAYMENT_AMOUNT_INVALID` con `minMinor` ya calculado con el saldo (nuevo ejemplo 422).
+  - D-159: `forceCloseSession` documenta sus efectos (conserva pagos y propinas; reembolso automático si el saldo queda negativo; saldo no cobrado si es positivo).
+  - `getReceipt` con `x-permission: bill.read`.
+  - H-08: `createOrderOnBehalf` dice "en nombre del cliente" (como D-113 y CU-31).
+  - `CHANGELOG.md` reordenado (más reciente arriba), con encabezado de reglas (D-150) y entrada 0.2.2 fechada. Se quitó la nota obsoleta "Próximo paso: openapi.yaml v0.1" de 0.1.0 y la línea "proposed" de 0.2.1 quedó como historia, con la aclaración "aceptados en 0.2.2".
+- **Por qué:** según `decisiones.md` §6 el contrato se toca al final, cuando las reglas y los documentos derivados ya están alineados (pasos 2 y 3). Un contrato que dice otra cosa que las reglas hace que Web y Android implementen mal. Todos los cambios son compatibles: ningún renombre, ningún campo obligatorio nuevo; el único campo nuevo es opcional.
+- **Para confirmar por el dueño (interpretaciones mías):**
+  1. **H-08, "etiqueta del pedido a nombre de la mesa":** lo interpreté como el `summary` de `createOrderOnBehalf` (decía "de la mesa"; D-113, CU-31 y el permiso dicen "del cliente"). Si te referías a otra cosa, avisame.
+  2. **`getReceipt` → `bill.read`:** el catálogo de permisos no tiene uno específico para el comprobante; elegí el existente más cercano (el mismo que `getBill`, `listPayments` y `getOrder`). No se creó ningún permiso.
+  3. **`limitMinor: 750000`** en el ejemplo del límite: subí de 500000 a 750000 para que siga siendo el 15 % de la misma base que antes era el 10 %. Ver H-19.
+  4. **Fechas viejas:** el historial de Git empieza hoy (commit inicial), así que no hay forma de recuperar las fechas de 0.1.0, 0.2.0 y 0.2.1. Quedaron como "fecha no registrada" en vez de inventarlas.
+  5. **`GET /menu`:** la descripción anterior daba prioridad a `restaurantId` sobre el token; RN-TEN-03 dice lo contrario. Se corrigió el contrato (no hay implementación, no rompe a nadie).
+- **Hallazgos nuevos (no se resolvieron en silencio):** **H-16**, **H-17**, **H-18**, **H-19** (ver §3).
+- **Qué NO se hizo:** no se validó el YAML con ningún programa (mis herramientas solo leen y escriben archivos; el lint es el Paso 5 y lo corre el dueño). Revisé a mano que las descripciones nuevas no tengan `: ` en texto sin comillas, que rompe el YAML. No se tocaron `endpoints.md` ni `eventos.md`.
+- **Qué estudiar:** *cambio compatible vs. incompatible* (por qué un campo opcional nuevo no rompe y renombrar sí); *409 vs. 422* (conflicto de estado vs. dato que viola una regla); `x-permission` (es una *extensión* de OpenAPI: el lint no la entiende, es convención nuestra); `example` vs. `examples` (uno vs. varios ejemplos con nombre); *SemVer con `0.x`*; por qué un changelog se escribe de más reciente a más antiguo; las trampas del YAML (`: ` y `#` dentro de texto sin comillas).
+- **Archivos tocados:** `docs/04-api/openapi.yaml`, `docs/04-api/CHANGELOG.md`, `docs/00-gobierno/advances.md`.
+- **Commit sugerido:** `docs(api): contract 0.2.2`
 
 ### Historial previo (resumen, para contexto)
 - **v0.1:** plan maestro convertido en 52 documentos (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes).

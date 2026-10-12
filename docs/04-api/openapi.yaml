@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Somphie Zúrich API
-  version: 0.2.1
+  version: 0.2.2
   summary: Contrato REST del backend de Somphie Zúrich (pedidos por QR, operación del personal, cuenta y pagos simulados).
   description: |
     Fuente de verdad del contrato (ADR-0008). Todo cambio se hace **primero aquí** y en `CHANGELOG.md`.
@@ -77,8 +77,9 @@ paths:
       summary: Menú con categorías, productos y opciones
       description: |
         Devuelve textos ya localizados (`Accept-Language` o `?lang=`; fallback `es-AR`) y el `locale` efectivo.
-        El restaurante se resuelve así: `restaurantId` si se envía; si no, el del token (invitado o personal);
-        si no, el restaurante por defecto del despliegue.
+        El restaurante se resuelve así (RN-TEN-03, D-144): con token (invitado o personal) manda el restaurante del token y, si `restaurantId`
+        viene y es distinto, responde `404`; sin token se usa `restaurantId` y, si falta, el restaurante predeterminado del despliegue;
+        un `restaurantId` desconocido responde `404`. La web obtiene `restaurantId` de `GET /public/tables/{tableCode}`.
         `ETag` débil = `catalogVersion` + idioma; la respuesta lleva `Vary: Accept-Language`.
       security: [{}, {guestToken: []}, {staffJwt: []}]
       x-permission: menu.read
@@ -165,7 +166,8 @@ paths:
       operationId: getPublicTable
       summary: Resolver el QR de una mesa
       description: |
-        Solo expone etiqueta de mesa y si se puede abrir o unirse. Nunca revela pedidos, nombres ni saldo.
+        Solo expone etiqueta de mesa, el restaurante al que pertenece (`restaurantId`, para pedir el menú del local correcto, D-144) y si se puede abrir o unirse.
+        Nunca revela pedidos, nombres ni saldo.
         Errores: `TABLE_CODE_INVALID` (404), `TABLE_UNAVAILABLE` (409).
       parameters:
         - $ref: '#/components/parameters/TableCode'
@@ -177,11 +179,11 @@ paths:
               schema: {$ref: '#/components/schemas/PublicTable'}
               examples:
                 free:
-                  value: {tableLabel: Mesa 7, restaurantOpen: true, hasActiveSession: false, canOpen: true}
+                  value: {tableLabel: Mesa 7, restaurantId: 6f2d8a41-3b9c-4e75-a1d0-5c7e9b3f2a68, restaurantOpen: true, hasActiveSession: false, canOpen: true}
                 occupied:
-                  value: {tableLabel: Mesa 7, restaurantOpen: true, hasActiveSession: true, canOpen: false}
+                  value: {tableLabel: Mesa 7, restaurantId: 6f2d8a41-3b9c-4e75-a1d0-5c7e9b3f2a68, restaurantOpen: true, hasActiveSession: true, canOpen: false}
                 closed:
-                  value: {tableLabel: Mesa 7, restaurantOpen: false, opensAt: '2026-10-12T11:00:00Z', hasActiveSession: false, canOpen: false}
+                  value: {tableLabel: Mesa 7, restaurantId: 6f2d8a41-3b9c-4e75-a1d0-5c7e9b3f2a68, restaurantOpen: false, opensAt: '2026-10-12T11:00:00Z', hasActiveSession: false, canOpen: false}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
@@ -237,7 +239,9 @@ paths:
       summary: Unirse a la sesión abierta con el código
       description: |
         Errores: `JOIN_CODE_REQUIRED`, `JOIN_CODE_INVALID`, `JOIN_CODE_RATE_LIMITED` (5 fallos/10 min por IP+mesa), `SESSION_FULL`, `SESSION_CLOSED`.
-        Si la sesión fue abierta por el personal y todavía no tiene `HOST`, el primero en unirse pasa a ser `HOST`.
+        Rol del participante nuevo (D-143, RN-ACC-14 y RN-ACC-15): normalmente `MEMBER`. Una sesión abierta por el personal (`openSessionAsStaff`) nace **sin `HOST`**
+        y el primero en unirse pasa a serlo; los siguientes son `MEMBER`. La base garantiza un solo `HOST` por sesión: si dos personas se unen a la vez,
+        una queda `HOST` y la otra `MEMBER` **sin error** (no hay un `409` por esto). Los clientes leen `participant.role` de la respuesta y no lo suponen.
       x-permission: session.join
       parameters:
         - $ref: '#/components/parameters/TableCode'
@@ -254,10 +258,19 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SessionAccessResponse'}
-              example:
-                session: {id: 5d3e8f10-2a4b-4c6d-9e8f-0a1b2c3d4e5f, status: OPEN, tableLabel: Mesa 7, openedAt: '2026-10-11T15:00:10Z', readOnly: false}
-                participant: {id: 0d1e2f3a-4b5c-4d6e-8f7a-8b9c0d1e2f3a, displayName: Sofi, role: MEMBER}
-                guestToken: gt_Qp4Zs8Vn1Mt6Xc3LjH9aBw2RuYe5DkF7
+              examples:
+                member:
+                  summary: Se une a una sesión que ya tiene HOST
+                  value:
+                    session: {id: 5d3e8f10-2a4b-4c6d-9e8f-0a1b2c3d4e5f, status: OPEN, tableLabel: Mesa 7, openedAt: '2026-10-11T15:00:10Z', readOnly: false}
+                    participant: {id: 0d1e2f3a-4b5c-4d6e-8f7a-8b9c0d1e2f3a, displayName: Sofi, role: MEMBER}
+                    guestToken: gt_Qp4Zs8Vn1Mt6Xc3LjH9aBw2RuYe5DkF7
+                firstJoinerBecomesHost:
+                  summary: Primer participante de una sesión abierta por el personal (queda HOST)
+                  value:
+                    session: {id: 5d3e8f10-2a4b-4c6d-9e8f-0a1b2c3d4e5f, status: OPEN, tableLabel: Mesa 7, openedAt: '2026-10-11T15:00:10Z', readOnly: false}
+                    participant: {id: 7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f, displayName: Lucía, role: HOST}
+                    guestToken: gt_Hs2Tk7Wm0Pq5Zb8NdC3vXe1RjY6LaF4U
         '400': {$ref: '#/components/responses/BadRequest'}
         '403':
           description: Código ausente o incorrecto
@@ -527,12 +540,14 @@ paths:
       operationId: createPayment
       summary: Pagar (simulado, total o parcial, con propina opcional)
       description: |
-        Con lock exclusivo de la sesión. `amountMinor` entre `minPaymentMinor` y el saldo; `0` solo si hay `tipMinor > 0` (pago solo propina).
+        Con lock exclusivo de la sesión. `amountMinor` entre `min(minPaymentMinor, saldo)` y el saldo: si el saldo es menor al mínimo, se paga exactamente el saldo (D-158).
+        `0` solo si hay `tipMinor > 0` (pago solo propina, que no se rechaza por saldo 0, D-146).
         La propina no reduce el saldo; si el monto principal falla, la propina tampoco se registra.
         En modo demo, un importe terminado en `.13` simula rechazo: `422 PAYMENT_DECLINED` y queda un registro `FAILED` sin cambiar el saldo.
         Nunca se piden ni guardan datos de tarjeta.
-        Errores: `PAYMENT_AMOUNT_INVALID`, `PAYMENT_NOTHING_TO_PAY`, `PAYMENT_EXCEEDS_BALANCE` (409, trae saldo actual), `PAYMENT_DECLINED`,
-        `TIP_INVALID`, `TIP_EXCEEDS_LIMIT`, `TIP_NOT_ALLOWED`, `SESSION_CLOSED`.
+        Errores 409: `PAYMENT_EXCEEDS_BALANCE` (trae `balanceMinor`), `PAYMENT_NOTHING_TO_PAY`, `TIP_NOT_ALLOWED` (no hay cargos en la sesión, D-147), `SESSION_CLOSED`.
+        Errores 422: `PAYMENT_AMOUNT_INVALID` (trae `minMinor`, ya calculado con el saldo: `min(minPaymentMinor, saldo)`, D-158), `PAYMENT_DECLINED`,
+        `TIP_INVALID`, `TIP_EXCEEDS_LIMIT` (trae `maxTipMinor`).
       security: [{guestToken: []}]
       x-permission: payment.create
       parameters:
@@ -557,14 +572,21 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '409':
-          description: Conflicto de saldo o sesión
+          description: Conflicto de saldo, sin cargos para la propina o sesión cerrada
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
               examples:
                 exceedsBalance: {$ref: '#/components/examples/ProblemPaymentExceedsBalance'}
+                tipNotAllowed: {$ref: '#/components/examples/ProblemTipNotAllowed'}
                 sessionClosed: {$ref: '#/components/examples/ProblemSessionClosed'}
-        '422': {$ref: '#/components/responses/Unprocessable'}
+        '422':
+          description: Regla de negocio violada con datos válidos (monto fuera de rango, rechazo simulado, propina inválida o sobre el tope)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              examples:
+                amountInvalid: {$ref: '#/components/examples/ProblemPaymentAmountInvalid'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
         '500': {$ref: '#/components/responses/InternalError'}
     get:
@@ -595,6 +617,7 @@ paths:
       summary: Comprobante PDF no fiscal (sesión cerrada)
       description: "Solo `CLOSED`, con el token en lectura (24 h). Antes del cierre: `RECEIPT_NOT_AVAILABLE` (409)."
       security: [{guestToken: []}]
+      x-permission: bill.read
       responses:
         '200':
           description: PDF
@@ -1153,7 +1176,7 @@ paths:
     post:
       tags: [StaffBilling]
       operationId: createOrderOnBehalf
-      summary: Tomar un pedido en nombre de la mesa (nace ACCEPTED)
+      summary: Tomar un pedido en nombre del cliente (nace ACCEPTED)
       description: |
         El pedido se auto-acepta y queda auditado con el actor. Fuera de horario el personal puede crear pedidos (RN-ORD-07).
         `acknowledgedTotalMinor` es opcional: si se envía y no coincide, `409 PRICE_CHANGED`.
@@ -1187,7 +1210,7 @@ paths:
       tags: [StaffBilling]
       operationId: registerCashPayment
       summary: Registrar un pago en efectivo
-      description: Mismas reglas de monto y propina que el pago del participante (RN-BIL-03, RN-TIP-*). Método `CASH_COUNTER`.
+      description: Mismas reglas de monto y propina que el pago del participante (RN-BIL-03, RN-TIP-*), incluido el mínimo `min(minPaymentMinor, saldo)` (D-158) y los mismos errores (`TIP_NOT_ALLOWED` es `409`, D-147). Método `CASH_COUNTER`.
       security: [{staffJwt: []}]
       x-permission: payment.register_cash
       parameters:
@@ -1218,6 +1241,7 @@ paths:
               schema: {$ref: '#/components/schemas/Problem'}
               examples:
                 exceedsBalance: {$ref: '#/components/examples/ProblemPaymentExceedsBalance'}
+                tipNotAllowed: {$ref: '#/components/examples/ProblemTipNotAllowed'}
                 sessionClosed: {$ref: '#/components/examples/ProblemSessionClosed'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '500': {$ref: '#/components/responses/InternalError'}
@@ -1324,7 +1348,11 @@ paths:
       tags: [StaffBilling]
       operationId: forceCloseSession
       summary: Cierre forzado con motivo
-      description: Cancela pedidos `PENDING_REVIEW` e ítems activos; el saldo se registra tal cual y el comprobante lo marca.
+      description: |
+        Cancela pedidos `PENDING_REVIEW` e ítems activos. Los pagos y propinas ya registrados **se conservan** (RN-SES-06, D-159).
+        Si tras cancelar `balance < 0`, en la **misma transacción** se registra un reembolso simulado automático por el exceso
+        (sin devolver propina; queda como un pago de tipo `REFUND` en el historial de la sesión y auditado con el actor).
+        Si `balance > 0`, queda como **saldo no cobrado** en la auditoría y en el comprobante, que marca el cierre forzado.
       security: [{staffJwt: []}]
       x-permission: session.force_close
       parameters:
@@ -1401,7 +1429,8 @@ paths:
       description: |
         Con lock exclusivo. El importe se calcula y congela al aplicar (RN-ADJ-03). Todos los ajustes restan.
         `DISCOUNT_PERCENT` usa `percentBp` (1000 = 10 %); `DISCOUNT_AMOUNT` y `MANUAL_ADJUSTMENT` usan `amountMinor`; `COURTESY_ITEM` usa `orderItemId`.
-        `adjustment.apply` está limitado por el rol (el Mozo hasta el 15 % de los cargos); superar el límite exige `adjustment.apply_any` (`ADJUSTMENT_LIMIT_EXCEEDED`, 403).
+        `adjustment.apply` está limitado por el rol: el Mozo, hasta el 15 % **acumulado** de los cargos brutos de la sesión (suma de todos sus ajustes vigentes, D-142);
+        superar el límite exige `adjustment.apply_any` (`ADJUSTMENT_LIMIT_EXCEEDED`, 403).
         El importe de un `DISCOUNT_PERCENT` se redondea al centavo más cercano (la mitad hacia arriba).
         Errores: `ADJUSTMENT_INVALID` (422), `ADJUSTMENT_EXCEEDS_BALANCE` (409), `ADJUSTMENT_ITEM_INVALID` (409), `SESSION_CLOSED` (409).
       security: [{staffJwt: []}]
@@ -1664,7 +1693,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/VersionInfo'}
-              example: {build: 0.1.0, contractVersion: 0.2.1}
+              example: {build: 0.1.0, contractVersion: 0.2.2}
         '500': {$ref: '#/components/responses/InternalError'}
   /media/{path}:
     get:
@@ -1714,7 +1743,7 @@ components:
     RestaurantIdQuery:
       name: restaurantId
       in: query
-      description: Restaurante del menú público (multi-sucursal simulada). Si falta, se usa el del token o el predeterminado del despliegue.
+      description: Restaurante del menú público (multi-sucursal simulada). Sin token, si falta se usa el predeterminado del despliegue. Con token manda el del token y, si difiere, responde `404` (RN-TEN-03).
       schema: {type: string, format: uuid}
     IfNoneMatch:
       name: If-None-Match
@@ -1879,7 +1908,7 @@ components:
             code: STATE_CONFLICT
             traceId: 9f1c2a7e4b
     Unprocessable:
-      description: Regla de negocio violada con datos válidos (`ORDER_EMPTY`, `PAYMENT_DECLINED`, `IDEMPOTENCY_KEY_REUSED`, `TIP_*`, `ADJUSTMENT_INVALID`, etc.)
+      description: Regla de negocio violada con datos válidos (`ORDER_EMPTY`, `PAYMENT_AMOUNT_INVALID`, `PAYMENT_DECLINED`, `IDEMPOTENCY_KEY_REUSED`, `TIP_INVALID`, `TIP_EXCEEDS_LIMIT`, `ADJUSTMENT_INVALID`, etc.)
       content:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}
@@ -1985,6 +2014,21 @@ components:
         code: PAYMENT_EXCEEDS_BALANCE
         traceId: 9f1c2a7e4b
         extra: {balanceMinor: 805000}
+    ProblemTipNotAllowed:
+      value:
+        type: https://api.somphiezurich.example/errors/tip-not-allowed
+        title: Todavía no hay cargos para agregar propina
+        status: 409
+        code: TIP_NOT_ALLOWED
+        traceId: 9f1c2a7e4b
+    ProblemPaymentAmountInvalid:
+      value:
+        type: https://api.somphiezurich.example/errors/payment-amount-invalid
+        title: El monto no es válido
+        status: 422
+        code: PAYMENT_AMOUNT_INVALID
+        traceId: 9f1c2a7e4b
+        extra: {minMinor: 50}  # saldo 50 < mínimo 100: minMinor ya viene calculado con el saldo (D-158)
     ProblemOrderAlreadyDecided:
       value:
         type: https://api.somphiezurich.example/errors/order-already-decided
@@ -2025,7 +2069,7 @@ components:
         status: 403
         code: ADJUSTMENT_LIMIT_EXCEEDED
         traceId: 9f1c2a7e4b
-        extra: {limitPercent: 10, limitMinor: 500000}
+        extra: {limitPercent: 15, limitMinor: 750000}
   schemas:
     Uuid: {type: string, format: uuid}
     Timestamp: {type: string, format: date-time}
@@ -2080,6 +2124,7 @@ components:
       enum: [SETTLED, EMPTY, EXPIRED_EMPTY, FORCED]
     ParticipantRole:
       type: string
+      description: "A lo sumo un `HOST` por sesión (RN-ACC-15). En una sesión abierta por el personal no hay `HOST` hasta que el primero se une (D-143)."
       enum: [HOST, MEMBER]
     TableDisplayStatus:
       type: string
@@ -2182,9 +2227,11 @@ components:
         isDefault: {type: boolean}
     PublicTable:
       type: object
+      description: Estado público de una mesa. `restaurantId` (opcional) permite a la web pedir `GET /menu` del local correcto (D-144).
       required: [tableLabel, restaurantOpen, hasActiveSession, canOpen]
       properties:
         tableLabel: {type: string}
+        restaurantId: {$ref: '#/components/schemas/Uuid'}
         restaurantOpen: {type: boolean}
         opensAt: {$ref: '#/components/schemas/Timestamp'}
         hasActiveSession: {type: boolean}
@@ -2217,7 +2264,7 @@ components:
         id: {$ref: '#/components/schemas/Uuid'}
         displayName: {type: string}
         role: {$ref: '#/components/schemas/ParticipantRole'}
-        revoked: {type: boolean, description: "Propuesto: `true` si el acceso fue retirado. Confirmar con Web y Android."}
+        revoked: {type: boolean, description: "`true` si el acceso fue retirado (RN-ACC-11). Opcional (D-145)."}
     SessionAccessResponse:
       type: object
       required: [session, participant, guestToken]
@@ -2320,7 +2367,7 @@ components:
         note: {type: string}
         rejection:
           type: object
-          description: "Propuesto: motivo visible cuando el pedido fue rechazado. Confirmar con Web y Android."
+          description: "Motivo visible; aparece solo en pedidos rechazados (D-145)."
           required: [reasonCode]
           properties:
             reasonCode: {$ref: '#/components/schemas/RejectReasonCode'}
@@ -2490,7 +2537,7 @@ components:
               totalMinor: {$ref: '#/components/schemas/MoneyMinor'}
     CreatePaymentRequest:
       type: object
-      description: "`amountMinor` entre `minPaymentMinor` y el saldo; `0` solo si `tipMinor > 0`."
+      description: "`amountMinor` entre `min(minPaymentMinor, saldo)` y el saldo (D-158); `0` solo si `tipMinor > 0`."
       required: [amountMinor, method]
       properties:
         amountMinor: {$ref: '#/components/schemas/MoneyMinor'}
