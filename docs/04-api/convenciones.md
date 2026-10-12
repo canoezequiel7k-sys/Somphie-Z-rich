@@ -1,6 +1,6 @@
 # Convenciones de la API
 
-> Estado: **borrador v0.1**. El contrato formal será `openapi.yaml` (WP-ARQ-10, Fase 1). Hasta entonces, este documento y `endpoints.md` son la referencia.
+> Estado: **v0.2**. El contrato formal es `openapi.yaml` (WP-ARQ-10, ya existe; manda ante cualquier diferencia). Este documento explica las convenciones generales; `endpoints.md` es el borrador previo del que salió el contrato.
 
 ## 1. Generales
 | Tema | Convención |

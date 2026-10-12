@@ -2,6 +2,8 @@
 
 Origen: tus respuestas sobre D-101…D-128 y Q-01…Q-14.
 
+> **Documento histórico:** describe el estado al cerrar v0.2. Lo decidido después (D-142…D-159, Q-15…Q-20 resueltas) está en `decisiones.md` y `advances.md`; si algo de abajo difiere, mandan esos.
+
 ## Resumen
 | Tema | Cambio | Dónde quedó |
 |---|---|---|
@@ -11,7 +13,7 @@ Origen: tus respuestas sobre D-101…D-128 y Q-01…Q-14.
 | Descuentos y cortesías | Importe congelado, límite por rol, anulables | RN-ADJ, permisos, CU-37/38, CL-190…198 |
 | Idiomas | Web cliente es-AR + en | RN-I18N, CU-47, CL-210…213 |
 | Imágenes | Carpeta + puerto | RN-IMG, nube.md |
-| Hosting | Web en Vercel; **backend aún sin host (Q-15)** | nube.md |
+| Hosting | Web en Vercel; **backend sin host definido en ese momento (Q-15, resuelta luego con D-156)** | nube.md |
 | Llamar al mozo | Incluido (adelantable) | RN-WCL, CU-62, CL-200…204 |
 | Multi-sucursal simulada | Aislamiento + 2 restaurantes en pruebas | RN-TEN, WP-BE-46 |
 | Contrato | `balance = charges − adjustments − paid` | CHANGELOG 0.2.0 |

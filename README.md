@@ -1,9 +1,9 @@
 # Somphie Zúrich — Sistema integral de gestión de cafetería
 
-> **Documentación v0.2 — Fase 0 (Especificación funcional).** Incluye tus decisiones sobre D-101…D-128 y Q-01…Q-14; ver `docs/00-gobierno/cambios-v0.2.md`.
+> **Documentación v0.2 — Fase 0 (Especificación funcional).** Incluye las decisiones D-101…D-159 y las preguntas Q-01…Q-20 resueltas (Q-21 sigue pendiente); el resumen de v0.2 está en `docs/00-gobierno/cambios-v0.2.md`.
 > Estado: **borrador para validación del dueño del proyecto**. Nada de lo descrito está implementado todavía.
 > Idioma de los documentos: español. Idioma del código, API y base de datos: inglés (ver D-103).
-> **¿Retomas el trabajo o eres un agente nuevo?** Lee primero `docs/00-gobierno/advances.md`: estado actual, decisiones D-142…D-157, plan paso a paso y bitácora.
+> **¿Retomas el trabajo o eres un agente nuevo?** Lee primero `docs/00-gobierno/advances.md`: estado actual, decisiones D-142…D-159, plan paso a paso y bitácora.
 
 ## 1. Qué es este repositorio
 
@@ -32,7 +32,7 @@ somphie-zurich/
 │   ├── 01-producto/           visión, alcance, actores y roles, glosario
 │   ├── 02-dominio/            modelo, estados, reglas, casos de uso, casos límite, errores, datos
 │   ├── 03-arquitectura/       contexto, backend, secuencias, seguridad, tiempo real, concurrencia
-│   ├── 04-api/                convenciones, endpoints (borrador), eventos, changelog del contrato
+│   ├── 04-api/                openapi.yaml (contrato), convenciones, endpoints (borrador previo), eventos, changelog
 │   ├── 05-diseno/             sistema visual y mapa de pantallas
 │   ├── 06-pruebas/            estrategia y criterios de aceptación
 │   ├── 07-despliegue/         entorno local y nube/CI-CD

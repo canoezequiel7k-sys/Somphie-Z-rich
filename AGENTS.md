@@ -8,7 +8,7 @@ Este archivo aplica a **todo agente o colaborador** (backend, web, android, UX, 
 
 1. `docs/00-gobierno/decisiones.md` y `adr/` — decisiones tomadas.
 2. `docs/02-dominio/estados-y-transiciones.md` y `reglas-negocio.md` — reglas del negocio.
-3. `docs/04-api/openapi.yaml` (cuando exista, Fase 1) — contrato. Antes de eso: `docs/04-api/endpoints.md`.
+3. `docs/04-api/openapi.yaml` — contrato (fuente de verdad desde la v0.2.x; se cambia siempre junto con `CHANGELOG.md`). `endpoints.md` es el borrador previo del que salió: si difieren, manda el YAML.
 4. `docs/02-dominio/catalogo-errores.md` — códigos de error.
 5. La guía de tu agente en `docs/08-agentes/`.
 6. El código existente. **El código nunca es la fuente de verdad de una regla**: si el código dice algo distinto, es un bug o un cambio de reglas pendiente de documentar.

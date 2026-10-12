@@ -151,6 +151,8 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | H-17 | **Operaciones del invitado sin `x-permission`:** `getCurrentSession`, `listParticipants` y `listSessionWaiterCalls` (verificado leyendo el YAML). `info.description` dice que cada operación lo indica | A decidir (dueño) |
 | H-18 | **Reembolso automático del cierre forzado (D-159):** `Payment` no tiene un campo que lo distinga (la marca "automático por cierre forzado" vive solo en la auditoría). El contrato documenta que queda como `REFUND` | A decidir antes de la Fase 7 |
 | H-19 | **`limitMinor` de `ADJUSTMENT_LIMIT_EXCEEDED`:** `catalogo-errores.md` lo lista como extra pero no define qué representa. En el ejemplo se asumió "15 % de los cargos brutos" (ver Paso 4) | A decidir (dueño) |
+| H-20 | **Acciones de auditoría propuestas 🟡:** `RN-AUD-01` exige auditar revocación de participantes, catálogo, usuarios/roles/estaciones, QR, ajustes y logins fallidos, pero ningún documento nombraba esos códigos. Propuestos en `catalogo-auditoria.md` §3 (`PARTICIPANT_REVOKED`, `CATALOG_CHANGED`, `USER_CHANGED`, `TABLE_QR_REGENERATED`, `SETTINGS_CHANGED`, `LOGIN_FAILED_REPEATED`). Tampoco se audita hoy: llamados al mozo ni rotación del `joinCode` | A confirmar (dueño) |
+| H-21 | **Pedido tomado por el personal (RN-ORD-18):** nace `ACCEPTED` y se audita con `ORDER_CREATED` (`after.status = ACCEPTED`); no se emite `ORDER_ACCEPTED` aparte. Es una interpretación mía: ningún documento lo dice | A confirmar (dueño) |
 
 ---
 ## 4. Plan paso a paso
@@ -165,9 +167,9 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | 3 | ✅ | Propagar a documentos que dependen de esas reglas (H-01, H-03): estados §1, casos de uso (CU-02/03/30), modelo de datos, roles (15 %), casos límite nuevos, errores, criterios de aceptación | `estados-y-transiciones.md`, `casos-de-uso.md`, `modelo-datos.md`, `actores-y-roles.md`, `casos-limite.md`, `catalogo-errores.md`, `criterios-aceptacion.md`; además `decisiones.md` y `reglas-negocio.md` (D-158 y D-159, que cierran H-13 y H-14) | Cada regla modificada se refleja en todos los documentos que la mencionan | `docs(domain): propagate rule changes` |
 | 4 | ✅ | Contrato **0.2.2**: ejemplo 15 %, quitar "proposed", `PublicTable.restaurantId`, `TIP_NOT_ALLOWED` en 409, `x-permission` del recibo, regla del HOST en `join`, etiqueta del pedido a nombre de la mesa; **y reflejar D-158** (`minMinor` del pago calculado con el saldo) **y D-159** (efectos del `force-close`). Reordenar `CHANGELOG.md` (H-05, H-07, H-08) | `docs/04-api/openapi.yaml`, `docs/04-api/CHANGELOG.md` | `info.version` = última entrada del changelog; todos los cambios son **compatibles** | `docs(api): contract 0.2.2` |
 | 5 | ✅ | Redocly: corregir `redocly.yaml` (H-09) y reemplazar Spectral en los documentos (D-148). **El dueño corre** `npx @redocly/cli lint docs/04-api/openapi.yaml` y pega el resultado | `redocly.yaml`, ADR-0008, `estrategia.md`, `nube.md`, `convenciones.md`, `devops.md` | El lint corre sin errores de configuración | `chore(api): standardize on redocly` |
-| 6 | ⬜ | Catálogo de acciones de auditoría (D-151) | `docs/02-dominio/catalogo-auditoria.md` | Cada acción citada en reglas/estados tiene su código | `docs(domain): add audit action catalog` |
-| 7 | ⬜ | Comparar duplicados de la raíz con los de `docs/` y reportar diferencias; el dueño borra (H-10) | raíz | Un solo archivo oficial por documento | `chore: remove duplicated docs` |
-| 8 | ⬜ | Consolidar v0.2 en el cuerpo de cada documento (D-157) | todos los docs con sección "v0.2" | Ningún documento tiene secciones con "precedencia" | `docs: consolidate v0.2 into body (v0.3)` |
+| 6 | ✅ | Catálogo de acciones de auditoría (D-151) | `docs/02-dominio/catalogo-auditoria.md` | Cada acción citada en reglas/estados tiene su código | `docs(domain): add audit action catalog` |
+| 7 | ✅ | Comparar duplicados de la raíz con los de `docs/` y reportar diferencias; el dueño borra (H-10) | raíz | Un solo archivo oficial por documento | `chore: remove duplicated docs` |
+| 8 | 🔄 | Consolidar v0.2 en el cuerpo de cada documento (D-157) | todos los docs con sección "v0.2" | Ningún documento tiene secciones con "precedencia" | `docs: consolidate v0.2 into body (v0.3)` |
 | 9 | ⬜ | Puerta de Fase 1 y arranque de Fase 1: dominio puro (WP-BE-10) y tokens de diseño (WP-UX-10; ver Q-21; incluye actualizar `design/img/README.md` y D-134, que nombran `ic_icon.png`) | `backend/`, `design/` | Checklist de `arquitecto.md` | — |
 
 ---
@@ -272,6 +274,26 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Qué estudiar:** *qué es un linter* y la diferencia entre error de configuración y hallazgo del contrato; *rulesets* (`extends: recommended`) y por qué se apaga una regla solo con motivo escrito; *DRY aplicado a herramientas* (una herramienta en vez de dos); por qué conviene verificar un nombre en la documentación oficial antes de "corregirlo" a ojo, y **correr la herramienta** antes de dar por buena una lectura de la documentación (este paso lo demuestra).
 - **Archivos tocados:** `redocly.yaml`, `ADR-0008-contract-first-openapi.md`, `docs/06-pruebas/estrategia.md`, `docs/07-despliegue/nube.md`, `docs/04-api/convenciones.md`, `docs/08-agentes/devops.md`, `advances.md`.
 - **Commit sugerido:** `chore(api): standardize on redocly`
+
+### 2026-10-11 — Paso 6 ✅ — Catálogo de acciones de auditoría
+- **Qué:** nuevo `docs/02-dominio/catalogo-auditoria.md`. Sección 2: **19 códigos** tomados textualmente de `estados-y-transiciones.md` y `reglas-negocio.md` (sesión, pedido, ítem, pago/reembolso, ajuste), con actor, `targetType`, datos y origen. Sección 3: **6 códigos propuestos 🟡** para lo que `RN-AUD-01` exige y nadie nombraba. Sección 4: lo que hoy **no** se audita.
+- **Por qué:** sin vocabulario cerrado cada módulo inventa sus códigos y los reportes y pruebas se rompen. Los códigos nuevos van marcados 🟡 porque `AGENTS.md` prohíbe inventar sin avisar.
+- **Hallazgos nuevos:** **H-20** y **H-21** (ver §3).
+- **Qué estudiar:** *registro de auditoría append-only* y por qué se escribe en la misma transacción; *vocabulario controlado / enum cerrado*; qué va en un `beforeSummary` (resumen mínimo, nunca la entidad completa ni secretos).
+- **Archivos tocados:** `docs/02-dominio/catalogo-auditoria.md` (nuevo), `advances.md`.
+- **Commit sugerido:** `docs(domain): add audit action catalog`
+
+### 2026-10-11 — Paso 7 ✅ — Duplicados de la raíz eliminados
+- **Resultado (dueño):** `Get-FileHash` dio `True` para `roadmap-fases.md` y `cambios-v0.2.md` (idénticos a los de `docs/`). `decisiones.md` de la raíz ya era una versión vieja. Se borraron las tres con `git rm`; H-10 cerrado.
+- **Qué se verificó** (tamaños, sin leer contenido): `decisiones.md` de la raíz pesa 9,49 KB y el oficial 13,33 KB → **la copia de la raíz está vieja**. `roadmap-fases.md` tiene **15839 bytes en ambos** lugares y `cambios-v0.2.md` 1,60 KB en ambos → probablemente idénticos, **a confirmar con hash**. `README.md` de la raíz es el README principal del repo: no es un duplicado (no hay copia en `docs/00-gobierno` ni en `docs/08-agentes`).
+- **Acción del dueño:** comparar hashes y, si coinciden (o si la raíz es la vieja), borrar las tres copias de la raíz con `git rm`. El Paso 7 pasa a ✅ cuando estén borradas.
+- **Qué estudiar:** *hash de archivo* (`Get-FileHash`) para comparar contenido sin leerlo; por qué igual tamaño **no** prueba igual contenido.
+
+### 2026-10-11 — Paso 8 🔄 (parcial) — H-12 resuelto; la consolidación queda para antes de la Fase 2
+- **Qué:** H-12 corregido: `AGENTS.md` §1 punto 3 (el contrato ya existe y manda sobre `endpoints.md`), encabezado de `convenciones.md` (ya no dice "borrador v0.1"), y `README.md` (ahora cita D-101…D-159, Q-01…Q-20 resueltas, descripción de `04-api/`).
+- **Qué NO se hizo:** la consolidación de las secciones "v0.2" en el cuerpo de cada documento (D-157). D-157 la ubica **antes de la Fase 2**, no de la Fase 1, y la Fase 1 (dominio puro) no depende de ella. Se hace antes de WP-BE-20. **H-15 cerrado** (el dueño corrió `git grep`): el único documento desactualizado era `cambios-v0.2.md` (Q-15 y la lista de preguntas); se marcó como documento histórico y se corrigió la fila de hosting. El "10 %" de `endpoints.md` y `openapi.yaml` es el ejemplo de `percentBp: 1000`, no el límite del Mozo; el `HOST` de ADR-0003 es consistente con D-143.
+- **Archivos tocados:** `AGENTS.md`, `README.md`, `docs/04-api/convenciones.md`, `docs/00-gobierno/cambios-v0.2.md`, `advances.md`.
+- **Commit sugerido:** `docs: update stale references to the contract (H-12)`
 
 ### Historial previo (resumen, para contexto)
 - **v0.1:** plan maestro convertido en 52 documentos (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes).
