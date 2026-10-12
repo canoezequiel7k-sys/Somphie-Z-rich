@@ -5,6 +5,7 @@
 # Backend
 backend/build/
 backend/.gradle/
+backend/.kotlin/
 # Web
 web/node_modules/
 web/dist/

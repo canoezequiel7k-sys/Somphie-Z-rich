@@ -170,7 +170,7 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | 6 | ✅ | Catálogo de acciones de auditoría (D-151) | `docs/02-dominio/catalogo-auditoria.md` | Cada acción citada en reglas/estados tiene su código | `docs(domain): add audit action catalog` |
 | 7 | ✅ | Comparar duplicados de la raíz con los de `docs/` y reportar diferencias; el dueño borra (H-10) | raíz | Un solo archivo oficial por documento | `chore: remove duplicated docs` |
 | 8 | 🔄 | Consolidar v0.2 en el cuerpo de cada documento (D-157) | todos los docs con sección "v0.2" | Ningún documento tiene secciones con "precedencia" | `docs: consolidate v0.2 into body (v0.3)` |
-| 9 | ⬜ | Puerta de Fase 1 y arranque de Fase 1: dominio puro (WP-BE-10) y tokens de diseño (WP-UX-10; ver Q-21; incluye actualizar `design/img/README.md` y D-134, que nombran `ic_icon.png`) | `backend/`, `design/` | Checklist de `arquitecto.md` | — |
+| 9 | 🔄 | Puerta de Fase 1 y arranque de Fase 1: dominio puro (WP-BE-10) y tokens de diseño (WP-UX-10; ver Q-21; incluye actualizar `design/img/README.md` y D-134, que nombran `ic_icon.png`) | `backend/`, `design/` | Checklist de `arquitecto.md` | — |
 
 ---
 ## 5. Reglas de trabajo durante este tramo
@@ -294,6 +294,10 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Qué NO se hizo:** la consolidación de las secciones "v0.2" en el cuerpo de cada documento (D-157). D-157 la ubica **antes de la Fase 2**, no de la Fase 1, y la Fase 1 (dominio puro) no depende de ella. Se hace antes de WP-BE-20. **H-15 cerrado** (el dueño corrió `git grep`): el único documento desactualizado era `cambios-v0.2.md` (Q-15 y la lista de preguntas); se marcó como documento histórico y se corrigió la fila de hosting. El "10 %" de `endpoints.md` y `openapi.yaml` es el ejemplo de `percentBp: 1000`, no el límite del Mozo; el `HOST` de ADR-0003 es consistente con D-143.
 - **Archivos tocados:** `AGENTS.md`, `README.md`, `docs/04-api/convenciones.md`, `docs/00-gobierno/cambios-v0.2.md`, `advances.md`.
 - **Commit sugerido:** `docs: update stale references to the contract (H-12)`
+
+### 2026-10-11 — Paso 9 🔄 — Arranque del backend (WP-BE-10, primera tanda)
+- **Versiones verificadas en la web (no de memoria):** JDK 25.0.2 (ya instalado por el dueño; Docker 29.8.2 y Git 2.54.0 también); **Gradle 9.8.1** (versión actual en `services.gradle.org`; Gradle 9.1+ ejecuta sobre Java 25); **Kotlin 2.4.0** (estable del 3 de junio de 2026; solo Kotlin 2.3+ puede generar bytecode para Java 25); **JUnit 6.1.2** (BOM). Spring Boot **no** se agrega todavía: es del WP-BE-20 (Fase 2).
+- **Archivos a tocar (nuevos, en `backend/`):** `settings.gradle.kts`, `build.gradle.kts`, `shared/domain/DomainException.kt`, `orders/domain/ItemStatus.kt`, `orders/domain/OrderItem.kt`, `orders/domain/OrderStatus.kt`, y sus pruebas `ItemTransitionsTest.kt` y `OrderStatusDerivationTest.kt`.
 
 ### Historial previo (resumen, para contexto)
 - **v0.1:** plan maestro convertido en 52 documentos (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes).
