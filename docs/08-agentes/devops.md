@@ -20,7 +20,7 @@ Que el proyecto **arranque igual en cualquier máquina**, se pruebe y despliegue
 4. Gestión de secretos, gitleaks, Dependabot/Renovate.
 5. Releases (web/back) y APK Android por tag.
 6. Backups y reseteo de demo.
-7. Lint de docs (markdownlint, Spectral, enlaces) y plantilla de ADR.
+7. Lint de docs (markdownlint, Redocly CLI para el OpenAPI, enlaces) y plantilla de ADR.
 8. Verificar proveedor y planes **vigentes** antes de decidir (checklist `nube.md` §2).
 
 ## Plantillas a crear (F2)

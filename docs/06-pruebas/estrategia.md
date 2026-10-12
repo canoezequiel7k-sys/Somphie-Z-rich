@@ -81,7 +81,7 @@ Android: pruebas de UI por pantalla + un flujo instrumentado de punta a punta co
 | Compilación + lint + tipos | Sí |
 | Pruebas unitarias y de integración | Sí |
 | ArchUnit | Sí |
-| Contrato (swagger-request-validator + Spectral) | Sí |
+| Contrato (swagger-request-validator + Redocly CLI) | Sí |
 | Cobertura de dominio ≥ 90 % (líneas) | Sí |
 | gitleaks (secretos) | Sí |
 | E2E (Playwright) | Sí en `main`, opcional en PR |

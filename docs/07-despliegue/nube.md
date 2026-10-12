@@ -40,7 +40,7 @@
 | `backend.yml` | `backend/**`, `docs/04-api/**` | JDK → build → tests (Testcontainers) → ArchUnit → contrato → artefacto/imagen |
 | `web.yml` | `web/**`, `docs/04-api/**` | pnpm → lint → typecheck → vitest → build → (E2E en `main`) |
 | `android.yml` | `android/**` | assembleDebug → unit tests → lint |
-| `docs.yml` | `docs/**` | markdownlint + Spectral (OpenAPI) + chequeo de enlaces |
+| `docs.yml` | `docs/**` | markdownlint + Redocly CLI (lint del OpenAPI) + chequeo de enlaces |
 | `security.yml` | siempre | gitleaks + auditoría de dependencias (informativa) |
 | `deploy-demo.yml` | push a `main` verde | Desplegar front y backend a demo |
 | `release-android.yml` | tag `android-v*` | Compilar APK firmado y publicarlo en GitHub Releases (D-122) |

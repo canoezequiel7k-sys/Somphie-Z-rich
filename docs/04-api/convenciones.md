@@ -80,7 +80,7 @@ Cada endpoint declara: **Auth** (`public` | `guest` | `staff` | `owner`), **Perm
 | Herramienta | Uso |
 |---|---|
 | **Prism** | Servidor mock desde `openapi.yaml` (`:4010`) para Web/Android sin backend |
-| **Spectral** | Lint del YAML en CI |
+| **Redocly CLI** | Lint del YAML en CI, vista previa de la documentación y empaquetado (`redocly.yaml`, D-148) |
 | **openapi-typescript** | Tipos para Web |
 | **Bruno** (colecciones en `docs/04-api/bruno/`) | Probar el backend a mano antes de tener UI |
 | **swagger-request-validator** | Test de contrato en backend |
