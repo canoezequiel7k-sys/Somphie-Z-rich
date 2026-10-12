@@ -104,9 +104,9 @@ Todos los errores viajan en formato **RFC 7807** (`application/problem+json`) co
 
 | Código | HTTP | Cuándo | Acción UI | Extra |
 |---|---|---|---|---|
-| `PAYMENT_AMOUNT_INVALID` | 422 | < mínimo o no entero | Corregir | `minMinor` |
+| `PAYMENT_AMOUNT_INVALID` | 422 | `amount` < `min(minPaymentMinor, balance)` (D-158) o no entero | Corregir | `minMinor` (ya calculado con el saldo) |
 | `PAYMENT_EXCEEDS_BALANCE` | 409 | > saldo | Ajustar al saldo | `balanceMinor` |
-| `PAYMENT_NOTHING_TO_PAY` | 409 | Saldo ≤ 0 | Refrescar cuenta | — |
+| `PAYMENT_NOTHING_TO_PAY` | 409 | Saldo ≤ 0 con monto principal > 0 (un pago solo propina no lo produce, D-146) | Refrescar cuenta | — |
 | `PAYMENT_DECLINED` | 422 | Rechazo simulado (demo) | "Pago rechazado" | `paymentId` |
 | `PAYMENT_NOT_FOUND` | 404 | — | — | — |
 | `PAYMENT_NOT_VOIDABLE` | 409 | No `SUCCEEDED` | Mensaje | — |
@@ -144,7 +144,7 @@ Todos los errores viajan en formato **RFC 7807** (`application/problem+json`) co
 | `TIP_NOT_ALLOWED` | 409 | Sin cargos en la sesión | Mensaje | — |
 | `ADJUSTMENT_INVALID` | 422 | Porcentaje fuera de 1–100, monto ≤ 0, motivo faltante | Campo | — |
 | `ADJUSTMENT_EXCEEDS_BALANCE` | 409 | El ajuste deja saldo negativo | Ajustar al saldo | `maxAdjustmentMinor` |
-| `ADJUSTMENT_LIMIT_EXCEEDED` | 403 | Supera el límite del rol | "Requiere al Dueño" | `limitPercent`, `limitMinor` |
+| `ADJUSTMENT_LIMIT_EXCEEDED` | 403 | Supera el límite del rol: es **acumulado** (lo ya aplicado por ese Mozo + el ajuste nuevo supera el 15 % de los cargos brutos, D-142) | "Requiere al Dueño" | `limitPercent`, `limitMinor` |
 | `ADJUSTMENT_ITEM_INVALID` | 409 | Ítem cancelado o ya con cortesía | Refrescar | `itemId` |
 | `ADJUSTMENT_NOT_FOUND` | 404 | — | — | — |
 | `ADJUSTMENT_NOT_VOIDABLE` | 409 | Ya anulado, sesión cerrada o fuera de ventana | Mensaje | — |

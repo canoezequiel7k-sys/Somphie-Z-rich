@@ -34,7 +34,7 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 | RN-SES-03 | La sesión agrupa pedidos, pagos y participantes; una visita nueva no hereda nada | D |
 | RN-SES-04 | Motivos de cierre: `SETTLED`, `EMPTY`, `EXPIRED_EMPTY`, `FORCED` | D |
 | RN-SES-05 | Cierre normal exige: sin pedidos `PENDING_REVIEW`, sin ítems `QUEUED/IN_PREPARATION/READY`, `balance == 0` | A (bajo `FOR UPDATE`) |
-| RN-SES-06 | Cierre forzado: solo `session.force_close`, motivo obligatorio, cancela pendientes y ítems activos, queda auditado y marcado en el comprobante. **Pagos y propinas:** los pagos `SUCCEEDED` y sus propinas **se conservan** (no se anulan solos). Si queda saldo > 0, se registra como **no cobrado** en la auditoría y en el comprobante. 🟡 Si tras cancelar queda saldo < 0, debe resolverse con reembolso (RN-BIL-07); la mecánica exacta está pendiente (H-14) | A |
+| RN-SES-06 | Cierre forzado: solo `session.force_close`, motivo obligatorio, cancela pendientes y ítems activos, queda auditado y marcado en el comprobante. **Pagos y propinas:** los pagos `SUCCEEDED` y sus propinas **se conservan** (no se anulan solos). Si queda saldo > 0, se registra como **no cobrado** en la auditoría y en el comprobante. Si tras cancelar queda saldo < 0, en la **misma transacción** se registra un **reembolso simulado automático** por el exceso (sin devolver propina), auditado con el actor y marcado "automático por cierre forzado" (D-159) | A |
 | RN-SES-07 | Sesión `CLOSED`: no admite pedidos, pagos ni participantes. Solo lectura con token 24 h | D/A |
 | RN-SES-08 | Expira sola si no hay pedidos facturables ni pendientes y pasaron `sessionIdleTtlMin` sin **actividad** (crear pedido, unirse, acción del personal). Consultar/poll **no** cuenta como actividad | A (job) |
 | RN-SES-09 | Mesa y sesión se identifican con IDs distintos en toda API | D |
@@ -86,7 +86,7 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 |---|---|---|
 | RN-BIL-01 | `charges = Σ lineTotalMinor` de ítems no cancelados de pedidos `ACCEPTED…DELIVERED` (`lineTotalMinor = unitPriceMinor × quantity`, y `unitPriceMinor` ya incluye opciones, RN-OPT-04). Usa **precios históricos**, nunca el catálogo actual | D |
 | RN-BIL-02 | `balance = charges − adjustments − paid` (v0.2) calculado **dentro de la transacción** con la sesión bloqueada. La propina **no** entra en esta fórmula (RN-TIP-02) | A/DB |
-| RN-BIL-03 | Pago con monto principal (**`amountMinor > 0`**): entero `minPaymentMinor ≤ amount ≤ balance`; si `balance ≤ 0` → `PAYMENT_NOTHING_TO_PAY`; si excede → `PAYMENT_EXCEEDS_BALANCE` (devuelve saldo actual). **Con `amountMinor = 0` (pago solo propina) esta regla no aplica**: rige RN-TIP-01/RN-TIP-04 y no se rechaza por saldo 0 (D-146) | A |
+| RN-BIL-03 | Pago con monto principal (**`amountMinor > 0`**): entero `min(minPaymentMinor, balance) ≤ amount ≤ balance` (si el saldo es menor al mínimo, se paga exactamente el saldo, D-158); si `balance ≤ 0` → `PAYMENT_NOTHING_TO_PAY`; si excede → `PAYMENT_EXCEEDS_BALANCE` (devuelve saldo actual). **Con `amountMinor = 0` (pago solo propina) esta regla no aplica**: rige RN-TIP-01/RN-TIP-04 y no se rechaza por saldo 0 (D-146) | A |
 | RN-BIL-04 | Pago idempotente por `Idempotency-Key`; un doble toque **no** cuenta dos veces. Dos pagos **intencionales** distintos del mismo monto son válidos si el saldo alcanza | A/DB |
 | RN-BIL-05 | `SimulatedPaymentProvider` aprueba siempre, salvo en modo demo donde un **monto principal** (`amountMinor`) con centavos terminados en `13` simula rechazo (`PAYMENT_DECLINED`, queda registro `FAILED` y no altera saldo); la propina no se evalúa y un pago solo propina nunca se rechaza por esta regla (D-125). Efectivo (`CASH_COUNTER`) lo registra el personal | A |
 | RN-BIL-06 | Anular un pago: solo `SUCCEEDED`, sesión `OPEN`, motivo obligatorio; el saldo se recalcula y **su propina también se anula** (RN-TIP-05) | A |
@@ -179,7 +179,7 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 | RN-TIP-01 | La propina es **libre y voluntaria**: `tipMinor ≥ 0` adjunta a un pago, o un pago **solo propina** (`amountMinor = 0`, `tipMinor > 0`) | A |
 | RN-TIP-02 | La propina **no reduce el saldo** ni es un cargo; se registra aparte | D |
 | RN-TIP-03 | Tope de cordura: `tipMinor ≤ maxTipPercent × charges` (por defecto 100 %; `charges` = **cargos brutos**, sin descontar ajustes) → `TIP_EXCEEDS_LIMIT`. Sin cargos no se acepta propina (`TIP_NOT_ALLOWED`) | A |
-| RN-TIP-04 | Si `amountMinor > 0` aplican las reglas de RN-BIL-03 (el mínimo `minPaymentMinor` es del monto principal, no de la propina); si es 0, `tipMinor > 0` es obligatorio y **no** se rechaza por saldo 0 (D-146) | A |
+| RN-TIP-04 | Si `amountMinor > 0` aplican las reglas de RN-BIL-03 (el mínimo de pago, incluida su excepción D-158, es del monto principal, no de la propina); si es 0, `tipMinor > 0` es obligatorio y **no** se rechaza por saldo 0 (D-146) | A |
 | RN-TIP-05 | Anular un pago anula también su propina. Los reembolsos **no** devuelven propina | A |
 | RN-TIP-06 | Sesión cerrada no admite propina | A |
 | RN-TIP-07 | El comprobante muestra la propina **separada** de la cuenta | A |
@@ -250,3 +250,4 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 | Fecha | Paso | Cambio | Decisión / hallazgo |
 |---|---|---|---|
 | 2026-10-11 | Paso 2 | RN-BIL-03 solo con `amountMinor > 0`; nuevas RN-ACC-14/15 (HOST en sesión abierta por el personal) y RN-TEN-03; RN-SES-06, RN-ORD-02/03/04, RN-BIL-05/06/07/09, RN-TIP-03/04/08, RN-ADJ-06, RN-CAT-08 e RN-IMG-03 alineadas; valores por defecto v0.2 agregados | D-142, D-143, D-144, D-146, D-137, D-153, D-155 · H-02, H-03, H-04, H-06 |
+| 2026-10-11 | Paso 3 | RN-BIL-03 con mínimo dinámico `min(minPaymentMinor, balance)`; RN-SES-06 con reembolso automático si el saldo queda negativo (se quita la marca 🟡); RN-TIP-04 referencia la excepción | D-158, D-159 · H-13, H-14 |

@@ -129,3 +129,28 @@ Formato Dado/Cuando/Entonces. Cada criterio `AC-CU-nn-x` es verificable y se tra
 - **AC-CU-62-a** Un solo llamado activo por sesión y motivo; el personal lo recibe en tiempo real.
 - **AC-CU-47-a** Con `en`, menú e interfaz salen en inglés con fallback a `es-AR` donde falte traducción.
 - **AC-G-09** Ningún dato cruza entre dos restaurantes (prueba con dos restaurantes sembrados).
+
+---
+# Criterios añadidos en el Paso 3 (2026-10-11)
+
+### Sesión abierta por el personal (CU-30, CU-03, CU-13; D-143)
+- **AC-CU-30-a** Una sesión abierta por el personal nace **sin `HOST`** y con `joinCode`.
+- **AC-CU-03-d** En una sesión sin HOST, el primer participante que se une pasa a `HOST`; los siguientes son `MEMBER` (CL-055).
+- **AC-CU-03-e** Dos uniones simultáneas a una sesión sin HOST dejan exactamente un `HOST` y un `MEMBER`, y ninguna recibe error (CL-056). La prueba debe correr contra PostgreSQL real, no contra un mock, porque lo que se verifica es el índice único parcial.
+- **AC-CU-13-a** Mientras la sesión no tiene HOST, el personal con `participant.revoke` puede revocar participantes y rotar el código.
+
+### Menú y restaurante (CU-05; D-144)
+- **AC-CU-05-a** Sin token, `GET /menu` usa `restaurantId` o, si falta, el restaurante predeterminado; con un id desconocido responde `404` (CL-216/217).
+- **AC-CU-05-b** Con token, manda el restaurante del token; un `restaurantId` distinto responde `404`.
+
+### Pago mínimo (CU-12; D-158)
+- **AC-CU-12-j** Con saldo menor a `minPaymentMinor`, se acepta un pago de **exactamente** el saldo; cualquier otro monto es rechazado (CL-118).
+- **AC-CU-12-k** Con saldo mayor o igual al mínimo, un pago menor al mínimo responde `PAYMENT_AMOUNT_INVALID` (CL-102).
+
+### Cierre forzado (CU-35; D-159)
+- **AC-CU-35-b** Los pagos y propinas ya registrados se conservan tras el cierre forzado.
+- **AC-CU-35-c** Si tras cancelar queda saldo < 0, se registra en la misma transacción un reembolso simulado automático por el exceso, sin devolver propina, auditado con el actor (CL-119).
+- **AC-CU-35-d** Si queda saldo > 0, se anota como saldo no cobrado en la auditoría y en el comprobante (CL-112).
+
+### Límite del Mozo (CU-37; D-142)
+- **AC-CU-37-e** El límite del Mozo es **acumulado**: varios descuentos chicos que sumen más del 15 % de los cargos brutos son rechazados con `ADJUSTMENT_LIMIT_EXCEEDED` (CL-199). Los ajustes anulados no cuentan.

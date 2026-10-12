@@ -15,11 +15,11 @@ stateDiagram-v2
 
 | De | Acción | A | Quién | Guardas (si falla → error) | Efectos | Auditoría | Evento |
 |---|---|---|---|---|---|---|---|
-| — | `open` | `OPEN` | Invitado (QR) / personal (`session.open_manual`) | Mesa activa, local abierto, sin sesión `OPEN` previa (`SESSION_ALREADY_OPEN`) | Crea participante HOST y joinCode | `SESSION_OPENED` | `EV-session.updated` |
+| — | `open` | `OPEN` | Invitado (QR) / personal (`session.open_manual`) | Mesa activa, local abierto, sin sesión `OPEN` previa (`SESSION_ALREADY_OPEN`) | Por QR: crea participante `HOST` y `joinCode`. Por personal: crea la sesión y el `joinCode` **sin HOST**; el primer participante que se una pasa a ser `HOST` (RN-ACC-14, D-143) | `SESSION_OPENED` | `EV-session.updated` |
 | `OPEN` | `close` → `SETTLED` | `CLOSED` | `session.close` | Sin pedidos `PENDING_REVIEW` (`SESSION_HAS_PENDING_ORDERS`); sin ítems `QUEUED/IN_PREPARATION/READY` (`SESSION_HAS_ACTIVE_ITEMS`); `balance == 0` (`SESSION_BALANCE_PENDING`); hay al menos un cargo | Invalida joinCode; tokens → solo lectura 24 h | `SESSION_CLOSED` | `EV-session.closed` |
 | `OPEN` | `close` → `EMPTY` | `CLOSED` | `session.close` | Sin cargos y sin pendientes ni ítems activos | ídem | `SESSION_CLOSED` | ídem |
 | `OPEN` | `expire` → `EXPIRED_EMPTY` | `CLOSED` | Sistema | Sin pedidos pendientes ni cargos y sin actividad 30 min | ídem | `SESSION_EXPIRED` | ídem |
-| `OPEN` | `force_close` → `FORCED` | `CLOSED` | `session.force_close` + **motivo obligatorio** | — | Pedidos `PENDING_REVIEW` → `CANCELLED(SESSION_FORCED)`; ítems activos → `CANCELLED`; saldo se registra tal cual en el cierre | `SESSION_FORCE_CLOSED` | ídem |
+| `OPEN` | `force_close` → `FORCED` | `CLOSED` | `session.force_close` + **motivo obligatorio** | — | Pedidos `PENDING_REVIEW` → `CANCELLED(SESSION_FORCED)`; ítems activos → `CANCELLED`; pagos y propinas ya registrados **se conservan**; si `balance < 0` se registra un **reembolso simulado automático** por el exceso (sin propina) en la misma transacción; si `balance > 0` queda como **saldo no cobrado** (RN-SES-06, D-159) | `SESSION_FORCE_CLOSED` (+ `REFUND_CREATED` si hubo reembolso automático) | ídem |
 
 `CLOSED` es terminal. No hay reapertura en el MVP.
 
@@ -125,9 +125,9 @@ stateDiagram-v2
 
 | Acción | Quién | Guardas | Errores | Auditoría |
 |---|---|---|---|---|
-| Crear `PAYMENT` | Participante (`payment.create`) / personal (`payment.register_cash`) | Sesión `OPEN`; `100 ≤ amount ≤ balance`; `balance > 0`; idempotencia | `SESSION_CLOSED`, `PAYMENT_AMOUNT_INVALID`, `PAYMENT_EXCEEDS_BALANCE`, `PAYMENT_NOTHING_TO_PAY`, `PAYMENT_DECLINED` | `PAYMENT_CREATED` / `PAYMENT_FAILED` |
+| Crear `PAYMENT` | Participante (`payment.create`) / personal (`payment.register_cash`) | Sesión `OPEN`; con `amountMinor > 0`: `min(minPaymentMinor, balance) ≤ amount ≤ balance` y `balance > 0` (D-158); con `amountMinor = 0`, solo propina (§8.1, D-146); idempotencia | `SESSION_CLOSED`, `PAYMENT_AMOUNT_INVALID`, `PAYMENT_EXCEEDS_BALANCE`, `PAYMENT_NOTHING_TO_PAY`, `PAYMENT_DECLINED` | `PAYMENT_CREATED` / `PAYMENT_FAILED` |
 | Anular | `payment.void` | `SUCCEEDED`, sesión `OPEN`, motivo | `PAYMENT_NOT_VOIDABLE` | `PAYMENT_VOIDED` |
-| `REFUND` | `payment.refund` | Sesión `OPEN`; `amount ≤ pagado neto`; motivo | `REFUND_EXCEEDS_PAID` | `REFUND_CREATED` |
+| `REFUND` | `payment.refund` | Sesión `OPEN`; `amount ≤ pagado neto`; motivo (el reembolso automático del cierre forzado, D-159, lo crea el sistema mientras cierra la sesión) | `REFUND_EXCEEDS_PAID` | `REFUND_CREATED` |
 
 ## 6. Estado visible de la mesa (derivado para el tablero del personal)
 
@@ -152,7 +152,7 @@ Cualquier combinación `(estado actual, acción)` que **no** aparezca en las tab
 ## 8. Añadidos en v0.2
 
 ### 8.1 Pago con propina
-`PaymentKind`/`PaymentStatus` no cambian. Un pago `PAYMENT` puede llevar `tipMinor ≥ 0`; si `amountMinor = 0`, `tipMinor > 0` (pago solo propina). Anular el pago anula la propina (`VOIDED`).
+`PaymentKind`/`PaymentStatus` no cambian. Un pago `PAYMENT` puede llevar `tipMinor ≥ 0`; si `amountMinor = 0`, `tipMinor > 0` (pago solo propina). Anular el pago anula la propina (`VOIDED`). Un pago solo propina no se rechaza por saldo 0 (D-146); el mínimo de pago aplica solo al monto principal (D-158).
 
 ### 8.2 Ajuste de cuenta (`AdjustmentStatus`)
 ```mermaid

@@ -93,7 +93,7 @@ Todas quedaron 🟢 **aceptadas** (D-101 a D-128), salvo **D-121**, que no traí
 | D-140 | **i18n en la web cliente**: es-AR + en desde el diseño; alemán después. Panel admin y app Android solo es-AR. Catálogo con traducciones por idioma | Q-13 | 🟢 (idiomas 🟡) |
 | D-141 | **Multi-sucursal simulada**: `restaurant_id` en todo y pruebas de aislamiento con dos restaurantes; sin UI multi-local | Q-14 | 🟢 |
 
-## 3.2 Decisiones tomadas por delegación del dueño (D-142 … D-157)
+## 3.2 Decisiones tomadas por delegación del dueño (D-142 … D-159)
 
 El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable y bueno"*. Las toma el Arquitecto y el dueño puede **revocar cualquiera**. El detalle (alternativas descartadas y qué estudiar) está en `00-gobierno/advances.md` §2. Estado 🟢 (delegada) = tomada por delegación, revocable.
 
@@ -115,6 +115,8 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | D-155 | **Imágenes**: subir desde el admin solo en local (`MEDIA_UPLOAD_ENABLED=true`); en la demo, imágenes versionadas en el repo | Q-20 | 🟢 (delegada) |
 | D-156 | **Backend como imagen Docker** configurada solo por variables de entorno, sin atarse a un proveedor. El hosting y PostgreSQL se eligen en la Fase 2 con el checklist de `nube.md` | Q-15 | 🟢 (delegada) / 🔴 proveedor |
 | D-157 | **Consolidar la documentación ("v0.3")** antes de la Fase 2: integrar en el cuerpo las secciones "v0.2" apendadas | H-06 | 🟢 (delegada) |
+| D-158 | **Pago mínimo con saldo chico**: el monto principal debe cumplir `min(minPaymentMinor, balance) ≤ amount ≤ balance`. Si el saldo es menor al mínimo, se paga **exactamente el saldo**. Así siempre se puede saldar la cuenta | H-13 | 🟢 (delegada) |
+| D-159 | **Cierre forzado con saldo negativo**: en la misma transacción, tras cancelar ítems, si `balance < 0` el sistema registra un **reembolso simulado automático** por el exceso (no incluye propinas), auditado con el actor y la marca "automático por cierre forzado". Si `balance > 0` queda como **saldo no cobrado** en auditoría y comprobante. Los pagos y propinas ya registrados se conservan | H-14 | 🟢 (delegada) |
 
 ## 4. Preguntas
 

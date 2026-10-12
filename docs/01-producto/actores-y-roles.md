@@ -25,7 +25,7 @@
 | `order.cancel_own` | Cancelar pedido propio pendiente | Autor del pedido o `HOST` |
 | `bill.read` | Ver cuenta | Sesión propia |
 | `payment.create` | Registrar pago simulado | Sesión propia abierta |
-| `participant.manage` | Revocar participantes, rotar código | Solo `HOST` de la sesión |
+| `participant.manage` | Revocar participantes, rotar código | Solo `HOST` de la sesión (si aún no hay HOST, D-143, lo cubre el personal con `participant.revoke`) |
 | `order.read` | Ver pedidos | Restaurante; Cocina solo ítems de su estación aceptados |
 | `order.accept` / `order.reject` | Decidir pedido pendiente | Restaurante |
 | `order.cancel` | Cancelar ítems/pedido ya aceptado | Restaurante (estación propia si es Cocina/Barra) |
@@ -51,7 +51,7 @@
 | `audit.read` | Consultar auditoría | Restaurante |
 | `settings.manage` | Horarios, límites, textos | Restaurante |
 
-## 3. Matriz rol × permiso (por defecto — 🟡 validar D-115, D-116)
+## 3. Matriz rol × permiso (por defecto — D-115, D-116)
 
 ✔ = permitido · ○ = permitido con alcance restringido · — = no
 
@@ -121,7 +121,7 @@
 
 | Permiso | Qué autoriza | Alcance |
 |---|---|---|
-| `adjustment.apply` | Aplicar descuentos, cortesías y ajustes **dentro del límite** (`maxStaffDiscountPercent`, `maxStaffAdjustmentMinor`) | Sesión abierta |
+| `adjustment.apply` | Aplicar descuentos, cortesías y ajustes **dentro del límite** (`maxStaffDiscountPercent` = 15 % **acumulado** de los cargos brutos, D-142; `maxStaffAdjustmentMinor` opcional) | Sesión abierta |
 | `adjustment.apply_any` | Aplicar sin límite | Sesión abierta |
 | `adjustment.void` | Anular ajustes (Mozo: propios y ≤ 10 min; Dueño: cualquiera) | Sesión abierta |
 | `waiter_call.create` | Llamar al mozo | Sesión propia abierta |
@@ -137,4 +137,4 @@
 | `waiter_call.create` | ✔ | ✔ | — | — | — | — |
 | `waiter_call.handle` | — | — | ✔ | ✔ | — | ✔ |
 
-Límite de descuento del Mozo: 10 % (🟡 Q-17). Cocina no ve propinas ni ajustes.
+Límite de descuento del Mozo: **15 % acumulado** de los cargos brutos de la sesión (suma de todos sus ajustes vigentes sin `adjustment.apply_any`), configurable; el Dueño no tiene límite (D-142). Cocina no ve propinas ni ajustes.

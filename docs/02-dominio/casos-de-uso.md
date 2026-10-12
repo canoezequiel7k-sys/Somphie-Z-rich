@@ -27,7 +27,7 @@ flowchart LR
 ### CU-01 — Escanear QR y resolver la mesa
 - **Actor:** visitante anónimo · **Permiso:** público · **Fase:** 4
 - **Pre:** QR impreso con `tableCode`.
-- **Flujo:** 1) Abre `/t/{tableCode}`. 2) La web llama `GET /public/tables/{tableCode}`. 3) Recibe `{tableLabel, restaurantOpen, hasActiveSession, canOpen}`. 4) Si hay token guardado y válido para esa sesión → CU-04. Si no hay sesión → ofrece CU-02. Si hay sesión → pide código (CU-03).
+- **Flujo:** 1) Abre `/t/{tableCode}`. 2) La web llama `GET /public/tables/{tableCode}`. 3) Recibe `{tableLabel, restaurantId, restaurantOpen, hasActiveSession, canOpen}` (`restaurantId` permite pedir el menú del local correcto, D-144). 4) Si hay token guardado y válido para esa sesión → CU-04. Si no hay sesión → ofrece CU-02. Si hay sesión → pide código (CU-03).
 - **Errores:** `TABLE_CODE_INVALID` (QR viejo/regenerado) → pantalla "Este QR ya no es válido, avisá al personal"; `TABLE_UNAVAILABLE`; `RESTAURANT_CLOSED` (muestra menú de solo lectura).
 - **Nota:** el menú se puede **ver** sin abrir sesión (solo lectura); abrir sesión se pide al primer intento de pedir.
 - **Pantallas:** SC-C-01.
@@ -37,14 +37,14 @@ flowchart LR
 - **Pre:** mesa activa, sin sesión `OPEN`, local abierto.
 - **Flujo:** 1) El usuario ingresa su nombre (≤30). 2) `POST /public/tables/{tableCode}/sessions {displayName}`. 3) Servidor crea sesión `OPEN`, participante `HOST`, `joinCode` y token. 4) Responde `{session, participant, guestToken, joinCode}`. 5) La web guarda el token y muestra el código para compartir.
 - **Alternativas:** carrera con otro escaneo → `409 SESSION_ALREADY_OPEN` → la web pasa a CU-03. `requireStaffToOpenSession=true` → queda esperando confirmación del personal (🟡).
-- **Efectos:** `SESSION_OPENED` auditado; `EV-session.updated`; tablero del personal muestra mesa `OCCUPIED`.
+- **Efectos:** `SESSION_OPENED` auditado; `EV-session.updated`; tablero del personal muestra mesa `OCCUPIED`. Quien abre por QR es el `HOST`; en sesiones abiertas por el personal rige CU-30 (RN-ACC-14).
 - **Idempotencia:** `Idempotency-Key` obligatorio; un reintento devuelve la misma sesión (no crea otra).
 - **Pantallas:** SC-C-02.
 
 ### CU-03 — Unirse a una sesión con código
 - **Actor:** visitante · **Permiso:** `session.join` · **Fase:** 4
 - **Pre:** sesión `OPEN` en la mesa.
-- **Flujo:** nombre + código de 6 caracteres → `POST /public/tables/{tableCode}/join {displayName, joinCode}` → participante `MEMBER` + token.
+- **Flujo:** nombre + código de 6 caracteres → `POST /public/tables/{tableCode}/join {displayName, joinCode}` → participante + token. El rol es `MEMBER`, salvo que la sesión aún no tenga `HOST` (abierta por el personal, CU-30): el primero en unirse pasa a ser `HOST` (RN-ACC-14). Si dos se unen a la vez, uno queda `HOST` y el otro `MEMBER`, **sin error** (RN-ACC-15, D-143).
 - **Errores:** `JOIN_CODE_REQUIRED`, `JOIN_CODE_INVALID`, `JOIN_CODE_RATE_LIMITED` (muestra espera), `SESSION_FULL`, `SESSION_CLOSED`.
 - **Pantallas:** SC-C-03.
 
@@ -55,7 +55,7 @@ flowchart LR
 
 ### CU-05 — Consultar el menú
 - **Actor:** cualquiera · **Permiso:** `menu.read` · **Fase:** 3
-- **Flujo:** `GET /menu` (con `If-None-Match`). Muestra categorías, productos, precio, imagen, alérgenos, "Agotado".
+- **Flujo:** `GET /menu` (con `If-None-Match`). Sin token se envía `restaurantId` (o el servidor usa el predeterminado del despliegue; id desconocido → `404`, RN-TEN-03). Muestra categorías, productos, precio, imagen, alérgenos, "Agotado".
 - **Errores/estados:** sin conexión → muestra último menú en caché con aviso; vacío (sin productos) → estado vacío; error → reintentar.
 - **Pantallas:** SC-C-04/05/06.
 
@@ -97,8 +97,8 @@ flowchart LR
 
 ### CU-12 — Pagar (simulado, total o parcial)
 - **Actor:** participante · **Permiso:** `payment.create` · **Fase:** 7
-- **Pre:** sesión `OPEN`, `balance > 0`.
-- **Flujo:** 1) Elige "Pagar todo" / monto libre / "Mi parte" (divisor UI). 2) Confirma pantalla de pago simulado (sin campos de tarjeta). 3) `POST /sessions/current/payments {amountMinor, method:"SIMULATED_ONLINE"}` + `Idempotency-Key`. 4) Servidor: bloquea sesión `FOR UPDATE`, recalcula saldo, valida, crea pago, recalcula. 5) Responde `201 {payment, bill}`.
+- **Pre:** sesión `OPEN`; `balance > 0` (salvo pago solo propina con cargos, D-146).
+- **Flujo:** 1) Elige "Pagar todo" / monto libre / "Mi parte" (divisor UI). El mínimo es `min(minPaymentMinor, saldo)`: si el saldo es chico, se paga exactamente el saldo (D-158). 2) Confirma pantalla de pago simulado (sin campos de tarjeta). 3) `POST /sessions/current/payments {amountMinor, method:"SIMULATED_ONLINE"}` + `Idempotency-Key`. 4) Servidor: bloquea sesión `FOR UPDATE`, recalcula saldo, valida, crea pago, recalcula. 5) Responde `201 {payment, bill}`.
 - **Errores:** `PAYMENT_AMOUNT_INVALID`, `PAYMENT_EXCEEDS_BALANCE` (incluye saldo actual → la UI ajusta), `PAYMENT_NOTHING_TO_PAY`, `PAYMENT_DECLINED` (demo), `SESSION_CLOSED`.
 - **Concurrencia:** dos participantes pagando a la vez se serializan; el segundo ve el saldo ya reducido.
 - **Efectos:** `PAYMENT_CREATED`; `EV-bill.updated`.
@@ -166,12 +166,12 @@ flowchart LR
 - **Flujo:** `GET /staff/tables` → mesas con `displayStatus` derivado, cantidad de pendientes, saldo (desde F7).
 
 ### CU-30 — Abrir una sesión desde el personal
-- **Permiso:** `session.open_manual` · **Fase:** 5 (🟡 D-114)
-- **Flujo:** `POST /staff/tables/{tableId}/sessions {hostLabel?}` → sesión `OPEN` con `joinCode` que el mozo puede dictar. Los clientes se unen con CU-03.
+- **Permiso:** `session.open_manual` · **Fase:** 5 (D-114)
+- **Flujo:** `POST /staff/tables/{tableId}/sessions {hostLabel?}` → sesión `OPEN` con `joinCode` que el mozo puede dictar, **sin HOST** (D-143). Los clientes se unen con CU-03 y el primero en unirse pasa a ser `HOST`; hasta entonces el personal puede revocar participantes y rotar el código (RN-ACC-10, RN-ACC-14).
 - **Errores:** `SESSION_ALREADY_OPEN`, `TABLE_UNAVAILABLE`.
 
 ### CU-31 — Tomar un pedido en nombre del cliente
-- **Permiso:** `order.create_on_behalf` · **Fase:** 7 (🟡 D-113)
+- **Permiso:** `order.create_on_behalf` · **Fase:** 7 (D-113)
 - **Flujo:** `POST /staff/sessions/{id}/orders` → pedido auto-`ACCEPTED`, auditado con actor. Útil para clientes sin móvil.
 
 ### CU-32 — Registrar un pago en efectivo
@@ -192,7 +192,7 @@ flowchart LR
 ### CU-35 — Cierre forzado
 - **Permiso:** `session.force_close` · **Fase:** 7
 - **Flujo:** `POST /staff/sessions/{id}/force-close {reason}` (motivo obligatorio).
-- **Efectos:** cancela pendientes e ítems activos; audita `SESSION_FORCE_CLOSED`; comprobante marcado.
+- **Efectos:** cancela pendientes e ítems activos; audita `SESSION_FORCE_CLOSED`; comprobante marcado. Los pagos y propinas ya registrados **se conservan**. Si el saldo queda < 0, el sistema registra en la misma transacción un **reembolso simulado automático** por el exceso (sin propina), auditado; si queda > 0, se anota como **saldo no cobrado** en la auditoría y el comprobante (RN-SES-06, D-159).
 
 ### CU-36 — Alternar disponibilidad de un producto
 - **Permiso:** `availability.toggle` · **Fase:** 5
@@ -256,7 +256,7 @@ flowchart LR
 ## Enmiendas a casos existentes
 - **CU-05/06 (menú y carrito):** los productos con `optionGroups` abren una hoja de selección; respetar `required`, `min/max` y valores por defecto. El total estimado suma los deltas. El menú respeta el idioma elegido (RN-I18N).
 - **CU-07 (enviar pedido):** cada línea lleva `optionIds[]`. Errores nuevos: `OPTION_NOT_FOUND`, `OPTION_UNAVAILABLE`, `OPTION_SELECTION_INVALID`.
-- **CU-12 (pagar):** el participante puede agregar una **propina libre** (`tipMinor`) o pagar solo propina. Errores nuevos: `TIP_INVALID`, `TIP_EXCEEDS_LIMIT`, `TIP_NOT_ALLOWED`. El saldo no incluye la propina.
+- **CU-12 (pagar):** el participante puede agregar una **propina libre** (`tipMinor`) o pagar solo propina. Errores nuevos: `TIP_INVALID`, `TIP_EXCEEDS_LIMIT`, `TIP_NOT_ALLOWED`. El saldo no incluye la propina. Un pago solo propina no exige `balance > 0` (D-146) y el mínimo del monto principal es `min(minPaymentMinor, saldo)` (D-158).
 - **CU-11 (cuenta):** muestra ajustes (con etiqueta genérica) y propinas aparte.
 - **CU-24/25 (colas):** el ítem muestra `optionsSummary`.
 - **CU-32 (efectivo):** admite propina.
@@ -265,7 +265,7 @@ flowchart LR
 ### CU-37 — Aplicar descuento, cortesía o ajuste
 - **Permiso:** `adjustment.apply` / `adjustment.apply_any` · **Fase:** 7
 - **Flujo:** desde SC-S-08 elige tipo, monto/porcentaje o ítem, motivo → `POST /staff/sessions/{id}/adjustments` + `Idempotency-Key`. Servidor: lock `FOR UPDATE`, calcula importe, valida límite y saldo, registra, audita.
-- **Errores:** `ADJUSTMENT_INVALID`, `ADJUSTMENT_EXCEEDS_BALANCE`, `ADJUSTMENT_LIMIT_EXCEEDED` (sugiere pedir al Dueño), `ADJUSTMENT_ITEM_INVALID`, `SESSION_CLOSED`.
+- **Errores:** `ADJUSTMENT_INVALID`, `ADJUSTMENT_EXCEEDS_BALANCE`, `ADJUSTMENT_LIMIT_EXCEEDED` (el límite del Mozo es **acumulado**: 15 % de los cargos brutos, D-142; sugiere pedir al Dueño), `ADJUSTMENT_ITEM_INVALID`, `SESSION_CLOSED`.
 
 ### CU-38 — Anular un ajuste
 - **Permiso:** `adjustment.void` · **Fase:** 7 · `POST /staff/adjustments/{id}/void {reason}`. Errores: `ADJUSTMENT_NOT_VOIDABLE`, `FORBIDDEN`.

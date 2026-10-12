@@ -41,14 +41,15 @@
 CREATE UNIQUE INDEX ux_one_open_session_per_table
   ON table_session (table_id) WHERE status = 'OPEN';
 
--- Un solo host por sesión
+-- Un solo host por sesión (RN-ACC-15). Una sesión abierta por el personal puede no tener HOST
+-- hasta que alguien se una (D-143). Ver §7.5 para el patrón de unión.
 CREATE UNIQUE INDEX ux_one_host_per_session
   ON session_participant (session_id) WHERE role = 'HOST';
 
 -- Idempotencia de pagos a nivel de datos
 ALTER TABLE payment ADD CONSTRAINT ux_payment_idem UNIQUE (session_id, idempotency_key);
 
--- Dinero siempre válido
+-- Dinero siempre válido (nota: el CHECK de `payment` fue reemplazado en v0.2, ver §7.2)
 ALTER TABLE payment ADD CONSTRAINT ck_payment_amount CHECK (amount_minor > 0);
 ALTER TABLE order_item ADD CONSTRAINT ck_item_qty CHECK (quantity BETWEEN 1 AND 99);
 ALTER TABLE product ADD CONSTRAINT ck_product_price CHECK (price_minor > 0);
@@ -113,10 +114,28 @@ ALTER TABLE order_item ADD CONSTRAINT ck_item_status CHECK (status IN
 | `product` | `image_url` → `image_path` + `image_version`; alérgenos limitados a la lista de D-137 |
 | `order_item` | + `base_price_minor`, `name_i18n jsonb`; `options_snapshot` deja de estar reservado y pasa a usarse |
 | `payment` | + `tip_minor bigint not null default 0`. Se **reemplaza** `CHECK(amount_minor > 0)` por `CHECK(amount_minor >= 0 AND tip_minor >= 0 AND amount_minor + tip_minor > 0)` y se agrega `CHECK(kind = 'PAYMENT' OR tip_minor = 0)` |
-| `restaurant_settings` | + `max_tip_percent` (100), `max_staff_discount_percent` (10), `max_staff_adjustment_minor`, `waiter_call_cooldown_sec` (60), `default_locale` (`es-AR`), `supported_locales` |
+| `restaurant_settings` | + `max_tip_percent` (100), `max_staff_discount_percent` (**15**, D-142), `max_staff_adjustment_minor` (nullable: sin tope por defecto, D-142), `waiter_call_cooldown_sec` (60), `default_locale` (`es-AR`), `supported_locales` |
 
 ### 7.3 Consulta única de cuenta (actualizada)
 `billableChargesForSession` sigue siendo **la única** definición de cargos. Se agrega `appliedAdjustmentsForSession` (Σ `bill_adjustment` `APPLIED`) y `tipsForSession` (Σ `tip_minor` de pagos `SUCCEEDED`). `balance = charges − adjustments − paidNet`.
 
 ### 7.4 Retención (D-135)
 Nombres de invitados: anonimizar a los 12 meses (🟡). `waiter_call`: 30 días. El resto sin cambios.
+
+### 7.5 Cambios del Paso 3 (2026-10-11)
+
+**HOST en sesiones abiertas por el personal (D-143, RN-ACC-14/15).** `table_session.opened_by_type` indica quién abrió la sesión. Si la abrió el personal, no existe fila `HOST` hasta que alguien se une. Patrón de unión (indicativo; todo dentro de **una** transacción):
+
+```sql
+-- 1) Intentar ser HOST. Si ya hay uno, no inserta nada y no falla.
+INSERT INTO session_participant (id, session_id, display_name, role, token_hash, created_at)
+VALUES (:id, :sessionId, :name, 'HOST', :tokenHash, now())
+ON CONFLICT (session_id) WHERE role = 'HOST' DO NOTHING;
+-- 2) Si el paso 1 insertó 0 filas (el HOST ya existía), insertar el mismo participante con role = 'MEMBER'.
+```
+
+Por qué así: **no** se consulta "¿hay HOST?" para insertar después. Dos transacciones podrían consultar a la vez, ver "no hay" y ambas intentar ser HOST (condición de carrera). Se deja que la base decida con el índice único parcial `ux_one_host_per_session`: la segunda transacción espera el commit de la primera y su `INSERT` no hace nada.
+
+**Pago mínimo (D-158).** Sin cambios de esquema: `min(minPaymentMinor, balance)` se valida en la aplicación.
+
+**Cierre forzado (D-159).** Sin columnas nuevas. El reembolso automático es una fila `payment` con `kind = 'REFUND'` cuyo `reason` lo identifica como "cierre forzado automático". El saldo no cobrado no se guarda: se calcula con la consulta de cuenta (`charges − adjustments − paidNet`) y se copia a `audit_event.after_summary` al cerrar.

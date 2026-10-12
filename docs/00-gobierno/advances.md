@@ -112,6 +112,18 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Qué:** integrar las secciones "v0.2" apendadas dentro del cuerpo de cada documento.
 - **Por qué:** una regla repartida en dos lugares con "precedencia" es una trampa para quien llega nuevo.
 
+### D-158 — Pago mínimo con saldo chico (H-13)
+- **Qué:** el monto principal debe cumplir `min(minPaymentMinor, balance) ≤ amount ≤ balance`. Si el saldo es menor al mínimo, se paga **exactamente el saldo**.
+- **Por qué:** con la regla anterior, si quedaban 50 centavos y el mínimo era 100, ningún monto era válido y la cuenta no se podía saldar. El mínimo existe para evitar pagos ridículamente chicos, no para impedir cerrar la cuenta.
+- **Alternativas:** bajar el mínimo a 1 centavo (permite spam de micropagos); permitir saldar solo en efectivo (obliga al personal a intervenir por centavos).
+- **Estudiar:** *casos borde en límites numéricos*, *reglas con excepciones explícitas*.
+
+### D-159 — Cierre forzado con saldo negativo (H-14)
+- **Qué:** en el cierre forzado, tras cancelar ítems, si `balance < 0` el sistema registra **en la misma transacción** un reembolso simulado automático por el exceso (sin devolver propina), auditado con el actor. Si `balance > 0` queda como **saldo no cobrado** en auditoría y comprobante. Los pagos y propinas ya registrados se conservan.
+- **Por qué:** el cierre normal exige saldo 0, pero el forzado existe para destrabar situaciones. No debe dejar una sesión cerrada con plata "a favor" del cliente sin registrar. Hacerlo automático y en la misma transacción evita estados intermedios.
+- **Alternativas:** bloquear el cierre forzado hasta reembolsar a mano (contradice su propósito); cerrar y dejar el saldo negativo (la contabilidad queda inconsistente).
+- **Estudiar:** *transacciones*, *valores derivados vs. guardados* (el saldo no cobrado se calcula, no se guarda).
+
 ### Sigue pendiente
 - **Q-21 (parcialmente resuelta):** el ícono existe como `ic_icon.svg` y hay un boceto `boceto_v.1.0.png`. Falta confirmar: (a) si el SVG es el isotipo **final**; (b) si hay logo horizontal; (c) el motivo de su tamaño (1,54 MB es muy grande para un SVG: normalmente un ícono pesa decenas de KB; puede tener una imagen incrustada o un trazado automático con miles de nodos y habría que **optimizarlo** antes de usarlo como favicon o ícono de Android). Bloquea solo los tokens y el ícono derivado, no el resto.
 
@@ -120,9 +132,9 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 
 | ID | Hallazgo | Paso |
 |---|---|---|
-| H-01 | 15 % vs 10 % (reglas y contrato dicen 15 %; el ejemplo de error del contrato dice 10; Q-17 sigue abierta en decisiones) | 1, 3, 4 |
+| H-01 | 15 % vs 10 % (reglas y contrato dicen 15 %; el ejemplo de error del contrato dice 10; Q-17 sigue abierta en decisiones) | 1 ✅, 3 ✅; **queda el ejemplo del contrato (Paso 4)** |
 | H-02 | RN-BIL-03 contradice el pago solo propina | 2 |
-| H-03 | Regla de HOST en sesión abierta por el personal no está documentada (choca con RN-ACC-10, estados §1, modelo de datos, CU-30) | 2, 3 |
+| H-03 | Regla de HOST en sesión abierta por el personal no está documentada (choca con RN-ACC-10, estados §1, modelo de datos, CU-30) | 2 ✅, 3 ✅ |
 | H-04 | Resolución del restaurante en `GET /menu` no está en RN-TEN | 2, 4 |
 | H-05 | Campos marcados `proposed` en el contrato | 4 |
 | H-06 | RN-CAT-08 cita Q-09; RN-ORD-02/03/04 sin opciones; RN-SES-06 sin pagos/propinas; RN-BIL-06/07/09 sin propina; RN-TIP-03 sin "bruto"; RN-BIL-05 sin aclarar `.13` sobre el monto principal; encabezado de valores por defecto sin los parámetros v0.2 | 2 |
@@ -132,8 +144,9 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | H-10 | Archivos duplicados en la raíz | 7 |
 | H-11 | Q-16…Q-20 siguen abiertas en `decisiones.md` | 1 (✅ resuelto) |
 | H-12 | `AGENTS.md` §1 punto 3 dice que `openapi.yaml` "cuando exista, Fase 1" y que antes rige `endpoints.md`, pero el contrato ya existe (0.2.1). El encabezado del `README.md` solo cita D-101…D-128 y Q-01…Q-14 | 8 |
-| H-13 | **Regla del pago mínimo con saldo chico.** RN-BIL-03 exige `amount ≥ minPaymentMinor` (100 centavos por defecto) y `amount ≤ balance`. Si el saldo es menor al mínimo (ej. quedan 50 centavos) ninguna cantidad cumple las dos condiciones y la cuenta no se puede saldar por esta vía. Propuesta: `amount ≥ min(minPaymentMinor, balance)`. Falta confirmar con el contrato y decidir | 3 (decisión) y 4 |
-| H-14 | **Cierre forzado con saldo negativo** (RN-SES-06): si al cancelar ítems activos los pagos ya hechos superan los cargos, no está definido si se reembolsa antes, durante o después del cierre, ni qué código de error aplica | 3 |
+| H-13 | **Regla del pago mínimo con saldo chico.** RN-BIL-03 exigía `amount ≥ minPaymentMinor` y `amount ≤ balance`; con saldo menor al mínimo ninguna cantidad servía. **Resuelto con D-158** | 3 ✅ (contrato: Paso 4) |
+| H-14 | **Cierre forzado con saldo negativo** (RN-SES-06): no estaba definido qué pasaba. **Resuelto con D-159** (reembolso simulado automático) | 3 ✅ (contrato: Paso 4) |
+| H-15 | **Documentos que no revisé en el Paso 3** y pueden seguir mencionando el 10 %, el mínimo fijo de 100 o un HOST siempre presente: `04-api/endpoints.md`, `05-diseno/mapa-pantallas.md`, `08-agentes/*`, ADRs y `01-producto/alcance.md`. Mi herramienta busca nombres de archivo, no contenido, así que no pude comprobarlo. **El dueño puede verificarlo con** `git grep -n -E "10 ?%|Q-15|Q-17|Q-18|Q-20|HOST" -- docs` | 8 |
 
 ---
 ## 4. Plan paso a paso
@@ -145,8 +158,8 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | 0 | ✅ | Crear este archivo (estado, decisiones, plan) | `docs/00-gobierno/advances.md` | El archivo existe y el dueño lo aprobó | `docs(governance): add advances log` |
 | 1 | ✅ | Registrar D-142…D-157; cerrar Q-15…Q-20; dejar Q-21; enlazar `advances.md` desde `AGENTS.md` y `README.md` | `docs/00-gobierno/decisiones.md`, `AGENTS.md`, `README.md` | Cada decisión tiene ID, estado y motivo; no quedan preguntas contradictorias | `docs(governance): record decisions D-142..D-157` |
 | 2 | ✅ | Corregir reglas de negocio (H-02, H-03, H-04, H-06) y agregar la regla de HOST y RN-TEN-03 | `docs/02-dominio/reglas-negocio.md` (+ `docs/00-gobierno/advances.md` para anotar) | Ninguna regla contradice a otra ni al contrato | `docs(domain): align business rules with contract` |
-| 3 | ⬜ | Propagar a documentos que dependen de esas reglas (H-01, H-03): estados §1, casos de uso (CU-02/03/30), modelo de datos, roles (15 %), casos límite nuevos, errores, criterios de aceptación | `estados-y-transiciones.md`, `casos-de-uso.md`, `modelo-datos.md`, `actores-y-roles.md`, `casos-limite.md`, `catalogo-errores.md`, `criterios-aceptacion.md` | Cada regla modificada se refleja en todos los documentos que la mencionan | `docs(domain): propagate rule changes` |
-| 4 | ⬜ | Contrato **0.2.2**: ejemplo 15 %, quitar "proposed", `PublicTable.restaurantId`, `TIP_NOT_ALLOWED` en 409, `x-permission` del recibo, regla del HOST en `join`, etiqueta del pedido a nombre de la mesa. Reordenar `CHANGELOG.md` (H-05, H-07, H-08) | `docs/04-api/openapi.yaml`, `docs/04-api/CHANGELOG.md` | `info.version` = última entrada del changelog; todos los cambios son **compatibles** | `docs(api): contract 0.2.2` |
+| 3 | ✅ | Propagar a documentos que dependen de esas reglas (H-01, H-03): estados §1, casos de uso (CU-02/03/30), modelo de datos, roles (15 %), casos límite nuevos, errores, criterios de aceptación | `estados-y-transiciones.md`, `casos-de-uso.md`, `modelo-datos.md`, `actores-y-roles.md`, `casos-limite.md`, `catalogo-errores.md`, `criterios-aceptacion.md`; además `decisiones.md` y `reglas-negocio.md` (D-158 y D-159, que cierran H-13 y H-14) | Cada regla modificada se refleja en todos los documentos que la mencionan | `docs(domain): propagate rule changes` |
+| 4 | ⬜ | Contrato **0.2.2**: ejemplo 15 %, quitar "proposed", `PublicTable.restaurantId`, `TIP_NOT_ALLOWED` en 409, `x-permission` del recibo, regla del HOST en `join`, etiqueta del pedido a nombre de la mesa; **y reflejar D-158** (`minMinor` del pago calculado con el saldo) **y D-159** (efectos del `force-close`). Reordenar `CHANGELOG.md` (H-05, H-07, H-08) | `docs/04-api/openapi.yaml`, `docs/04-api/CHANGELOG.md` | `info.version` = última entrada del changelog; todos los cambios son **compatibles** | `docs(api): contract 0.2.2` |
 | 5 | ⬜ | Redocly: corregir `redocly.yaml` (H-09) y reemplazar Spectral en los documentos (D-148). **El dueño corre** `npx @redocly/cli lint docs/04-api/openapi.yaml` y pega el resultado | `redocly.yaml`, ADR-0008, `estrategia.md`, `nube.md`, `convenciones.md`, `devops.md` | El lint corre sin errores de configuración | `chore(api): standardize on redocly` |
 | 6 | ⬜ | Catálogo de acciones de auditoría (D-151) | `docs/02-dominio/catalogo-auditoria.md` | Cada acción citada en reglas/estados tiene su código | `docs(domain): add audit action catalog` |
 | 7 | ⬜ | Comparar duplicados de la raíz con los de `docs/` y reportar diferencias; el dueño borra (H-10) | raíz | Un solo archivo oficial por documento | `chore: remove duplicated docs` |
@@ -202,6 +215,22 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Qué NO se hizo:** no se tocaron estados, casos de uso, modelo de datos ni contrato (pasos 3 y 4). RN-SES-06 quedó con una parte 🟡 a propósito: la mecánica del saldo negativo falta decidirla.
 - **Qué estudiar:** *regla general vs. regla específica* (RN-BIL-03 era general y RN-TIP-01 específica: la general debe nombrar sus excepciones); *invariantes* ("un solo HOST" es una invariante: se protege en la base, no solo en el código); *casos borde en límites numéricos* (H-13 es un caso clásico: un mínimo que choca con un máximo); *saldo acumulado vs. por operación* (D-142).
 - **Archivos tocados:** `docs/02-dominio/reglas-negocio.md`, `docs/00-gobierno/advances.md`.
+
+### 2026-10-11 — Paso 3 ✅ — Se propagan las reglas a los documentos derivados; D-158 y D-159
+- **Decisiones nuevas** (el dueño dijo "decidí vos"): **D-158** (pago mínimo `min(minPaymentMinor, balance)`: si el saldo es menor al mínimo, se paga exactamente el saldo) y **D-159** (cierre forzado con saldo negativo: reembolso simulado automático por el exceso, sin propina, en la misma transacción; con saldo positivo queda como *no cobrado*). Registradas en `decisiones.md` §3.2 y aplicadas en `reglas-negocio.md` (RN-BIL-03, RN-SES-06, RN-TIP-04).
+- **Qué se cambió, por archivo:**
+  - `estados-y-transiciones.md`: `open` (con/sin HOST según quién abre), `force_close` (efectos de D-159), pago (guardas con mínimo dinámico), reembolso automático, §8.1.
+  - `casos-de-uso.md`: CU-01 y CU-05 (`restaurantId`), CU-02/03/30 (HOST), CU-12 (mínimo y pago solo propina), CU-35 (D-159), CU-37 (límite acumulado); se quitaron marcas 🟡 de D-113/D-114.
+  - `modelo-datos.md`: ajuste por defecto 15 %, `max_staff_adjustment_minor` nullable, nueva §7.5 con el patrón SQL `INSERT … ON CONFLICT DO NOTHING` para el HOST.
+  - `actores-y-roles.md`: límite acumulado 15 %, `participant.manage` con la salvedad del HOST ausente, se quitó la marca 🟡.
+  - `catalogo-errores.md`: `PAYMENT_AMOUNT_INVALID`, `PAYMENT_NOTHING_TO_PAY` y `ADJUSTMENT_LIMIT_EXCEEDED` actualizados. **No se agregó ningún código de error nuevo.**
+  - `casos-limite.md`: nuevos CL-055, 056, 118, 119, 199, 216, 217; CL-101, 102, 112, 190 corregidos.
+  - `criterios-aceptacion.md`: nueva sección con AC-CU-30-a, 03-d/e, 13-a, 05-a/b, 12-j/k, 35-b/c/d, 37-e.
+  - `reglas-negocio.md`: fila nueva en su historial de cambios.
+- **Por qué:** cuando cambia una regla hay que actualizar **todos** los documentos que la repiten; si no, queda la misma contradicción que se corrigió en el Paso 2 pero escondida en otro archivo. Además, cada regla nueva necesita un caso límite y un criterio de aceptación: sin eso nadie escribe la prueba que protege la regla.
+- **Qué NO se hizo:** no se tocó `openapi.yaml` (Paso 4); se amplió la descripción del Paso 4 para incluir D-158 y D-159. No pude verificar con búsqueda de contenido que no queden menciones viejas en otros documentos (**H-15**).
+- **Qué estudiar:** *trazabilidad regla → caso límite → criterio de aceptación → prueba*; *`INSERT … ON CONFLICT DO NOTHING`* y por qué evita la condición de carrera; *transacción única* (el reembolso automático y el cierre ocurren juntos o no ocurren); *por qué un valor derivado (el saldo no cobrado) no se guarda sino que se calcula*; *pruebas de integración con base real* (AC-CU-03-e).
+- **Archivos tocados:** `decisiones.md`, `reglas-negocio.md`, `estados-y-transiciones.md`, `casos-de-uso.md`, `modelo-datos.md`, `actores-y-roles.md`, `catalogo-errores.md`, `casos-limite.md`, `criterios-aceptacion.md`, `advances.md`.
 
 ### Historial previo (resumen, para contexto)
 - **v0.1:** plan maestro convertido en 52 documentos (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes).

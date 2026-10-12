@@ -54,6 +54,8 @@ Cada fila es un escenario **que debe tener una prueba**. Columnas: mecanismo que
 | CL-052 | Nombre con HTML/emoji extremo | Se sanitiza/escapa; longitud ≤ 30 | Validación | RN-ACC-12 |
 | CL-053 | Mesa abierta por el personal pero nadie se une | La sesión vacía expira a los 30 min | Job | RN-SES-08 |
 | CL-054 | Se rota el código y alguien tiene el viejo | El viejo falla con `JOIN_CODE_INVALID`; los ya unidos siguen | — | RN-ACC-07 |
+| CL-055 | Sesión abierta por el personal: se une la primera persona | Pasa a ser `HOST`; los que se unen después son `MEMBER` | Rol decidido al unirse | RN-ACC-14, CU-03/30 |
+| CL-056 | Dos personas se unen **a la vez** a una sesión sin HOST | Exactamente un `HOST` y un `MEMBER`; ninguna recibe error | Índice único parcial + `INSERT … ON CONFLICT DO NOTHING` | RN-ACC-15, D-143 |
 
 ## 4. Pedidos y catálogo
 
@@ -97,8 +99,8 @@ Cada fila es un escenario **que debe tener una prueba**. Columnas: mecanismo que
 | ID | Escenario | Comportamiento esperado | Mecanismo | Refs |
 |---|---|---|---|---|
 | CL-100 | Pagar más que el saldo | `PAYMENT_EXCEEDS_BALANCE` | — | RN-BIL-03 |
-| CL-101 | Pagar con saldo 0 | `PAYMENT_NOTHING_TO_PAY` | — | — |
-| CL-102 | Monto 0, negativo o con decimales | `PAYMENT_AMOUNT_INVALID` / `VALIDATION_FAILED` | Enteros | RN-BIL-03 |
+| CL-101 | Pagar con saldo 0 (monto principal > 0) | `PAYMENT_NOTHING_TO_PAY`. Un pago **solo propina** con saldo 0 sí se acepta (CL-182) | — | RN-BIL-03, D-146 |
+| CL-102 | Monto principal negativo, con decimales o menor al mínimo `min(minPaymentMinor, saldo)` | `PAYMENT_AMOUNT_INVALID` / `VALIDATION_FAILED`. (Monto 0 sin propina: CL-180) | Enteros | RN-BIL-03, D-158 |
 | CL-103 | Pagar después de cerrada la sesión | `SESSION_CLOSED` | — | RN-BIL-08 |
 | CL-104 | Se paga todo y luego se pide algo más | Saldo vuelve a positivo; se puede pagar otra vez | — | — |
 | CL-105 | Se cancela un ítem ya pagado → saldo negativo | Mesa en "saldo a favor"; el cierre falla (`SESSION_BALANCE_PENDING`) hasta registrar reembolso | RN-BIL-07 | — |
@@ -108,12 +110,14 @@ Cada fila es un escenario **que debe tener una prueba**. Columnas: mecanismo que
 | CL-109 | Cierre con pedido pendiente | `SESSION_HAS_PENDING_ORDERS` con lista | — | RN-SES-05 |
 | CL-110 | Cierre con ítems sin entregar | `SESSION_HAS_ACTIVE_ITEMS` con lista | — | — |
 | CL-111 | Cierre con saldo > 0 | `SESSION_BALANCE_PENDING` con monto | — | — |
-| CL-112 | Cierre forzado con deuda | Permitido a `OWNER` con motivo; comprobante marca "cierre forzado" | — | RN-SES-06 |
+| CL-112 | Cierre forzado con deuda | Permitido a `OWNER` con motivo; el saldo queda como **no cobrado** (auditoría y comprobante) y los pagos y propinas se conservan (D-159); comprobante marca "cierre forzado" | — | RN-SES-06 |
 | CL-113 | Cerrar una sesión ya cerrada | Idempotente: `200` con estado actual | — | CU-34 |
 | CL-114 | Cambia el precio del catálogo con la cuenta abierta | La cuenta **no cambia** | Snapshot | RN-BIL-01 |
 | CL-115 | División en partes iguales con resto (ej. $1.000 / 3) | UI sugiere 334/333/333 (resto al primero); servidor solo ve montos | UI | RN-BIL-10 |
 | CL-116 | Comprobante pedido antes del cierre | `RECEIPT_NOT_AVAILABLE` | — | RN-BIL-09 |
 | CL-117 | Visita vacía (nadie pidió) | Staff cierra como `EMPTY` o expira `EXPIRED_EMPTY` | — | RN-SES-04 |
+| CL-118 | Quedan 50 centavos de saldo (menos que el mínimo de 100) | Un pago de exactamente 50 se acepta; 49 → `PAYMENT_AMOUNT_INVALID`; 51 → `PAYMENT_EXCEEDS_BALANCE` | Mínimo dinámico | RN-BIL-03, D-158 |
+| CL-119 | Cierre forzado cuando, tras cancelar ítems, los pagos superan los cargos | En la misma transacción se registra un reembolso simulado automático por el exceso (sin propina), auditado; la sesión cierra sin saldo negativo | Transacción única | RN-SES-06, D-159 |
 
 ## 7. Identidad y seguridad
 
@@ -187,7 +191,7 @@ Cada fila es un escenario **que debe tener una prueba**. Columnas: mecanismo que
 ## 12. Descuentos, cortesías y ajustes
 | ID | Escenario | Comportamiento esperado | Refs |
 |---|---|---|---|
-| CL-190 | Mozo aplica más del 10 % | `ADJUSTMENT_LIMIT_EXCEEDED` | RN-ADJ-06 |
+| CL-190 | Mozo aplica más del 15 % de los cargos brutos | `ADJUSTMENT_LIMIT_EXCEEDED` | RN-ADJ-06 |
 | CL-191 | Descuento mayor al saldo | `ADJUSTMENT_EXCEEDS_BALANCE` | RN-ADJ-05 |
 | CL-192 | Llega un pedido nuevo después del descuento | No se descuenta (importe congelado) | RN-ADJ-03 |
 | CL-193 | Se cancela un ítem con cortesía | La cortesía se anula en la misma transacción | RN-ADJ-08 |
@@ -196,6 +200,7 @@ Cada fila es un escenario **que debe tener una prueba**. Columnas: mecanismo que
 | CL-196 | Se anula un ajuste con la cuenta ya pagada | Permitido: el saldo vuelve a subir | RN-ADJ-07 |
 | CL-197 | Mozo intenta anular el ajuste de otro o pasados 10 min | `FORBIDDEN` / `ADJUSTMENT_NOT_VOIDABLE` | RN-ADJ-07 |
 | CL-198 | Ajuste con reintento (misma clave) | Un solo ajuste | RN-ADJ-09 |
+| CL-199 | Mozo aplica varios descuentos chicos que **suman** más del 15 % de los cargos brutos | El que supera el acumulado recibe `ADJUSTMENT_LIMIT_EXCEEDED`; los anteriores quedan | RN-ADJ-06, D-142 |
 
 ## 13. Llamado al mozo
 | ID | Escenario | Comportamiento esperado | Refs |
@@ -215,3 +220,5 @@ Cada fila es un escenario **que debe tener una prueba**. Columnas: mecanismo que
 | CL-213 | `Accept-Language` inválido | Fallback a `es-AR` | RN-I18N-04 |
 | CL-214 | Imagen inexistente | Placeholder de marca | RN-IMG-05 |
 | CL-215 | Usuario del restaurante A pide un recurso del B | `404` | RN-TEN-01 |
+| CL-216 | `GET /menu` sin token y sin `restaurantId` | Devuelve el menú del restaurante predeterminado del despliegue | RN-TEN-03, D-144 |
+| CL-217 | `GET /menu` con `restaurantId` desconocido, o distinto del de su token | `404` | RN-TEN-03, D-144 |
