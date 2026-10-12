@@ -2,6 +2,7 @@ package com.somphie.orders.domain
 
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
+import com.somphie.shared.domain.Money
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -14,10 +15,12 @@ import java.util.UUID
  * lanza `ITEM_INVALID_TRANSITION` (§7). El reloj NO se consulta aquí: la capa de aplicación inyecta
  * `now` (regla de oro 8 de `backend.md`).
  *
- * Los precios, opciones, nombre y estación (snapshot, RN-ORD-04) se agregan en la siguiente tanda.
+ * El snapshot (nombre, estación, precios y opciones, RN-ORD-04) vive en [ItemSnapshot]; el ítem lo
+ * conserva sin cambios en todas sus transiciones.
  */
 class OrderItem private constructor(
     val id: UUID,
+    val snapshot: ItemSnapshot,
     val status: ItemStatus,
     val queuedAt: Instant?,
     val startedAt: Instant?,
@@ -26,13 +29,19 @@ class OrderItem private constructor(
     val cancelledAt: Instant?,
 ) {
 
+    /** Importe de la línea con el PRECIO HISTÓRICO del snapshot (RN-BIL-01). */
+    val lineTotal: Money get() = snapshot.lineTotal
+
     /** El pedido fue aceptado: `PENDING → QUEUED`. */
     fun queue(now: Instant): OrderItem {
         requireFrom(ItemStatus.PENDING)
         return copyWith(status = ItemStatus.QUEUED, queuedAt = now)
     }
 
-    /** Se excluyó al aceptar el pedido (RN-ORD-10): `PENDING → CANCELLED`. */
+    /**
+     * Se excluyó al aceptar el pedido (RN-ORD-10): `PENDING → CANCELLED`. También es la transición que
+     * sufren los ítems cuando el pedido se rechaza, se cancela o expira (estados §3).
+     */
     fun exclude(now: Instant): OrderItem {
         requireFrom(ItemStatus.PENDING)
         return copyWith(status = ItemStatus.CANCELLED, cancelledAt = now)
@@ -111,10 +120,11 @@ class OrderItem private constructor(
         readyAt: Instant? = this.readyAt,
         deliveredAt: Instant? = this.deliveredAt,
         cancelledAt: Instant? = this.cancelledAt,
-    ) = OrderItem(id, status, queuedAt, startedAt, readyAt, deliveredAt, cancelledAt)
+    ) = OrderItem(id, snapshot, status, queuedAt, startedAt, readyAt, deliveredAt, cancelledAt)
 
     companion object {
-        /** Un ítem recién creado junto con su pedido (RN-ORD-05): nace `PENDING`. */
-        fun pending(id: UUID): OrderItem = OrderItem(id, ItemStatus.PENDING, null, null, null, null, null)
+        /** Un ítem recién creado junto con su pedido (RN-ORD-05): nace `PENDING`, con su snapshot. */
+        fun pending(id: UUID, snapshot: ItemSnapshot): OrderItem =
+            OrderItem(id, snapshot, ItemStatus.PENDING, null, null, null, null, null)
     }
 }

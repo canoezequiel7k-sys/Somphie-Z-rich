@@ -7,6 +7,12 @@ Reglas (D-150):
 - Versiones `0.x` = borrador. `1.0.0` = contrato congelado al cerrar la Fase 1.
 - Las fechas anteriores al 2026-10-11 no se registraron en su momento (el historial de Git empieza ese día): se marcan "fecha no registrada" en vez de inventarlas.
 
+## [0.2.3] — 2026-10-12 — cortesía solo sobre ítems aceptados (H-29)
+Cambio **compatible**: solo aclara una descripción; no cambia esquemas ni códigos de error.
+- fixed: `applyAdjustment` documenta que `ADJUSTMENT_ITEM_INVALID` (409) también aplica a un ítem aún sin aceptar (`PENDING`), además de cancelado o ya con cortesía (RN-ADJ-04, RN-BIL-01).
+- changed: `info.version` = `0.2.3` y el ejemplo de `GET /version` (`contractVersion`).
+- Impacto: **Web y Android** (no ofrecer cortesía sobre ítems de pedidos `PENDING_REVIEW`); **Backend** (ya lo cumple `CourtesyRules`).
+
 ## [0.2.2] — 2026-10-11 — contrato alineado con D-142…D-159 (Paso 4)
 Todos los cambios son **compatibles**: no se renombra ni se quita nada, no hay campos obligatorios nuevos y el único campo nuevo (`PublicTable.restaurantId`) es opcional.
 - added: `PublicTable.restaurantId` (opcional, UUID), para que la web pida `GET /menu` del local correcto tras escanear el QR (D-144). Los tres ejemplos de `GET /public/tables/{tableCode}` lo incluyen.

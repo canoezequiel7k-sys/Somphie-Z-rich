@@ -24,9 +24,9 @@ enum class AdjustmentKind { DISCOUNT_PERCENT, DISCOUNT_AMOUNT, COURTESY_ITEM, MA
  * pedido es incoherente → `ADJUSTMENT_INVALID`, como dice el contrato):
  * - `DISCOUNT_PERCENT`: [percentBp] en puntos básicos (1000 = 10 %).
  * - `DISCOUNT_AMOUNT` y `MANUAL_ADJUSTMENT`: [amount].
- * - `COURTESY_ITEM`: [itemLineTotal], el `lineTotalMinor` del ítem (RN-ADJ-04). La capa de aplicación
- *   lo busca; si el ítem está cancelado o ya tiene cortesía, ella responde `ADJUSTMENT_ITEM_INVALID`
- *   (falta el snapshot completo de `OrderItem`, ver advances.md).
+ * - `COURTESY_ITEM`: [itemLineTotal], el `lineTotalMinor` del ítem (RN-ADJ-04). Se obtiene con
+ *   `CourtesyRules.lineTotalFor`, que responde `ADJUSTMENT_ITEM_INVALID` si el ítem está cancelado o
+ *   ya tiene cortesía.
  */
 data class AdjustmentRequest(
     val kind: AdjustmentKind,

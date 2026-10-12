@@ -195,7 +195,7 @@ Cada fila es un escenario **que debe tener una prueba**. Columnas: mecanismo que
 | CL-191 | Descuento mayor al saldo | `ADJUSTMENT_EXCEEDS_BALANCE` | RN-ADJ-05 |
 | CL-192 | Llega un pedido nuevo después del descuento | No se descuenta (importe congelado) | RN-ADJ-03 |
 | CL-193 | Se cancela un ítem con cortesía | La cortesía se anula en la misma transacción | RN-ADJ-08 |
-| CL-194 | Cortesía de un ítem cancelado o ya cortesía | `ADJUSTMENT_ITEM_INVALID` | RN-ADJ-04 |
+| CL-194 | Cortesía de un ítem cancelado, aún sin aceptar (`PENDING`) o ya con cortesía | `ADJUSTMENT_ITEM_INVALID` | RN-ADJ-04 |
 | CL-195 | Pago y descuento simultáneos | Se serializan; el saldo nunca queda negativo por el ajuste | RN-ADJ-09 |
 | CL-196 | Se anula un ajuste con la cuenta ya pagada | Permitido: el saldo vuelve a subir | RN-ADJ-07 |
 | CL-197 | Mozo intenta anular el ajuste de otro o pasados 10 min | `FORBIDDEN` / `ADJUSTMENT_NOT_VOIDABLE` | RN-ADJ-07 |

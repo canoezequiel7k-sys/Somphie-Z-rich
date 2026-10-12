@@ -163,7 +163,7 @@ stateDiagram-v2
 ```
 | Acción | Quién | Guardas | Errores | Auditoría |
 |---|---|---|---|---|
-| Aplicar | `adjustment.apply` (límite) / `adjustment.apply_any` | Sesión `OPEN`; motivo; `monto ≤ balance`; dentro del límite del rol; ítem válido si es cortesía | `ADJUSTMENT_INVALID`, `ADJUSTMENT_EXCEEDS_BALANCE`, `ADJUSTMENT_LIMIT_EXCEEDED`, `ADJUSTMENT_ITEM_INVALID`, `SESSION_CLOSED` | `ADJUSTMENT_APPLIED` |
+| Aplicar | `adjustment.apply` (límite) / `adjustment.apply_any` | Sesión `OPEN`; motivo; `monto ≤ balance`; dentro del límite del rol; ítem aceptado, no cancelado y sin cortesía previa si es cortesía (RN-ADJ-04) | `ADJUSTMENT_INVALID`, `ADJUSTMENT_EXCEEDS_BALANCE`, `ADJUSTMENT_LIMIT_EXCEEDED`, `ADJUSTMENT_ITEM_INVALID`, `SESSION_CLOSED` | `ADJUSTMENT_APPLIED` |
 | Anular | `adjustment.void` | `APPLIED`; sesión `OPEN`; motivo; Mozo: propio y ≤ 10 min | `ADJUSTMENT_NOT_VOIDABLE`, `FORBIDDEN` | `ADJUSTMENT_VOIDED` |
 
 ### 8.3 Llamado al mozo (`WaiterCallStatus`)

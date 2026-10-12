@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Somphie Zúrich API
-  version: 0.2.2
+  version: 0.2.3
   summary: Contrato REST del backend de Somphie Zúrich (pedidos por QR, operación del personal, cuenta y pagos simulados).
   description: |
     Fuente de verdad del contrato (ADR-0008). Todo cambio se hace **primero aquí** y en `CHANGELOG.md`.
@@ -1432,7 +1432,7 @@ paths:
         `adjustment.apply` está limitado por el rol: el Mozo, hasta el 15 % **acumulado** de los cargos brutos de la sesión (suma de todos sus ajustes vigentes, D-142);
         superar el límite exige `adjustment.apply_any` (`ADJUSTMENT_LIMIT_EXCEEDED`, 403).
         El importe de un `DISCOUNT_PERCENT` se redondea al centavo más cercano (la mitad hacia arriba).
-        Errores: `ADJUSTMENT_INVALID` (422), `ADJUSTMENT_EXCEEDS_BALANCE` (409), `ADJUSTMENT_ITEM_INVALID` (409), `SESSION_CLOSED` (409).
+        Errores: `ADJUSTMENT_INVALID` (422), `ADJUSTMENT_EXCEEDS_BALANCE` (409), `ADJUSTMENT_ITEM_INVALID` (409: ítem cancelado, aún sin aceptar (`PENDING`) o ya con cortesía), `SESSION_CLOSED` (409).
       security: [{staffJwt: []}]
       x-permission: adjustment.apply
       parameters:
@@ -1693,7 +1693,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/VersionInfo'}
-              example: {build: 0.1.0, contractVersion: 0.2.2}
+              example: {build: 0.1.0, contractVersion: 0.2.3}
         '500': {$ref: '#/components/responses/InternalError'}
   /media/{path}:
     get:

@@ -8,6 +8,14 @@ package com.somphie.shared.domain
  * no se inventan (AGENTS.md §2, regla 2).
  */
 enum class ErrorCode {
+    // --- Pedidos (catálogo §4) ---
+    ORDER_EMPTY,
+    ORDER_ALREADY_DECIDED,
+    ORDER_NOT_CANCELLABLE,
+    ORDER_EXPIRED,
+    ORDER_ALL_ITEMS_EXCLUDED,
+    ITEM_NOT_FOUND,
+
     // --- Ítems de pedido (catálogo §4) ---
     ITEM_INVALID_TRANSITION,
     ITEM_NOT_CANCELLABLE,
@@ -28,6 +36,7 @@ enum class ErrorCode {
     ADJUSTMENT_EXCEEDS_BALANCE,
     ADJUSTMENT_LIMIT_EXCEEDED,
     ADJUSTMENT_NOT_VOIDABLE,
+    ADJUSTMENT_ITEM_INVALID,
 
     // --- Anulación y reembolso de pagos (catálogo §5) ---
     PAYMENT_NOT_VOIDABLE,

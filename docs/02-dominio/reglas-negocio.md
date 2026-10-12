@@ -193,7 +193,7 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 | RN-ADJ-01 | Tipos: `DISCOUNT_PERCENT`, `DISCOUNT_AMOUNT`, `COURTESY_ITEM`, `MANUAL_ADJUSTMENT`. Todos **restan**; no hay recargos en el MVP | D |
 | RN-ADJ-02 | Solo personal con permiso, con sesión `OPEN`, con `reasonCode` obligatorio (+ texto opcional ≤ 140) | A |
 | RN-ADJ-03 | El importe se **calcula y congela al aplicar** (un porcentaje se calcula sobre `charges − adjustments` vigentes en ese instante y se **redondea al centavo más cercano**, la mitad hacia arriba). Pedidos posteriores **no** heredan el descuento | D |
-| RN-ADJ-04 | `COURTESY_ITEM` apunta a un ítem no cancelado y sin cortesía previa; importe = `lineTotalMinor` | A |
+| RN-ADJ-04 | `COURTESY_ITEM` apunta a un ítem **aceptado** (no `PENDING`: su pedido todavía no es un cargo, RN-BIL-01), no cancelado y sin cortesía previa; importe = `lineTotalMinor`. Si no cumple → `ADJUSTMENT_ITEM_INVALID` | D |
 | RN-ADJ-05 | Un ajuste no puede dejar el saldo negativo: `adjustment ≤ balance` (`ADJUSTMENT_EXCEEDS_BALANCE`). Compensar a quien ya pagó se hace con **reembolso** | A |
 | RN-ADJ-06 | `adjustment.apply` está limitado por `maxStaffDiscountPercent` (**15 %**, D-142). Es un límite **acumulado**: la suma de los ajustes vigentes (no anulados) que ese Mozo aplicó sin `adjustment.apply_any` no puede superar ese porcentaje de los **cargos brutos** (`charges`) de la sesión. `maxStaffAdjustmentMinor` es un tope absoluto **opcional** (sin tope por defecto). Superar el límite exige `adjustment.apply_any` (`ADJUSTMENT_LIMIT_EXCEEDED`); el Dueño no tiene límite | A |
 | RN-ADJ-07 | Se puede **anular** (`VOIDED`) con motivo mientras la sesión esté `OPEN`; el Mozo solo los suyos y dentro de 10 min, el Dueño cualquiera | A |
@@ -251,3 +251,4 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 |---|---|---|---|
 | 2026-10-11 | Paso 2 | RN-BIL-03 solo con `amountMinor > 0`; nuevas RN-ACC-14/15 (HOST en sesión abierta por el personal) y RN-TEN-03; RN-SES-06, RN-ORD-02/03/04, RN-BIL-05/06/07/09, RN-TIP-03/04/08, RN-ADJ-06, RN-CAT-08 e RN-IMG-03 alineadas; valores por defecto v0.2 agregados | D-142, D-143, D-144, D-146, D-137, D-153, D-155 · H-02, H-03, H-04, H-06 |
 | 2026-10-11 | Paso 3 | RN-BIL-03 con mínimo dinámico `min(minPaymentMinor, balance)`; RN-SES-06 con reembolso automático si el saldo queda negativo (se quita la marca 🟡); RN-TIP-04 referencia la excepción | D-158, D-159 · H-13, H-14 |
+| 2026-10-12 | Paso 9 (WP-BE-10) | RN-ADJ-04: la cortesía exige un ítem aceptado (un ítem `PENDING` no es un cargo todavía); la columna *Dónde* pasa de A a D porque la hace cumplir el dominio (`CourtesyRules`) | H-29 |

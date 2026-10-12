@@ -145,7 +145,7 @@ Todos los errores viajan en formato **RFC 7807** (`application/problem+json`) co
 | `ADJUSTMENT_INVALID` | 422 | Porcentaje fuera de 1–100, monto ≤ 0, motivo faltante | Campo | — |
 | `ADJUSTMENT_EXCEEDS_BALANCE` | 409 | El ajuste deja saldo negativo | Ajustar al saldo | `maxAdjustmentMinor` |
 | `ADJUSTMENT_LIMIT_EXCEEDED` | 403 | Supera el límite del rol: es **acumulado** (lo ya aplicado por ese Mozo + el ajuste nuevo supera el 15 % de los cargos brutos, D-142) | "Requiere al Dueño" | `limitPercent`, `limitMinor` |
-| `ADJUSTMENT_ITEM_INVALID` | 409 | Ítem cancelado o ya con cortesía | Refrescar | `itemId` |
+| `ADJUSTMENT_ITEM_INVALID` | 409 | Ítem cancelado, aún sin aceptar (`PENDING`) o ya con cortesía | Refrescar | `itemId` |
 | `ADJUSTMENT_NOT_FOUND` | 404 | — | — | — |
 | `ADJUSTMENT_NOT_VOIDABLE` | 409 | Ya anulado, sesión cerrada o fuera de ventana | Mensaje | — |
 | `WAITER_CALL_ALREADY_ACTIVE` | 409 | Ya hay un llamado activo del mismo motivo | "Ya avisamos al personal" | — |
