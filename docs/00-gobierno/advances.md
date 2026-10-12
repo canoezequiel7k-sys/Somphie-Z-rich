@@ -297,7 +297,13 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 
 ### 2026-10-11 — Paso 9 🔄 — Arranque del backend (WP-BE-10, primera tanda)
 - **Versiones verificadas en la web (no de memoria):** JDK 25.0.2 (ya instalado por el dueño; Docker 29.8.2 y Git 2.54.0 también); **Gradle 9.8.1** (versión actual en `services.gradle.org`; Gradle 9.1+ ejecuta sobre Java 25); **Kotlin 2.4.0** (estable del 3 de junio de 2026; solo Kotlin 2.3+ puede generar bytecode para Java 25); **JUnit 6.1.2** (BOM). Spring Boot **no** se agrega todavía: es del WP-BE-20 (Fase 2).
-- **Archivos a tocar (nuevos, en `backend/`):** `settings.gradle.kts`, `build.gradle.kts`, `shared/domain/DomainException.kt`, `orders/domain/ItemStatus.kt`, `orders/domain/OrderItem.kt`, `orders/domain/OrderStatus.kt`, y sus pruebas `ItemTransitionsTest.kt` y `OrderStatusDerivationTest.kt`.
+- **Archivos a tocar (nuevos, en `backend/`):** `settings.gradle.kts`, `build.gradle.kts`, `shared/domain/DomainException.kt`, `orders/domain/ItemStatus.kt`, `orders/domain/OrderItem.kt`, `orders/domain/OrderStatus.kt`, y sus pruebas `ItemTestSupport.kt` (apoyo compartido), `ItemTransitionsTest.kt` y `OrderStatusDerivationTest.kt` (unas 67 pruebas). Después se generaron `gradlew`, `gradlew.bat` y `gradle/wrapper/` con `gradle wrapper --gradle-version 9.8.1` (los corrió el dueño).
+- **Hallazgo H-22 (a confirmar, dueño):** si un ítem pasa directo de `QUEUED` a `READY` y luego se deshace, vuelve a `IN_PREPARATION` con `startedAt` vacío; `estados-y-transiciones.md` no dice qué hacer en ese caso. Se dejó sin completar para no inventar.
+- **Qué estudiar:** *objeto inmutable* (por qué un error no puede dejar datos a medias); *reloj inyectado* (`now` por parámetro) para probar sin esperar; diferencia entre probar ejemplos y recorrer todos los estados alcanzables (BFS) como "prueba de propiedades" sin librerías extra.
+- **Resultado (dueño, `.\gradlew.bat test`):** `BUILD SUCCESSFUL`. Reportes de Gradle: `ItemTransitionsTest` **49** pruebas y `OrderStatusDerivationTest` **18**, **0 fallos, 0 errores, 0 omitidas** (67 en total). `.gitignore` ya cubre `backend/.gradle/`, `backend/build/` y `backend/.kotlin/`.
+- **Estado de esta tanda:** ✅ (compila y pasa sobre JDK 25 + Kotlin 2.4.0 + Gradle 9.8.1). El **Paso 9 sigue 🔄**: WP-BE-10 todavía no está completo.
+- **Falta de WP-BE-10 (próximas tandas):** `Money` y cargos; agregado `Order` (aceptar, rechazar, cancelar, expirar, exclusiones, usa la derivación); `TableSession` y su cierre; `Payment`/`Bill` (saldo, propina, ajustes); `JoinCode`. Después: tokens de diseño (WP-UX-10, Q-21).
+- **Commits sugeridos:** `chore(backend): add gradle build with kotlin and junit` y `feat(backend): add item transitions and order status derivation (WP-BE-10)`.
 
 ### Historial previo (resumen, para contexto)
 - **v0.1:** plan maestro convertido en 52 documentos (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes).
