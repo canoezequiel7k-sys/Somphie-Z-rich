@@ -536,6 +536,14 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Archivos:** `backend/src/main/resources/db/migration/V5__idempotency.sql`, `backend/src/main/kotlin/com/somphie/shared/idempotency/IdempotencyService.kt`, `backend/src/main/kotlin/com/somphie/shared/domain/DomainException.kt`, `backend/src/main/kotlin/com/somphie/shared/api/ApiExceptionHandler.kt` y esta bitácora.
 - **Qué estudiar:** Idempotencia basada en base de datos con control de estado `IN_PROGRESS` / `COMPLETED`, hashing de peticiones (`SHA-256`) y manejo de cabeceras de retransmisión (`Idempotent-Replayed`).
 
+### 2026-10-12 — WP-BE-42 ✅
+- **Qué hicimos:** Se implementó el módulo `orders` (Creación, consulta y cancelación de pedidos) en el backend:
+  1. Migración Flyway `V6__orders.sql` creando las tablas `customer_order` y `order_item` con sus restricciones de estado, precios, totales e ítems.
+  2. DTOs de pedido en `OrderModels.kt` y `OrdersController` exponiendo `POST /sessions/current/orders` (con integración robusta en `IdempotencyService`, validación de precios vigentes vs enviados, y creación del agregado puro `Order`), `GET /sessions/current/orders`, `GET /orders/{orderId}` y `POST /orders/{orderId}/cancel`.
+- **Por qué:** Cumple con WP-BE-42 de la Fase 4 del roadmap (pedidos persistentes protegidos por idempotencia y reglas de dominio).
+- **Archivos:** `backend/src/main/resources/db/migration/V6__orders.sql`, `backend/src/main/kotlin/com/somphie/orders/`, y esta bitácora.
+- **Qué estudiar:** Integración de agregados puros del dominio con persistencia relacional en Spring JDBC e idempotencia transaccional.
+
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)
 
