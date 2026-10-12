@@ -17,12 +17,12 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Documentación v0.2 (opciones de producto, propina, ajustes, i18n, llamados al mozo, imágenes en carpeta, multi-sucursal simulada) | ✅ | secciones "v0.2" dentro de cada doc |
 | Decisiones D-101…D-159 y preguntas Q-01…Q-20 resueltas (Q-21 abierta) | ✅ | `docs/00-gobierno/decisiones.md` |
 | ADRs 0001–0009 (propuestas) | ✅ | `docs/00-gobierno/adr/` |
-| Contrato `openapi.yaml` **0.2.3** (WP-ARQ-10) | ✅ (lint de Redocly válido y sin avisos hasta 0.2.2, Paso 5; el de 0.2.3 lo corre el dueño) | `docs/04-api/openapi.yaml` |
+| Contrato `openapi.yaml` **0.2.5** (WP-ARQ-10) | ✅ (el lint de Redocly sobre 0.2.5 queda pendiente porque la CLI no está disponible en este entorno) | `docs/04-api/openapi.yaml` |
 | Config de lint `redocly.yaml` | ✅ (clave corregida, H-09) | raíz |
-| `CHANGELOG.md` del contrato hasta 0.2.3 | ✅ | `docs/04-api/CHANGELOG.md` |
+| `CHANGELOG.md` del contrato hasta 0.2.5 | ✅ | `docs/04-api/CHANGELOG.md` |
 | Estructura de carpetas y `AGENTS.md` por carpeta | ✅ | `backend/`, `web/`, `android/` |
 | Archivos de marca: `ic_icon.svg` (1,54 MB) y `boceto_v.1.0.png` (1,75 MB) | ✅ existen; **sin revisar** (superan el límite de lectura de 1 MB del agente) | `design/img/` |
-| Backend: **dominio puro** de WP-BE-10 (`Money`, cuenta y pagos, ajustes, reembolsos/anulaciones, ítems, `Order`, cortesías). JDK 25, Gradle 9.8.1, Kotlin 2.4.0, JUnit 6.1.2 | ✅ 229 pruebas verificadas (0 fallos, 0 errores, 0 omitidas; corrida del 2026-10-12 a las 11:35 UTC, incluye las 2 de H-29) | `backend/` |
+| Backend: **dominio puro** de WP-BE-10 (`Money`, `Payment`/`Bill`, ajustes, reembolsos/anulaciones, `Order`/`OrderItem`, `TableSession`, `JoinCode`). JDK 25, Gradle 9.8.1, Kotlin 2.4.0, JUnit 6.1.2 | ✅ 235 pruebas; 0 fallos, errores u omitidas; cobertura de líneas 97,61 % (corrida final del 2026-10-12) | `backend/` |
 
 ### 1.2 Qué NO existe todavía
 - Código de `web/` y `android/` (solo tienen `AGENTS.md`). En `backend/` existe únicamente el dominio puro: **no** hay Spring, base de datos, API ni persistencia (Fase 2). *(El texto original de esta línea decía que backend, web y android solo tenían `AGENTS.md`.)*
@@ -158,11 +158,11 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | H-23 | **Prioridad de errores en un pago:** si fallan a la vez el monto principal y la propina (o hay pago vacío), el catálogo no dice cuál se informa. Se eligió: vacío (`TIP_INVALID`) → monto → propina | A confirmar (dueño) |
 | H-24 | **Prioridad de errores en un ajuste:** si fallan a la vez el saldo y el límite del Mozo, el catálogo no dice cuál se informa. Se eligió: inválido → saldo → límite (`AdjustmentRules.validate`) | A confirmar (dueño) |
 | H-25 | **`ADJUSTMENT_ITEM_INVALID` (cortesía):** exige saber si el ítem está cancelado o ya tiene cortesía; el dominio todavía no tiene el snapshot completo de `OrderItem` con id y precio | Tanda 4 ✅ (`CourtesyRules`) |
-| H-26 | **`ORDER_EXPIRED` vs `ORDER_ALREADY_DECIDED` al aceptar:** `estados-y-transiciones.md` §2 lista ambos como errores de `accept`, pero no dice cuándo aplica cada uno ni si un pedido vencido cuyo job aún no corrió (`now − createdAt > orderPendingTtlMin`, estado todavía `PENDING_REVIEW`) debe rechazarse. Propuesto en la tanda 4: `EXPIRED` → `ORDER_EXPIRED`; `ACCEPTED`/`REJECTED`/`CANCELLED` y estados derivados → `ORDER_ALREADY_DECIDED`; el TTL **no** se evalúa en `accept` (lo aplica solo el job) | A confirmar (dueño) |
-| H-27 | **`expire` sin código de error:** la tabla de `estados-y-transiciones.md` §2 dice "Error: —" para `expire`, pero un job puede toparse con un pedido ya decidido o aún no vencido. Propuesto: pedido ya decidido → `ORDER_ALREADY_DECIDED` (el job lo ignora); aún no vencido → error de programación (`IllegalArgumentException`), no de negocio. No se agrega ningún código nuevo | A confirmar (dueño) |
-| H-28 | **TTL de expiración (RN-ORD-12):** dice "tras `orderPendingTtlMin`" sin aclarar si vence justo al cumplirse (`>=`) o apenas después (`>`). Se implementó `>=` (`Order.isDueForExpiry`) | A confirmar (dueño) |
-| H-29 | **Cortesía sobre un ítem de un pedido que aún no se aceptó:** RN-ADJ-04 solo pide "no cancelado y sin cortesía previa"; un ítem `PENDING` cumple eso pero todavía no es un cargo facturable (RN-BIL-01). **Corrección aplicada el 2026-10-12:** RN-ADJ-04 exige ítem aceptado y `CourtesyRules` rechaza `PENDING` con `ADJUSTMENT_ITEM_INVALID`, con 2 pruebas nuevas | **Verificado en código y regla** (229 pruebas, 2026-10-12). **Documentación alineada el 2026-10-12:** `catalogo-errores.md`, CL-194, `estados-y-transiciones.md` §8.2 y contrato 0.2.3. Falta solo el lint de Redocly sobre 0.2.3 (lo corre el dueño) |
-| H-30 | **Matriz de transiciones inválidas de `Order` incompleta (hueco de cobertura):** `OrderTest` cubre aceptar/rechazar/cancelar/expirar desde `ACCEPTED`, `REJECTED`, `CANCELLED` y `EXPIRED`. **Faltan** las filas de `IN_PREPARATION`, `READY` y `DELIVERED`, y la derivación del estado tras acciones de ítem (RN-ORD-14; CL-028, CL-080…082), porque `Order` todavía no delega `start`/`deliver`/`cancel`/`undo` y no se pueden construir pedidos en esos estados | Pendiente: tanda posterior de WP-BE-10 (delegar acciones de ítem en `Order`) |
+| H-26 | **Aceptación y expiración:** el TTL lo aplica exclusivamente el job; `accept` valida el estado actual y acepta si sigue `PENDING_REVIEW`, aunque haya superado el TTL. Si el job ya lo marcó `EXPIRED`, `accept` responde `ORDER_EXPIRED` | Confirmada por producto e implementada |
+| H-27 | **Transición inválida y carrera del job:** el dominio informa el error correspondiente; `expire` antes del TTL es error de programación (`IllegalArgumentException`). El job futuro debe usar actualización condicional y no sobrescribir pedidos decididos | Confirmada por producto; dominio implementado, infraestructura pendiente en WP-BE-40 |
+| H-28 | **Límite del TTL de pedidos:** el vencimiento es inclusivo (`elapsed >= ttl`); el job puede expirar justo al cumplirse el TTL | Confirmada por producto e implementada |
+| H-29 | **Cortesía sobre un ítem de un pedido que aún no se aceptó:** RN-ADJ-04 solo pide "no cancelado y sin cortesía previa"; un ítem `PENDING` cumple eso pero todavía no es un cargo facturable (RN-BIL-01). **Corrección aplicada el 2026-10-12:** RN-ADJ-04 exige ítem aceptado y `CourtesyRules` rechaza `PENDING` con `ADJUSTMENT_ITEM_INVALID`, con 2 pruebas nuevas | **Verificado en código y regla**; documentación alineada en contrato 0.2.3. Lint de Redocly sobre el contrato vigente 0.2.5 pendiente porque la CLI no está disponible en este entorno |
+| H-30 | **Matriz de transiciones inválidas de `Order`:** faltaban estados derivados y su cobertura. `Order` ahora delega transiciones de ítems, deriva su propio estado, y `OrderTest` prueba decisiones inválidas desde `IN_PREPARATION`, `READY` y `DELIVERED`, además de los demás estados decididos | Resuelto en WP-BE-10; suite completa verificada |
 
 ---
 ## 4. Plan paso a paso
@@ -180,7 +180,7 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | 6 | ✅ | Catálogo de acciones de auditoría (D-151) | `docs/02-dominio/catalogo-auditoria.md` | Cada acción citada en reglas/estados tiene su código | `docs(domain): add audit action catalog` |
 | 7 | ✅ | Comparar duplicados de la raíz con los de `docs/` y reportar diferencias; el dueño borra (H-10) | raíz | Un solo archivo oficial por documento | `chore: remove duplicated docs` |
 | 8 | 🔄 | Consolidar v0.2 en el cuerpo de cada documento (D-157) | todos los docs con sección "v0.2" | Ningún documento tiene secciones con "precedencia" | `docs: consolidate v0.2 into body (v0.3)` |
-| 9 | 🔄 | Puerta de Fase 1 y arranque de Fase 1: dominio puro (WP-BE-10) y tokens de diseño (WP-UX-10; ver Q-21; incluye actualizar `design/img/README.md` y D-134, que nombran `ic_icon.png`) | `backend/`, `design/` | Checklist de `arquitecto.md` | — |
+| 9 | ✅ | Cerrar dominio puro de WP-BE-10 con H-26/H-27/H-28 confirmadas | `backend/src/main/kotlin/com/somphie/`, pruebas, `build.gradle.kts`, reglas/transiciones/casos límite/casos de uso/modelo de dominio/OpenAPI/CHANGELOG y esta bitácora | Suite verde (235 pruebas) y cobertura medida (97,61 %); documentación alineada. WP-UX-10 sigue pendiente por Q-21 | — |
 
 ---
 ## 5. Reglas de trabajo durante este tramo
@@ -378,6 +378,24 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Qué estudiar:** *propagación de un cambio de regla* (regla → documentos derivados → contrato) y *versionado de un contrato* (por qué un cambio compatible igual lleva versión y entrada de changelog).
 - **Archivos tocados:** `catalogo-errores.md`, `casos-limite.md`, `estados-y-transiciones.md`, `openapi.yaml`, `CHANGELOG.md`, `advances.md`.
 - **Commit sugerido (no ejecutado):** `docs(api): contract 0.2.3, courtesy only on accepted items (H-29)`
+
+### 2026-10-12 — Paso 9 ✅ — WP-BE-10 completado
+- **Qué:** `Order` delega las transiciones de sus ítems y deriva el estado después de cada acción; se añadieron `Payment` y su conexión con el cálculo de `Bill`; se implementaron `TableSession` y `JoinCode`; se midió JaCoCo y se hizo cumplir el mínimo de cobertura en `check`. H-26/H-27/H-28 quedaron reflejadas en dominio y documentación, y se actualizó el contrato a 0.2.4 con su changelog.
+- **Por qué:** completa el alcance de dominio puro de WP-BE-10 sin agregar infraestructura ni duplicar reglas existentes; `OrderItem`, `OrderStatusDerivation`, `PaymentRules`, `RefundRules` y `VoidRules` siguen siendo las fuentes únicas para sus reglas.
+- **Qué estudiar:** delegación desde la raíz de un agregado; inmutabilidad y transiciones por copia; proyección de una entidad a una consulta derivada; diferencia entre errores de dominio y precondiciones de programación; cobertura de líneas como métrica medida.
+- **Verificación inicial (antes de las correcciones finales):** `.\backend\gradlew.bat -p backend check jacocoTestReport` → `BUILD SUCCESSFUL`; 273 pruebas, 0 fallos/errores/omitidas; 631/642 líneas cubiertas (**98,29 %**, umbral 90 %). La CLI de Redocly no estaba disponible y el lint quedó pendiente.
+- **Interpretación registrada:** `TableSession` conserva el vencimiento inclusivo `now >= lastActivityAt + idleTtl`; que el TTL de inactividad venza exactamente en el límite es una interpretación técnica pendiente de confirmación del producto, no una decisión confirmada.
+- **Siguiente paso:** WP-UX-10 sigue pendiente por Q-21; WP-BE-20/WP-BE-40 incorporarán aplicación, persistencia y actualización condicional del job sin cambiar el dominio puro.
+- **Archivos:** `backend/src/main/kotlin/com/somphie/`, pruebas del dominio, `backend/build.gradle.kts`, `docs/02-dominio/` y `docs/04-api/`.
+- **Commit sugerido (no ejecutado):** `feat(backend): complete pure domain for WP-BE-10`
+
+### 2026-10-12 — Correcciones finales de WP-BE-10 ✅
+- **Qué:** `billing.domain` dejó de depender de `orders.domain`; `Order` expone los importes que califican como facturables y `CourtesyRules` recibe una proyección local. OpenAPI y changelog 0.2.5 alinean la revocación del HOST con RN-ACC-10; `TableSession` tiene pruebas de copia y exposición inmutable; `Payment` y el cierre forzado explican dónde se conservan los motivos.
+- **Por qué:** elimina la dependencia entre dominios sin duplicar el filtro de cargos y conserva fuera del agregado los motivos que deben quedar en auditoría.
+- **Criterios conservados:** el TTL inclusivo de sesiones sigue siendo una interpretación técnica pendiente de confirmación de producto; H-26/H-27/H-28 continúan como decisiones confirmadas.
+- **Verificación final:** `.\backend\gradlew.bat -p backend clean check jacocoTestReport` → `BUILD SUCCESSFUL`; 235 pruebas, 0 fallos, errores u omitidas; 653/669 líneas cubiertas (**97,61 %**, umbral 90 %). `git diff --check` pasó. Redocly no está disponible; el lint del contrato 0.2.5 queda pendiente.
+- **Siguiente paso:** queda pendiente la revisión manual; no se hicieron commits ni pushes.
+- **Archivos:** `Bill.kt`, `CourtesyRules.kt`, `Payment.kt`, `Order.kt`, `TableSession.kt`, pruebas de billing/orders/floor, `backend-arquitectura.md`, `openapi.yaml`, `CHANGELOG.md` y esta bitácora.
 
 ### Historial previo (resumen, para contexto)
 - **v0.1:** plan maestro convertido en 52 documentos (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes).

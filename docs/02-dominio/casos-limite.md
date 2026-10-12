@@ -31,7 +31,7 @@ Cada fila es un escenario **que debe tener una prueba**. Columnas: mecanismo que
 | CL-027 | Dos personas escanean la misma mesa libre simultáneamente | Una abre sesión; la otra `SESSION_ALREADY_OPEN` y pasa a unirse | Índice único parcial | RN-ACC-13 |
 | CL-028 | Barra y Cocina marcan listos ítems del mismo pedido a la vez | Ambos se aplican; el estado derivado del pedido es correcto | Recalculo en tx; lock de pedido | RN-ORD-14 |
 | CL-029 | Dos personas cambian el mismo ítem (`start`) a la vez | Una gana; la otra `ITEM_INVALID_TRANSITION` | Condicional por estado | RN-PRE-05 |
-| CL-030 | Dos instancias del job de expiración corren a la vez | Cada pedido expira una sola vez | Condicional por estado | CU-50 |
+| CL-030 | Dos instancias del job de expiración corren a la vez | Cada pedido expira una sola vez; la actualización condicional no modifica pedidos ya decididos | Condicional por estado | CU-50 |
 | CL-031 | Edición simultánea del mismo producto en el admin | El segundo guardado falla con `OPTIMISTIC_LOCK_FAILED` y recarga | `@Version` | CU-40 |
 | CL-032 | Número `#NNN` asignado a dos pedidos simultáneos | Nunca se repite | `UPDATE … RETURNING` en `order_counter` | RN-ORD-15 |
 
@@ -71,8 +71,8 @@ Cada fila es un escenario **que debe tener una prueba**. Columnas: mecanismo que
 | CL-067 | Pedido fuera de horario | `RESTAURANT_CLOSED` | Settings | RN-ORD-07 |
 | CL-068 | Se archiva un producto con pedidos históricos | No se borra; pedidos viejos conservan nombre/precio | Snapshot | RN-CAT-02 |
 | CL-069 | Se cambia el nombre del producto | Pedidos viejos muestran el nombre original | Snapshot | RN-ORD-04 |
-| CL-070 | El pedido queda sin decisión 15 min | Pasa a `EXPIRED`; cliente notificado y puede reenviar | Job | RN-ORD-12 |
-| CL-071 | El personal acepta un pedido que ya expiró (pantalla desactualizada) | `ORDER_EXPIRED` | — | CU-22 |
+| CL-070 | El pedido queda sin decisión al cumplirse 15 min | El job puede cambiarlo a `EXPIRED`; cliente notificado y puede reenviar | Job; límite inclusivo | RN-ORD-12 |
+| CL-071 | El personal acepta un pedido cuyo estado ya es `EXPIRED` | `ORDER_EXPIRED`; si solo superó el TTL pero sigue `PENDING_REVIEW`, puede aceptarse hasta que el job lo expire | Estado actual; el job decide la expiración | CU-22, H-26 |
 | CL-072 | Se aceptan todos los ítems excepto uno (excluido) | Pedido `ACCEPTED`; el ítem queda `CANCELLED`; el cliente ve el aviso; no se cobra | RN-ORD-10 | — |
 | CL-073 | Se intenta excluir todos los ítems al aceptar | `ORDER_ALL_ITEMS_EXCLUDED` | — | — |
 | CL-074 | Nota de ítem de 5 000 caracteres | `VALIDATION_FAILED` | — | — |

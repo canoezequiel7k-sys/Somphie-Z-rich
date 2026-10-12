@@ -2,6 +2,7 @@ package com.somphie.orders.domain
 
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
+import com.somphie.shared.domain.Money
 import java.time.Duration
 import java.time.Instant
 import java.util.Collections
@@ -37,8 +38,8 @@ data class Rejection(val reason: RejectionReason, val text: String? = null) {
  * Quién puede decidir (permisos), el motivo de exclusión/cancelación y la auditoría son de la capa
  * de aplicación; el dominio solo protege las reglas del pedido.
  *
- * Todavía NO delega las acciones de ítem (`start`, `deliver`…) ni recalcula el estado después de
- * ellas (RN-ORD-14): queda para la tanda siguiente.
+ * Las acciones de ítem se delegan a [OrderItem] y el estado agregado se deriva otra vez después de
+ * cada transición, como exige RN-ORD-14.
  */
 class Order private constructor(
     val id: UUID,
@@ -119,6 +120,53 @@ class Order private constructor(
         return Order(id, OrderStatus.EXPIRED, discardItems(now), createdAt, null, now, null)
     }
 
+    /** Delega el inicio al ítem y recalcula el estado agregado desde todos sus ítems. */
+    fun startItem(itemId: UUID, now: Instant): Order = transitionItem(itemId) { it.start(now) }
+
+    /** Reutiliza la transición existente del ítem, incluido el atajo QUEUED → READY. */
+    fun markItemReady(itemId: UUID, now: Instant): Order = transitionItem(itemId) { it.markReady(now) }
+
+    /** Delega la entrega al ítem y actualiza el pedido sin duplicar la regla de transición. */
+    fun deliverItem(itemId: UUID, now: Instant): Order = transitionItem(itemId) { it.deliver(now) }
+
+    /** Delega la cancelación al ítem; el motivo y la autorización siguen siendo responsabilidad de aplicación. */
+    fun cancelItem(itemId: UUID, now: Instant): Order = transitionItem(itemId) { it.cancel(now) }
+
+    /** Delega el deshacer al ítem para conservar su ventana temporal y sus errores existentes. */
+    fun undoItem(itemId: UUID, now: Instant, undoWindow: Duration): Order =
+        transitionItem(itemId) { it.undo(now, undoWindow) }
+
+    /**
+     * Expone solo los importes admitidos por RN-BIL-01 para que `OrderChargesPort` los entregue a billing.
+     * Se filtra en el módulo dueño de los estados, así billing no necesita importar `Order` ni sus ítems.
+     */
+    fun billableLineTotals(): List<Money> =
+        if (status !in BILLABLE_STATUSES) emptyList()
+        else items.filter { it.status != ItemStatus.CANCELLED }.map { it.lineTotal }
+
+    /**
+     * Reemplaza un solo ítem en una copia local y publica un agregado nuevo únicamente si la regla tuvo éxito.
+     * Así una transición inválida nunca deja cambios parciales en el pedido original.
+     */
+    private fun transitionItem(itemId: UUID, transition: (OrderItem) -> OrderItem): Order {
+        val index = items.indexOfFirst { it.id == itemId }
+        if (index < 0) {
+            throw DomainException(ErrorCode.ITEM_NOT_FOUND, "Item $itemId does not belong to order $id")
+        }
+        val updatedItems = items.toMutableList()
+        updatedItems[index] = transition(items[index])
+        val derivedStatus = OrderStatusDerivation.fromItems(updatedItems.map { it.status })
+        return Order(
+            id = id,
+            status = derivedStatus,
+            items = updatedItems,
+            createdAt = createdAt,
+            acceptedAt = acceptedAt,
+            decidedAt = decidedAt,
+            rejection = rejection,
+        )
+    }
+
     /** Ítems `PENDING` de un pedido que no llegó a aceptarse: `PENDING → CANCELLED` (estados §3). */
     private fun discardItems(now: Instant): List<OrderItem> = items.map { it.exclude(now) }
 
@@ -149,6 +197,14 @@ class Order private constructor(
     )
 
     companion object {
+        /** Estados de pedido que generan cargos; la cuenta consume los importes ya filtrados por esta raíz. */
+        private val BILLABLE_STATUSES = setOf(
+            OrderStatus.ACCEPTED,
+            OrderStatus.IN_PREPARATION,
+            OrderStatus.READY,
+            OrderStatus.DELIVERED,
+        )
+
         /**
          * Pedido nuevo (RN-ORD-05): nace `PENDING_REVIEW` con sus ítems `PENDING`.
          * Un pedido sin ítems es `ORDER_EMPTY`; ítems que no estén `PENDING` o con ids repetidos son

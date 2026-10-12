@@ -73,7 +73,7 @@ erDiagram
 |---|---|---|
 | **TableSession** | Participantes | Una sola `OPEN` por mesa; `CLOSED` es terminal; join code solo válido mientras `OPEN`; ≤ máx. participantes; un solo `HOST` |
 | **Order** | Items | Total calculado = Σ ítems; solo `PENDING_REVIEW` puede decidirse; estado derivado **siempre** coherente con ítems (se recalcula tras cada cambio); inmutable en cantidades/precios tras creación |
-| **Payment** | — | `amountMinor > 0`; `SUCCEEDED` no se edita (solo se anula con nuevo registro de estado); reembolso ≤ neto pagado |
+| **Payment** | — | `amountMinor > 0`, salvo pago solo propina (`amountMinor = 0` y `tipMinor > 0`); `SUCCEEDED` no se edita (solo se anula con nuevo estado); reembolso ≤ neto pagado |
 | **Product** | — | Precio ≥ 0 (> 0 para vender); pertenece a una categoría y una estación |
 | **AppUser** | Roles, estaciones | Email único; ≥ 1 `OWNER` activo en el restaurante |
 

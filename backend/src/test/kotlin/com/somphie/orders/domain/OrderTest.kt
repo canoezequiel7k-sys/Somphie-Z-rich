@@ -2,6 +2,7 @@ package com.somphie.orders.domain
 
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
+import com.somphie.shared.domain.Money
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -104,6 +105,17 @@ class OrderTest {
         assertTrue(order.items.all { it.queuedAt == later })
         assertEquals(later, order.acceptedAt)
         assertEquals(later, order.decidedAt)
+    }
+
+    /** El dominio acepta por estado actual: el job es el único responsable de cambiar el pedido a EXPIRED. */
+    @Test
+    fun `accepts an overdue order while it is still pending review`() {
+        val acceptanceTime = T0.plus(ttl).plusSeconds(1)
+
+        val accepted = newOrder().accept(acceptanceTime)
+
+        assertEquals(OrderStatus.ACCEPTED, accepted.status)
+        assertEquals(acceptanceTime, accepted.acceptedAt)
     }
 
     @Test
@@ -209,12 +221,77 @@ class OrderTest {
         }
     }
 
+    /** Construye cada estado terminal o derivado para probar las decisiones inválidas desde el agregado. */
     private fun orderIn(status: OrderStatus): Order = when (status) {
         OrderStatus.ACCEPTED -> newOrder().accept(T0)
         OrderStatus.REJECTED -> newOrder().reject(T0, Rejection(RejectionReason.OTHER))
         OrderStatus.CANCELLED -> newOrder().cancel(T0)
         OrderStatus.EXPIRED -> newOrder().expire(T0.plus(ttl), ttl)
-        else -> error("Not reachable with the operations implemented so far: $status")
+        OrderStatus.IN_PREPARATION -> newOrder().accept(T0).let { it.startItem(it.items.first().id, T0) }
+        OrderStatus.READY -> newOrder().accept(T0).let { order ->
+            order.items.fold(order) { current, item -> current.markItemReady(item.id, T0) }
+        }
+        OrderStatus.DELIVERED -> newOrder().accept(T0).let { order ->
+            val ready = order.items.fold(order) { current, item -> current.markItemReady(item.id, T0) }
+            ready.items.fold(ready) { current, item -> current.deliverItem(item.id, T0) }
+        }
+        OrderStatus.PENDING_REVIEW -> newOrder()
+    }
+
+    /** Verifica que solo pedidos aceptados y sus ítems no cancelados aporten importes a la cuenta. */
+    @TestFactory
+    fun `billable line totals follow the order and item states`(): List<DynamicTest> =
+        OrderStatus.entries.map { status ->
+            dynamicTest("order $status") {
+                val order = if (status in setOf(
+                        OrderStatus.ACCEPTED,
+                        OrderStatus.IN_PREPARATION,
+                        OrderStatus.READY,
+                        OrderStatus.DELIVERED,
+                    )
+                ) {
+                    val pending = newOrder(3)
+                    val accepted = pending.accept(T0, setOf(pending.items.first().id))
+                    val firstActiveId = accepted.items[1].id
+                    val secondActiveId = accepted.items[2].id
+                    val preparing = accepted.startItem(firstActiveId, T0)
+                    when (status) {
+                        OrderStatus.ACCEPTED -> accepted
+                        OrderStatus.IN_PREPARATION -> preparing
+                        OrderStatus.READY -> preparing
+                            .markItemReady(firstActiveId, T0)
+                            .markItemReady(secondActiveId, T0)
+                        OrderStatus.DELIVERED -> preparing
+                            .markItemReady(firstActiveId, T0)
+                            .markItemReady(secondActiveId, T0)
+                            .deliverItem(firstActiveId, T0)
+                            .deliverItem(secondActiveId, T0)
+                        else -> error("The status is not billable: $status")
+                    }
+                } else {
+                    orderIn(status)
+                }
+                val expected = if (status in setOf(
+                        OrderStatus.ACCEPTED,
+                        OrderStatus.IN_PREPARATION,
+                        OrderStatus.READY,
+                        OrderStatus.DELIVERED,
+                    )
+                ) List(2) { Money.of(485_000) } else emptyList()
+
+                assertEquals(expected, order.billableLineTotals())
+            }
+        }
+
+    /** Excluye de la proyección el ítem cancelado sin mutar el pedido aceptado original. */
+    @Test
+    fun `billable line totals exclude cancelled items`() {
+        val order = newOrder(2)
+        val cancelledItem = order.items.first()
+        val accepted = order.accept(later, setOf(cancelledItem.id))
+
+        assertEquals(listOf(order.items.last().lineTotal), accepted.billableLineTotals())
+        assertTrue(order.billableLineTotals().isEmpty())
     }
 
     private fun expectedCode(status: OrderStatus, act: Act): ErrorCode = when {
@@ -223,9 +300,18 @@ class OrderTest {
         else -> ErrorCode.ORDER_ALREADY_DECIDED
     }
 
+    /** Cada estado ya decidido rechaza aceptar, rechazar, cancelar y expirar sin mutar el agregado. */
     @TestFactory
     fun `a decided order rejects every decision with the catalog code and changes nothing`(): List<DynamicTest> =
-        listOf(OrderStatus.ACCEPTED, OrderStatus.REJECTED, OrderStatus.CANCELLED, OrderStatus.EXPIRED).flatMap { status ->
+        listOf(
+            OrderStatus.ACCEPTED,
+            OrderStatus.REJECTED,
+            OrderStatus.CANCELLED,
+            OrderStatus.EXPIRED,
+            OrderStatus.IN_PREPARATION,
+            OrderStatus.READY,
+            OrderStatus.DELIVERED,
+        ).flatMap { status ->
             Act.entries.map { act ->
                 dynamicTest("$status then $act") {
                     val order = orderIn(status)
@@ -252,5 +338,80 @@ class OrderTest {
         val order = newOrder(3)
         val accepted = order.accept(later, setOf(order.items[0].id))
         assertEquals(OrderStatusDerivation.fromItems(statusesOf(accepted)), accepted.status)
+    }
+
+    /** Comprueba que una transición del agregado conserva el resto de ítems y recalcula el estado. */
+    @Test
+    fun `item actions delegated by the aggregate keep other items and derive preparation status`() {
+        val accepted = newOrder().accept(later)
+        val firstId = accepted.items[0].id
+        val secondBefore = accepted.items[1]
+
+        val preparing = accepted.startItem(firstId, later.plusSeconds(1))
+        assertEquals(OrderStatus.IN_PREPARATION, preparing.status)
+        assertEquals(ItemStatus.IN_PREPARATION, preparing.items[0].status)
+        assertEquals(secondBefore, preparing.items[1])
+        assertEquals(OrderStatusDerivation.fromItems(statusesOf(preparing)), preparing.status)
+    }
+
+    /** Recorre los estados derivados READY, DELIVERED y CANCELLED, incluyendo deshacer una entrega. */
+    @Test
+    fun `ready delivered cancelled and undo item actions recalculate the aggregate status`() {
+        val accepted = newOrder(2).accept(later)
+        val firstId = accepted.items[0].id
+        val secondId = accepted.items[1].id
+
+        val oneReady = accepted.markItemReady(firstId, later.plusSeconds(1))
+        assertEquals(OrderStatus.IN_PREPARATION, oneReady.status)
+
+        val allReady = oneReady.markItemReady(secondId, later.plusSeconds(2))
+        assertEquals(OrderStatus.READY, allReady.status)
+
+        val oneDelivered = allReady.deliverItem(firstId, later.plusSeconds(3))
+        assertEquals(OrderStatus.READY, oneDelivered.status)
+
+        val allDelivered = oneDelivered.deliverItem(secondId, later.plusSeconds(4))
+        assertEquals(OrderStatus.DELIVERED, allDelivered.status)
+
+        val oneUndelivered = allDelivered.undoItem(firstId, later.plusSeconds(5), UNDO_WINDOW)
+        assertEquals(OrderStatus.READY, oneUndelivered.status)
+
+        val allCancelled = accepted.cancelItem(firstId, later.plusSeconds(6))
+            .cancelItem(secondId, later.plusSeconds(7))
+        assertEquals(OrderStatus.CANCELLED, allCancelled.status)
+        assertEquals(OrderStatus.READY, oneUndelivered.status)
+        val deliveredError = assertThrows(DomainException::class.java) {
+            allDelivered.cancelItem(secondId, later.plusSeconds(8))
+        }
+        assertEquals(ErrorCode.ITEM_NOT_CANCELLABLE, deliveredError.code)
+    }
+
+    /** Verifica que el error de una acción delegada conserva intactos estado e ítems originales. */
+    @Test
+    fun `an invalid delegated transition does not mutate the original aggregate`() {
+        val pending = newOrder()
+        val beforeItems = pending.items
+
+        val error = assertThrows(DomainException::class.java) {
+            pending.startItem(pending.items.first().id, later)
+        }
+
+        assertEquals(ErrorCode.ITEM_INVALID_TRANSITION, error.code)
+        assertEquals(OrderStatus.PENDING_REVIEW, pending.status)
+        assertEquals(beforeItems, pending.items)
+    }
+
+    /** Verifica el error de catálogo cuando el identificador no pertenece al agregado. */
+    @Test
+    fun `delegated action for an item outside the aggregate is ITEM_NOT_FOUND`() {
+        val accepted = newOrder().accept(later)
+
+        val error = assertThrows(DomainException::class.java) {
+            accepted.startItem(UUID.randomUUID(), later.plusSeconds(1))
+        }
+
+        assertEquals(ErrorCode.ITEM_NOT_FOUND, error.code)
+        assertEquals(OrderStatus.ACCEPTED, accepted.status)
+        assertEquals(listOf(ItemStatus.QUEUED, ItemStatus.QUEUED), statusesOf(accepted))
     }
 }

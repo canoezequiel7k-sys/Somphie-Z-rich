@@ -64,7 +64,7 @@ Reglas:
 | `SessionAccessPort` (floor) | orders, billing | Resolver sesión, comprobar `OPEN`, participante, bloquear (`lockForShare` / `lockForUpdate`) |
 | `ProductQueryPort` (catalog) | orders | Datos vigentes de productos (precio, disponibilidad, estación) |
 | `OrderCommandPort` (orders) | preparation | Transiciones de ítem (`start`, `ready`, `deliver`, `cancel`, `undo`) |
-| `OrderChargesPort` (orders) | billing | Cargos facturables de una sesión (única definición, ver `modelo-datos.md` §4) |
+| `OrderChargesPort` (orders) | billing | Importes facturables y datos de ítems para cortesías; el dominio de pedidos aplica sus estados antes de entregar los cargos (única definición, ver `modelo-datos.md` §4) |
 | `OrderActivityPort` (orders) | floor (cierre) | ¿Hay pendientes/ítems activos? |
 | `CurrentActor` (shared) | todos | Principal autenticado y permisos |
 | `AuditPort` (audit) | todos | Registrar evento en la misma transacción |

@@ -5,16 +5,11 @@ import com.somphie.billing.domain.PaymentKind.REFUND
 import com.somphie.billing.domain.PaymentStatus.FAILED
 import com.somphie.billing.domain.PaymentStatus.SUCCEEDED
 import com.somphie.billing.domain.PaymentStatus.VOIDED
-import com.somphie.orders.domain.ItemStatus
-import com.somphie.orders.domain.OrderStatus
 import com.somphie.shared.domain.Money
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.DynamicTest
-import org.junit.jupiter.api.DynamicTest.dynamicTest
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.TestFactory
 
 /**
  * Pruebas de la cuenta (RN-BIL-01, RN-BIL-02, RN-TIP-02, RN-TIP-05, RN-ORD-19).
@@ -23,8 +18,7 @@ import org.junit.jupiter.api.TestFactory
 class BillCalculatorTest {
 
     // --- Ayudas para armar datos de prueba sin repetir código ---
-    private fun charge(order: OrderStatus, item: ItemStatus, cents: Long) =
-        ChargeLine(order, item, Money.of(cents))
+    private fun charge(cents: Long) = ChargeLine(Money.of(cents))
 
     private fun payment(cents: Long, tip: Long = 0, status: PaymentStatus = SUCCEEDED) =
         PaymentLine(PAYMENT, status, Money.of(cents), Money.of(tip))
@@ -35,8 +29,8 @@ class BillCalculatorTest {
     private fun adjustment(cents: Long, status: AdjustmentStatus = AdjustmentStatus.APPLIED) =
         AdjustmentLine(status, Money.of(cents))
 
-    /** Línea facturable "normal": pedido entregado, ítem entregado. */
-    private fun billable(cents: Long) = charge(OrderStatus.DELIVERED, ItemStatus.DELIVERED, cents)
+    /** Representa un importe que el puerto de pedidos ya calificó como facturable. */
+    private fun billable(cents: Long) = charge(cents)
 
     private fun summarize(
         charges: List<ChargeLine> = emptyList(),
@@ -44,36 +38,11 @@ class BillCalculatorTest {
         payments: List<PaymentLine> = emptyList(),
     ) = BillCalculator.summarize(charges, adjustments, payments)
 
-    // --- Qué cuenta como cargo (RN-BIL-01 y RN-ORD-19) ---
-
-    /**
-     * Recorre TODAS las combinaciones (estado de pedido × estado de ítem). La lista de estados que
-     * cobran está escrita a mano acá, separada del código, para detectar si alguien la cambia sin querer.
-     */
-    @TestFactory
-    fun `a line is billable only in accepted to delivered orders and when the item is not cancelled`():
-        List<DynamicTest> {
-        val billableOrders = setOf(
-            OrderStatus.ACCEPTED, OrderStatus.IN_PREPARATION, OrderStatus.READY, OrderStatus.DELIVERED,
-        )
-        return OrderStatus.entries.flatMap { order ->
-            ItemStatus.entries.map { item ->
-                dynamicTest("order $order with item $item") {
-                    val expected = if (order in billableOrders && item != ItemStatus.CANCELLED) 1_000L else 0L
-                    assertEquals(Money.of(expected), BillableCharges.total(listOf(charge(order, item, 1_000))))
-                }
-            }
-        }
-    }
-
     @Test
-    fun `charges sum only the billable lines`() {
+    fun `charges sum the billable lines supplied by the orders port`() {
         val charges = listOf(
             billable(970_000),
-            charge(OrderStatus.PENDING_REVIEW, ItemStatus.PENDING, 300_000), // pendiente: no cobra
-            charge(OrderStatus.REJECTED, ItemStatus.CANCELLED, 500_000), // rechazado: no cobra
-            charge(OrderStatus.ACCEPTED, ItemStatus.CANCELLED, 100_000), // ítem excluido/cancelado: no cobra
-            charge(OrderStatus.ACCEPTED, ItemStatus.QUEUED, 480_000),
+            billable(480_000),
         )
         assertEquals(Money.of(1_450_000), summarize(charges = charges).charges)
     }
@@ -153,7 +122,7 @@ class BillCalculatorTest {
     fun `cancelling an already paid item leaves a negative balance`() {
         // Se pagó todo (1.000.000) y después se cancela un ítem de 400.000: quedan 600.000 de cargos.
         val summary = summarize(
-            charges = listOf(billable(600_000), charge(OrderStatus.ACCEPTED, ItemStatus.CANCELLED, 400_000)),
+            charges = listOf(billable(600_000)),
             payments = listOf(payment(1_000_000)),
         )
         assertEquals(Balance(-400_000), summary.balance)

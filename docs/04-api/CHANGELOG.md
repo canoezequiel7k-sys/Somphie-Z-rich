@@ -7,6 +7,20 @@ Reglas (D-150):
 - Versiones `0.x` = borrador. `1.0.0` = contrato congelado al cerrar la Fase 1.
 - Las fechas anteriores al 2026-10-11 no se registraron en su momento (el historial de Git empieza ese día): se marcan "fecha no registrada" en vez de inventarlas.
 
+## [0.2.5] — 2026-10-12 — alinear revocación del HOST con RN-ACC-10
+Cambio **compatible**: aclara quién puede revocar al HOST y cuándo aplica el error existente.
+- changed: el HOST no puede revocarse a sí mismo; el personal puede revocarlo, en consistencia con RN-ACC-10 y el dominio.
+- changed: `info.version` = `0.2.5` y el ejemplo de `GET /version` (`contractVersion`).
+- Impacto: **Web y Android** (aclara respuestas ya documentadas); **Backend** (el dominio ya aplica este comportamiento).
+
+## [0.2.4] — 2026-10-12 — aclarar expiración de pedidos (H-26, H-27, H-28)
+Cambio **compatible**: precisa cuándo se aplican errores existentes y el límite temporal, sin cambiar esquemas ni códigos.
+- changed: la aceptación depende del estado actual; superar el TTL no bloquea si el job aún no marcó `EXPIRED`.
+- changed: rechazar un pedido `EXPIRED` responde `ORDER_EXPIRED`; otros estados ya decididos responden `ORDER_ALREADY_DECIDED`.
+- fixed: CU-50 expira al cumplirse el TTL (`createdAt + TTL <= now`) y el job no sobrescribe decisiones concurrentes.
+- changed: `info.version` = `0.2.4` y el ejemplo de `GET /version` (`contractVersion`).
+- Impacto: **Web y Android** (interpretación consistente de respuestas ya documentadas); **Backend** (job futuro y manejo de estados según el contrato).
+
 ## [0.2.3] — 2026-10-12 — cortesía solo sobre ítems aceptados (H-29)
 Cambio **compatible**: solo aclara una descripción; no cambia esquemas ni códigos de error.
 - fixed: `applyAdjustment` documenta que `ADJUSTMENT_ITEM_INVALID` (409) también aplica a un ítem aún sin aceptar (`PENDING`), además de cancelado o ya con cortesía (RN-ADJ-04, RN-BIL-01).

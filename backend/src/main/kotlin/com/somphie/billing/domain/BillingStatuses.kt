@@ -6,6 +6,9 @@ package com.somphie.billing.domain
  */
 enum class PaymentKind { PAYMENT, REFUND }
 
+/** Medio de registro del movimiento, según `estados-y-transiciones.md` §5. */
+enum class PaymentMethod { SIMULATED_ONLINE, CASH_COUNTER }
+
 /**
  * Estado de un pago (§5):
  * - `SUCCEEDED`: aprobado, cuenta para el saldo.

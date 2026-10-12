@@ -1,7 +1,5 @@
 package com.somphie.billing.domain
 
-import com.somphie.orders.domain.ItemStatus
-import com.somphie.orders.domain.OrderStatus
 import com.somphie.shared.domain.Money
 import com.somphie.shared.domain.total
 
@@ -12,41 +10,20 @@ import com.somphie.shared.domain.total
  * Así nunca queda desincronizada ("una sola fuente de verdad"). Y como es una función pura (recibe
  * datos, devuelve números), se puede probar sin base de datos.
  *
- * Nota de arquitectura: este archivo usa los enums de `orders` (OrderStatus, ItemStatus).
- * La dirección de dependencia billing → orders se confirmará con ArchUnit en el WP-BE-20.
+ * La aplicación obtiene cargos ya filtrados mediante el puerto `OrderChargesPort` de `orders` y
+ * adapta sus importes a [ChargeLine]; así este dominio no importa tipos de otro módulo.
  */
 
 /**
- * Una línea de pedido vista desde la cuenta: solo lo que a billing le importa.
- * Se arma en la capa de aplicación a partir de los ítems reales.
+ * Importe de un ítem que `OrderChargesPort` ya calificó como facturable según RN-BIL-01.
+ * La aplicación lo arma con el precio histórico del ítem y no vuelve a decidir su elegibilidad.
  *
- * @property lineTotal `unitPriceMinor × quantity` ya calculado, con el PRECIO HISTÓRICO del snapshot
- *   (RN-BIL-01): nunca se consulta el catálogo actual, porque un cambio de precio posterior no debe
- *   alterar lo que el cliente ya pidió.
+ * @property lineTotal `unitPriceMinor × quantity` con el PRECIO HISTÓRICO del snapshot; un cambio
+ * posterior del catálogo nunca altera lo que el cliente ya pidió.
  */
 data class ChargeLine(
-    val orderStatus: OrderStatus,
-    val itemStatus: ItemStatus,
     val lineTotal: Money,
-) {
-    /**
-     * LA definición de "cargo facturable" (regla de oro 3): un ítem NO cancelado de un pedido en
-     * `ACCEPTED`, `IN_PREPARATION`, `READY` o `DELIVERED`.
-     *
-     * Por eso un pedido pendiente, rechazado, cancelado o expirado NUNCA aparece en la cuenta (RN-ORD-19).
-     */
-    val isBillable: Boolean
-        get() = orderStatus in BILLABLE_ORDER_STATUSES && itemStatus != ItemStatus.CANCELLED
-
-    private companion object {
-        val BILLABLE_ORDER_STATUSES = setOf(
-            OrderStatus.ACCEPTED,
-            OrderStatus.IN_PREPARATION,
-            OrderStatus.READY,
-            OrderStatus.DELIVERED,
-        )
-    }
-}
+)
 
 /** Un ajuste (descuento o cortesía) visto desde la cuenta. Solo los `APPLIED` restan. */
 data class AdjustmentLine(
@@ -119,14 +96,25 @@ data class BillSummary(
     val balance: Balance,
 )
 
-/** Cargos facturables. Existe como objeto aparte para que haya UN solo lugar donde se suman. */
+/** Suma importes que `OrderChargesPort` ya filtró conforme a RN-BIL-01. */
 object BillableCharges {
     fun total(lines: Iterable<ChargeLine>): Money =
-        lines.filter { it.isBillable }.map { it.lineTotal }.total()
+        lines.map { it.lineTotal }.total()
 }
 
 /** Calcula el [BillSummary]. Función pura: mismos datos de entrada, mismo resultado, sin tocar nada. */
 object BillCalculator {
+
+    /** Resume entidades de pago usando la misma regla de cálculo que las filas proyectadas desde persistencia. */
+    fun summarizePayments(
+        chargeLines: Iterable<ChargeLine>,
+        adjustmentLines: Iterable<AdjustmentLine>,
+        payments: Iterable<Payment>,
+    ): BillSummary = summarize(
+        chargeLines = chargeLines,
+        adjustmentLines = adjustmentLines,
+        paymentLines = payments.map { it.asBillLine() },
+    )
 
     fun summarize(
         chargeLines: Iterable<ChargeLine>,

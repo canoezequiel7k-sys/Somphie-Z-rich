@@ -50,10 +50,12 @@ stateDiagram-v2
 | De | Acción | A | Quién | Guardas | Error | Auditoría | Evento |
 |---|---|---|---|---|---|---|---|
 | — | `create` | `PENDING_REVIEW` | Participante (`order.create`) o personal | Sesión `OPEN`, local abierto, producto válido/disponible, límites, total reconocido coincide, pendientes < 3 | `SESSION_CLOSED`, `RESTAURANT_CLOSED`, `PRODUCT_UNAVAILABLE`, `PRICE_CHANGED`, `ORDER_PENDING_LIMIT_REACHED`, `ORDER_*` | `ORDER_CREATED` | `EV-order.created` |
-| `PENDING_REVIEW` | `accept` | `ACCEPTED` | `order.accept` | Estado actual `PENDING_REVIEW` (atómico) | `ORDER_ALREADY_DECIDED`, `ORDER_EXPIRED`, `ORDER_ALL_ITEMS_EXCLUDED` | `ORDER_ACCEPTED` | `EV-order.updated` |
-| `PENDING_REVIEW` | `reject` | `REJECTED` | `order.reject` | ídem | `ORDER_ALREADY_DECIDED` | `ORDER_REJECTED` | `EV-order.updated` |
+| `PENDING_REVIEW` | `accept` | `ACCEPTED` | `order.accept` | Estado actual `PENDING_REVIEW` (atómico); el TTL solo lo aplica el job | Si el estado ya es `EXPIRED`: `ORDER_EXPIRED`; otro estado decidido: `ORDER_ALREADY_DECIDED`; `ORDER_ALL_ITEMS_EXCLUDED` | `ORDER_ACCEPTED` | `EV-order.updated` |
+| `PENDING_REVIEW` | `reject` | `REJECTED` | `order.reject` | Estado actual `PENDING_REVIEW` (atómico); el TTL solo lo aplica el job | Si el estado ya es `EXPIRED`: `ORDER_EXPIRED`; otro estado decidido: `ORDER_ALREADY_DECIDED` | `ORDER_REJECTED` | `EV-order.updated` |
 | `PENDING_REVIEW` | `cancel` | `CANCELLED` | Autor/host (`order.cancel_own`) o personal | ídem | `ORDER_NOT_CANCELLABLE` | `ORDER_CANCELLED` | `EV-order.updated` |
-| `PENDING_REVIEW` | `expire` | `EXPIRED` | Sistema | Pasaron N min sin decisión | — | `ORDER_EXPIRED` | `EV-order.updated` |
+| `PENDING_REVIEW` | `expire` | `EXPIRED` | Sistema | `elapsed >= orderPendingTtlMin`, sin decisión | Estado ya decidido: `ORDER_ALREADY_DECIDED`; invocación antes del límite: error de programación | `ORDER_EXPIRED` | `EV-order.updated` |
+
+El job intenta la transición con una actualización condicional sobre `status = PENDING_REVIEW` y el límite temporal inclusivo. Si una aceptación/rechazo ganó la carrera, el job no modifica ese pedido; si el dominio recibe una transición inválida, informa el error correspondiente.
 
 ## 3. Ítem de pedido (`ItemStatus`)
 

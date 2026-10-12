@@ -21,6 +21,15 @@ enum class ErrorCode {
     ITEM_NOT_CANCELLABLE,
     ITEM_UNDO_WINDOW_EXPIRED,
 
+    // --- Sesiones y participantes (catálogo §3) ---
+    SESSION_FULL, // La sesión alcanzó el máximo de participantes permitido.
+    SESSION_CLOSED, // La acción requiere que la sesión siga abierta.
+    SESSION_HAS_PENDING_ORDERS, // El cierre normal no permite pedidos aún sin decisión.
+    SESSION_HAS_ACTIVE_ITEMS, // El cierre normal no permite ítems en preparación o listos.
+    SESSION_BALANCE_PENDING, // El cierre normal requiere saldo exactamente cero.
+    PARTICIPANT_NOT_FOUND, // El participante indicado no pertenece a la sesión.
+    HOST_CANNOT_BE_REVOKED, // El host no puede revocar su propio acceso.
+
     // --- Pagos (catálogo §5) ---
     PAYMENT_AMOUNT_INVALID,
     PAYMENT_EXCEEDS_BALANCE,

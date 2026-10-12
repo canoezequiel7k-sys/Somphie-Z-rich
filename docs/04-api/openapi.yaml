@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Somphie Zúrich API
-  version: 0.2.3
+  version: 0.2.5
   summary: Contrato REST del backend de Somphie Zúrich (pedidos por QR, operación del personal, cuenta y pagos simulados).
   description: |
     Fuente de verdad del contrato (ADR-0008). Todo cambio se hace **primero aquí** y en `CHANGELOG.md`.
@@ -334,7 +334,7 @@ paths:
       operationId: revokeParticipant
       summary: Revocar a un participante (solo HOST)
       description: |
-        Acceso retirado de inmediato; sus pedidos ya enviados se conservan. Error `HOST_CANNOT_BE_REVOKED` (409) si apunta al host.
+        Acceso retirado de inmediato; sus pedidos ya enviados se conservan. El HOST no puede revocarse a sí mismo (`HOST_CANNOT_BE_REVOKED`, 409); el personal sí puede revocarlo.
       security: [{guestToken: []}]
       x-permission: participant.manage
       parameters:
@@ -840,7 +840,7 @@ paths:
       operationId: acceptOrder
       summary: Aceptar un pedido (con exclusiones opcionales)
       description: |
-        Actualización condicional `PENDING_REVIEW -> ACCEPTED`: gana la primera decisión. Ítems a `QUEUED`; los excluidos a `CANCELLED` (no cobran).
+        Actualización condicional `PENDING_REVIEW -> ACCEPTED`: gana la primera decisión. El TTL solo lo aplica el job; si el estado sigue `PENDING_REVIEW`, aceptar no consulta el tiempo transcurrido. Ítems a `QUEUED`; los excluidos a `CANCELLED` (no cobran).
         Errores 409: `ORDER_ALREADY_DECIDED` (trae quién y cuándo), `ORDER_EXPIRED`. Error 422: `ORDER_ALL_ITEMS_EXCLUDED` (usar rechazo).
       security: [{staffJwt: []}]
       x-permission: order.accept
@@ -879,7 +879,7 @@ paths:
       tags: [StaffOrders]
       operationId: rejectOrder
       summary: Rechazar un pedido con motivo
-      description: "El pedido se conserva en el historial; sus ítems pasan a `CANCELLED`. Errores: `ORDER_ALREADY_DECIDED`, `ORDER_EXPIRED`."
+      description: "El pedido se conserva en el historial; sus ítems pasan a `CANCELLED`. Si el estado actual es `EXPIRED`, responde `ORDER_EXPIRED`; otros estados ya decididos responden `ORDER_ALREADY_DECIDED`."
       security: [{staffJwt: []}]
       x-permission: order.reject
       parameters:
@@ -1383,7 +1383,7 @@ paths:
       tags: [StaffFloor]
       operationId: revokeParticipantAsStaff
       summary: Revocar a un participante
-      description: Error `HOST_CANNOT_BE_REVOKED` (409) si apunta al host.
+      description: El personal puede revocar al HOST; `HOST_CANNOT_BE_REVOKED` (409) solo aplica si el propio HOST intenta revocarse a sí mismo.
       security: [{staffJwt: []}]
       x-permission: participant.revoke
       parameters:
@@ -1693,7 +1693,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/VersionInfo'}
-              example: {build: 0.1.0, contractVersion: 0.2.3}
+              example: {build: 0.1.0, contractVersion: 0.2.5}
         '500': {$ref: '#/components/responses/InternalError'}
   /media/{path}:
     get:
@@ -2726,4 +2726,3 @@ components:
       properties:
         build: {type: string}
         contractVersion: {type: string}
-

@@ -128,13 +128,13 @@ flowchart LR
 ### CU-22 — Aceptar un pedido (con exclusiones opcionales)
 - **Permiso:** `order.accept` · **Fase:** 4 (API) / 5 (UI)
 - **Flujo:** 1) Abre detalle. 2) Opcional: marca ítems a excluir con motivo. 3) `POST /staff/orders/{id}/accept {excludedItems?:[{itemId, reason}]}` + `Idempotency-Key`. 4) Servidor: actualización condicional `PENDING_REVIEW → ACCEPTED`; ítems → `QUEUED`/`CANCELLED`; auditoría; evento.
-- **Errores:** `ORDER_ALREADY_DECIDED` (otro empleado ganó: la app muestra quién y qué decidió), `ORDER_EXPIRED`, `ORDER_ALL_ITEMS_EXCLUDED`, `FORBIDDEN`.
+- **Errores:** `ORDER_ALREADY_DECIDED` (otro empleado ganó: la app muestra quién y qué decidió), `ORDER_EXPIRED` (el estado ya es `EXPIRED`), `ORDER_ALL_ITEMS_EXCLUDED`, `FORBIDDEN`. Superar el TTL sin que el job haya cambiado el estado no impide aceptar.
 - **Efectos:** aparecen ítems en las colas de sus estaciones; el cliente ve "Aceptado".
 
 ### CU-23 — Rechazar un pedido
 - **Permiso:** `order.reject` · **Fase:** 4/5
 - **Flujo:** `POST /staff/orders/{id}/reject {reasonCode, reasonText?}`.
-- **Errores:** `ORDER_ALREADY_DECIDED`, `ORDER_EXPIRED`.
+- **Errores:** `ORDER_ALREADY_DECIDED`, `ORDER_EXPIRED` si el estado actual ya es `EXPIRED`.
 - **Efectos:** pedido `REJECTED`, ítems `CANCELLED`, el cliente ve motivo y puede corregir (CU-10).
 
 ### CU-24 — Ver la cola de una estación
@@ -229,7 +229,7 @@ flowchart LR
 # D. Sistema
 
 ### CU-50 — Expirar pedidos pendientes
-- **Job** cada minuto: `PENDING_REVIEW` con `createdAt + TTL < now` → `EXPIRED` (actualización condicional, segura si dos instancias corren), audita `ORDER_EXPIRED`, emite evento.
+- **Job** cada minuto: `PENDING_REVIEW` con `createdAt + TTL <= now` → `EXPIRED` (actualización condicional, segura ante carreras con otras decisiones), audita `ORDER_EXPIRED`, emite evento. El dominio rechaza como error de programación una invocación antes del TTL; un pedido decidido ya no se modifica.
 
 ### CU-51 — Expirar sesiones vacías
 - **Job** cada minuto: sesiones `OPEN` sin pedidos pendientes ni cargos y sin actividad `sessionIdleTtlMin` → `CLOSED(EXPIRED_EMPTY)`.

@@ -1,7 +1,5 @@
 package com.somphie.billing.domain
 
-import com.somphie.orders.domain.ItemStatus
-import com.somphie.orders.domain.OrderItem
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
 import com.somphie.shared.domain.Money
@@ -9,7 +7,7 @@ import java.util.UUID
 
 /**
  * Cortesía de un ítem (RN-ADJ-04): apunta a un ítem ACEPTADO, NO cancelado y sin cortesía previa.
- * Cierra el hallazgo H-25: ahora el dominio conoce el id, el estado y el importe del ítem.
+ * Recibe una proyección del puerto entre módulos, no la entidad `OrderItem`.
  *
  * Un ítem `PENDING` todavía no es un cargo: su pedido no fue aceptado (RN-BIL-01) y puede terminar
  * rechazado, cancelado o vencido. Una cortesía sobre él restaría plata de OTROS ítems que sí se cobran
@@ -21,12 +19,20 @@ import java.util.UUID
  */
 object CourtesyRules {
 
+    /** Vista mínima de un ítem que la aplicación adapta desde `orders` antes de validar la cortesía. */
+    data class ItemFacts(
+        val id: UUID,
+        val lineTotal: Money,
+        val accepted: Boolean,
+        val cancelled: Boolean,
+    )
+
     /**
-     * Devuelve el importe de la cortesía (el `lineTotal` del ítem) o lanza `ADJUSTMENT_ITEM_INVALID`
-     * si el ítem está cancelado, aún sin aceptar (`PENDING`) o ya tiene cortesía.
+     * Devuelve el importe de la cortesía o lanza `ADJUSTMENT_ITEM_INVALID` si el ítem no fue aceptado,
+     * está cancelado o ya tiene cortesía.
      */
-    fun lineTotalFor(item: OrderItem, itemIdsWithCourtesy: Set<UUID>): Money {
-        if (item.status == ItemStatus.CANCELLED || item.status == ItemStatus.PENDING || item.id in itemIdsWithCourtesy) {
+    fun lineTotalFor(item: ItemFacts, itemIdsWithCourtesy: Set<UUID>): Money {
+        if (!item.accepted || item.cancelled || item.id in itemIdsWithCourtesy) {
             throw DomainException(
                 ErrorCode.ADJUSTMENT_ITEM_INVALID,
                 "Item ${item.id} cannot receive a courtesy",

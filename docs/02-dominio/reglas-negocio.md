@@ -51,11 +51,11 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 | RN-ORD-05 | Se crea en `PENDING_REVIEW`; sus ítems en `PENDING` | D |
 | RN-ORD-06 | Máx. `maxPendingOrdersPerSession` pedidos `PENDING_REVIEW` por sesión (`ORDER_PENDING_LIMIT_REACHED`) | A |
 | RN-ORD-07 | Fuera de horario de atención, un cliente no puede crear pedidos (`RESTAURANT_CLOSED`). El personal sí puede (con aviso) | A |
-| RN-ORD-08 | Solo `PENDING_REVIEW` puede aceptarse/rechazarse; **gana la primera decisión**, la segunda recibe `ORDER_ALREADY_DECIDED` con quién y cuándo | A/DB |
+| RN-ORD-08 | Solo el estado actual `PENDING_REVIEW` puede aceptarse/rechazarse; **gana la primera decisión**, la segunda recibe `ORDER_ALREADY_DECIDED` con quién y cuándo. El TTL no se comprueba en estas acciones: si el job aún no cambió el estado, el pedido sigue siendo decidible | A/DB |
 | RN-ORD-09 | Rechazo: `reasonCode` ∈ {`OUT_OF_STOCK`, `KITCHEN_CLOSED`, `ITEM_UNAVAILABLE`, `OTHER`} + texto opcional ≤ 140. **Se conserva** en historial | D |
 | RN-ORD-10 | Aceptar puede **excluir ítems** (con motivo): quedan `CANCELLED` y no cobran; si se excluyen todos → `ORDER_ALL_ITEMS_EXCLUDED` (usar rechazo) | A |
 | RN-ORD-11 | El cliente (autor o host) puede cancelar **solo** mientras esté `PENDING_REVIEW` | A |
-| RN-ORD-12 | `PENDING_REVIEW` sin decisión tras `orderPendingTtlMin` pasa a `EXPIRED` (job). El cliente puede reenviar | A (job) |
+| RN-ORD-12 | El job es el único que cambia `PENDING_REVIEW` a `EXPIRED`; selecciona pedidos cuando `elapsed >= orderPendingTtlMin`. El cliente puede reenviar | A (job) |
 | RN-ORD-13 | Tras aceptar, cantidades y precios **no se modifican**. Solo se cancelan ítems (personal) | D |
 | RN-ORD-14 | `Order.status` está materializado y se **recalcula en la misma transacción** que cualquier cambio de ítem (ver estados §4) | D |
 | RN-ORD-15 | `displayCode` `#NNN` secuencial por (restaurante, día de negocio), generado atómicamente | DB |
