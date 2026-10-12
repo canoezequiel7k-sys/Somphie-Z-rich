@@ -544,6 +544,16 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Archivos:** `backend/src/main/resources/db/migration/V6__orders.sql`, `backend/src/main/kotlin/com/somphie/orders/`, y esta bitácora.
 - **Qué estudiar:** Integración de agregados puros del dominio con persistencia relacional en Spring JDBC e idempotencia transaccional.
 
+### 2026-10-12 — WP-BE-44 ✅
+- **Qué hicimos:** Se implementaron los endpoints de decisión de pedidos por el personal (`StaffOrdersController` y `StaffOrderModels`):
+  1. `GET /staff/orders` y `GET /staff/orders/{id}` para consulta y filtrado de pedidos entrantes.
+  2. `POST /staff/orders/{id}/accept` para aceptar pedidos aplicando la lógica del agregado `Order` (con exclusión opcional de ítems y protección frente a decisiones duplicadas `ORDER_ALREADY_DECIDED`).
+  3. `POST /staff/orders/{id}/reject` para rechazar pedidos especificando motivo y texto opcional (hasta 140 caracteres).
+  4. Integración con `IdempotencyService` para garantizar reintentos seguros.
+- **Por qué:** Cumple con WP-BE-44 de la Fase 4 del roadmap, dotando al personal de las operaciones de gestión y decisión sobre los pedidos de la mesa.
+- **Archivos:** `backend/src/main/kotlin/com/somphie/orders/api/StaffOrdersController.kt`, `backend/src/main/kotlin/com/somphie/orders/domain/StaffOrderModels.kt`, y esta bitácora.
+- **Qué estudiar:** Ciclo de vida del pedido gestionado por el personal, exclusión de ítems al aceptar y rechazo con motivos estructurados.
+
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)
 
