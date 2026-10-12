@@ -509,6 +509,24 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Archivos:** `backend/src/main/kotlin/com/somphie/catalog/domain/ImageStorage.kt`, `backend/src/main/kotlin/com/somphie/catalog/infrastructure/FolderImageStorageAdapter.kt`, `backend/src/main/kotlin/com/somphie/catalog/api/MediaController.kt`, `backend/src/test/kotlin/com/somphie/catalog/api/MediaControllerTest.kt` y esta bitácora.
 - **Qué estudiar:** Puertos y adaptadores (Hexagonal architecture aplicada al almacenamiento de archivos) y manejo seguro de rutas estáticas con control de traversals.
 
+### 2026-10-12 — WP-BE-40 🔄 (En curso / Planificado)
+- **Qué vamos a hacer:** Implementar el módulo `floor` (Mesas, sesiones, participantes y resolución QR) en el backend (Spring Boot + PostgreSQL con Flyway V4):
+  1. Migración Flyway `V4__floor.sql` con tablas `dining_table`, `table_session` y `session_participant`, incluyendo el índice único parcial para garantizar una única sesión abierta por mesa (`ux_one_open_session_per_table`).
+  2. Endpoints públicos: `GET /public/tables/{tableCode}` (resolver QR), `POST /public/tables/{tableCode}/sessions` (abrir sesión / unirse) y `POST /public/tables/{tableCode}/join` (unirse con código de 6 caracteres).
+  3. Lógica de tokens de participante hasheados y generación de códigos de unión (`JoinCode`).
+  4. Pruebas unitarias e integración.
+- **Por qué:** Es el paquete principal de la Fase 4 (Mesas, sesiones, QR y pedidos), permitiendo que los clientes entren a una mesa y establezcan su sesión operativa.
+- **Archivos previstos:** `backend/src/main/resources/db/migration/V4__floor.sql`, controladores y servicios de floor en `backend/src/main/kotlin/com/somphie/floor/`, y pruebas asociadas.
+
+### 2026-10-12 — WP-BE-40 ✅
+- **Qué hicimos:** Se implementó el módulo `floor` (Mesas, sesiones, participantes y resolución QR) en el backend:
+  1. Migración Flyway `V4__floor.sql` creando las tablas `dining_table`, `table_session` y `session_participant`, incluyendo el índice único parcial `ux_one_open_session_per_table` para asegurar como máximo una sesión abierta por mesa de forma concurrente, además de la semilla de mesas demo.
+  2. DTOs de floor en `FloorModels.kt` y `FloorController` exponiendo `GET /public/tables/{tableCode}` (resolver QR), `POST /public/tables/{tableCode}/sessions` (abrir sesión y asignar rol HOST) y `POST /public/tables/{tableCode}/join` (unirse a sesión con código de unión).
+  3. Pruebas unitarias en `FloorControllerTest`.
+- **Por qué:** Cumple con WP-BE-40 de la Fase 4 del roadmap (Mesas, sesiones, QR y pedidos), permitiendo que los clientes interactúen con las mesas y establezcan sus sesiones operativas.
+- **Archivos:** `backend/src/main/resources/db/migration/V4__floor.sql`, `backend/src/main/kotlin/com/somphie/floor/`, `backend/src/test/kotlin/com/somphie/floor/` y esta bitácora.
+- **Qué estudiar:** Índices únicos parciales en PostgreSQL para restricciones condicionales (`WHERE status = 'OPEN'`) y gestión de sesiones de mesa basadas en tokens y códigos de unión de 6 caracteres.
+
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)
 
