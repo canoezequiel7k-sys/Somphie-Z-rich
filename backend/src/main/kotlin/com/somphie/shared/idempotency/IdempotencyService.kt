@@ -5,20 +5,23 @@ import com.somphie.shared.domain.ErrorCode
 import org.springframework.http.ResponseEntity
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Service
+import tools.jackson.core.type.TypeReference
+import tools.jackson.databind.ObjectMapper
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
 @Service
 class IdempotencyService(
-    private val jdbc: NamedParameterJdbcTemplate
+    private val jdbc: NamedParameterJdbcTemplate,
+    private val objectMapper: ObjectMapper,
 ) {
 
-    fun <T : Any> executeIdempotent(
+    fun executeIdempotent(
         scope: String,
         idempotencyKey: String?,
         requestBody: String,
-        action: () -> ResponseEntity<T>
-    ): ResponseEntity<T> {
+        action: () -> ResponseEntity<Map<String, Any>>,
+    ): ResponseEntity<Map<String, Any>> {
         if (idempotencyKey.isNullOrBlank()) {
             throw DomainException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED, "Idempotency-Key header is required")
         }
@@ -50,8 +53,10 @@ class IdempotencyService(
             }
 
             val responseStatus = existing["response_status"] as Int
-            @Suppress("UNCHECKED_CAST")
-            val responseBody = existing["response_body"] as? T ?: (null as T)
+            val storedBody = existing["response_body"] as? String
+            val responseBody = storedBody
+                ?.takeIf(String::isNotEmpty)
+                ?.let { objectMapper.readValue(it, responseBodyType) }
 
             return ResponseEntity.status(responseStatus)
                 .header("Idempotent-Replayed", "true")
@@ -66,7 +71,7 @@ class IdempotencyService(
         return try {
             val response = action()
             val status = response.statusCode.value()
-            val body = response.body?.toString() ?: ""
+            val body = response.body?.let(objectMapper::writeValueAsString) ?: ""
 
             jdbc.update(
                 "UPDATE idempotency_record SET status = 'COMPLETED', response_status = :status, response_body = :body WHERE scope = :scope AND key = :key",
@@ -87,5 +92,9 @@ class IdempotencyService(
         val digest = MessageDigest.getInstance("SHA-256")
         val hashBytes = digest.digest(input.toByteArray(StandardCharsets.UTF_8))
         return hashBytes.joinToString("") { "%02x".format(it) }
+    }
+
+    private companion object {
+        val responseBodyType = object : TypeReference<Map<String, Any>>() {}
     }
 }

@@ -98,6 +98,7 @@ class ApiExceptionHandler {
         -> HttpStatus.UNAUTHORIZED
         ErrorCode.ACCOUNT_DISABLED,
         ErrorCode.PASSWORD_CHANGE_REQUIRED,
+        ErrorCode.SESSION_ACCESS_REVOKED,
         -> HttpStatus.FORBIDDEN
         ErrorCode.ACCOUNT_TEMPORARILY_LOCKED,
         -> HttpStatus.TOO_MANY_REQUESTS

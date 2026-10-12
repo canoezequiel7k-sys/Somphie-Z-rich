@@ -18,8 +18,12 @@ import org.springframework.security.oauth2.jwt.JwtValidators
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder
 import org.springframework.security.core.AuthenticationException
+import org.springframework.security.core.authority.SimpleGrantedAuthority
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter
 import org.springframework.security.web.AuthenticationEntryPoint
 import org.springframework.security.web.SecurityFilterChain
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver
 import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jose.jwk.source.ImmutableSecret
 import java.net.URI
@@ -66,21 +70,59 @@ class IdentitySecurityConfiguration {
     }
 
     @Bean
+    fun jwtAuthenticationConverter(): JwtAuthenticationConverter =
+        JwtAuthenticationConverter().apply {
+            setJwtGrantedAuthoritiesConverter { jwt ->
+                jwt.getClaimAsStringList("perms").orEmpty().map(::SimpleGrantedAuthority)
+            }
+        }
+
+    @Bean
     fun identitySecurityFilterChain(
         http: HttpSecurity,
         jwtDecoder: JwtDecoder,
+        jwtAuthenticationConverter: JwtAuthenticationConverter,
     ): SecurityFilterChain {
         val entryPoint = IdentityAuthenticationEntryPoint()
+        val defaultBearerTokenResolver = DefaultBearerTokenResolver()
+        val bearerTokenResolver = BearerTokenResolver { request ->
+            val token = defaultBearerTokenResolver.resolve(request)
+            val path = request.requestURI.removePrefix(request.contextPath)
+            if (token?.startsWith(GUEST_TOKEN_PREFIX) == true || isGuestOrderEndpoint(request.method, path)) {
+                null
+            } else {
+                token
+            }
+        }
         http
             .csrf { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
                 it.requestMatchers(HttpMethod.POST, "/auth/login", "/auth/refresh").permitAll()
                 it.requestMatchers("/auth/logout", "/auth/change-password", "/me").authenticated()
-                it.anyRequest().permitAll()
+                it.requestMatchers(HttpMethod.GET, "/staff/orders", "/staff/orders/*")
+                    .hasAuthority("order.read")
+                it.requestMatchers(HttpMethod.POST, "/staff/orders/*/accept")
+                    .hasAuthority("order.accept")
+                it.requestMatchers(HttpMethod.POST, "/staff/orders/*/reject")
+                    .hasAuthority("order.reject")
+                it.requestMatchers("/staff/**").denyAll()
+                it.requestMatchers(HttpMethod.GET, "/menu", "/products/*", "/public/tables/*", "/media/**", "/version", "/actuator/health")
+                    .permitAll()
+                it.requestMatchers(HttpMethod.POST, "/public/tables/*/sessions", "/public/tables/*/join")
+                    .permitAll()
+                it.requestMatchers(HttpMethod.POST, "/sessions/current/orders", "/orders/*/cancel")
+                    .permitAll()
+                it.requestMatchers(HttpMethod.GET, "/sessions/current/orders", "/orders/*")
+                    .permitAll()
+                it.anyRequest().authenticated()
             }
             .oauth2ResourceServer {
-                it.jwt { jwt -> jwt.decoder(jwtDecoder) }
+                it.bearerTokenResolver(bearerTokenResolver)
+                it.jwt { jwt ->
+                    jwt.decoder(jwtDecoder)
+                        .jwtAuthenticationConverter(jwtAuthenticationConverter)
+                }
                 it.authenticationEntryPoint(entryPoint)
             }
             .exceptionHandling { it.authenticationEntryPoint(entryPoint) }
@@ -91,8 +133,14 @@ class IdentitySecurityConfiguration {
         return http.build()
     }
 
+    private fun isGuestOrderEndpoint(method: String, path: String): Boolean =
+        (path == "/sessions/current/orders" && method in setOf("GET", "POST")) ||
+            (path.matches(Regex("^/orders/[^/]+$")) && method == "GET") ||
+            (path.matches(Regex("^/orders/[^/]+/cancel$")) && method == "POST")
+
     private companion object {
         const val JWT_ISSUER = "somphie-backend"
+        const val GUEST_TOKEN_PREFIX = "gt_"
     }
 }
 

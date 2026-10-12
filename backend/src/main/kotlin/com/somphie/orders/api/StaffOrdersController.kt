@@ -1,5 +1,7 @@
 package com.somphie.orders.api
 
+import com.somphie.identity.application.IdentityService
+import com.somphie.identity.domain.StaffProfile
 import com.somphie.orders.domain.AcceptOrderRequest
 import com.somphie.orders.domain.ItemSnapshot
 import com.somphie.orders.domain.ItemStatus
@@ -24,6 +26,8 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.security.oauth2.jwt.Jwt
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -32,26 +36,45 @@ import java.util.UUID
 class StaffOrdersController(
     private val jdbc: NamedParameterJdbcTemplate,
     private val idempotencyService: IdempotencyService,
-    private val clock: Clock
+    private val clock: Clock,
+    private val identityService: IdentityService,
 ) {
 
     @GetMapping("/staff/orders")
     fun listStaffOrders(
         @RequestParam(required = false) status: String?,
-        @RequestParam(required = false) sessionId: String?
+        @RequestParam(required = false) sessionId: String?,
+        @AuthenticationPrincipal jwt: Jwt,
     ): ResponseEntity<List<Map<String, Any>>> {
-        var sql = "SELECT id, session_id, status, display_code, total_minor, note, created_at FROM customer_order WHERE 1=1"
-        val params = mutableMapOf<String, Any>()
+        val profile = authorize(jwt, "order.read")
+        var sql = """
+            SELECT o.id, o.session_id, o.status, o.display_code, o.total_minor, o.note, o.created_at
+            FROM customer_order o
+            WHERE o.restaurant_id = CAST(:restaurantId AS UUID)
+              AND (:restrictStation = FALSE OR EXISTS (
+                  SELECT 1 FROM order_item oi
+                  JOIN user_station us ON us.station_id = oi.station_id
+                  JOIN station s ON s.id = us.station_id
+                  WHERE oi.order_id = o.id AND oi.status IN ('QUEUED', 'IN_PREPARATION', 'READY', 'DELIVERED')
+                    AND us.user_id = CAST(:userId AS UUID)
+                    AND s.restaurant_id = CAST(:restaurantId AS UUID)
+              ))
+        """.trimIndent()
+        val params = mutableMapOf<String, Any>(
+            "restaurantId" to profile.account.restaurantId.toString(),
+            "restrictStation" to profile.roles.contains("KITCHEN"),
+            "userId" to profile.account.id.toString(),
+        )
 
         if (!status.isNullOrBlank()) {
-            sql += " AND status = :status"
+            sql += " AND o.status = :status"
             params["status"] = status
         }
         if (!sessionId.isNullOrBlank()) {
-            sql += " AND session_id = CAST(:sessionId AS UUID)"
+            sql += " AND o.session_id = CAST(:sessionId AS UUID)"
             params["sessionId"] = sessionId
         }
-        sql += " ORDER BY created_at DESC"
+        sql += " ORDER BY o.created_at DESC"
 
         val orders = jdbc.query(sql, params) { rs, _ ->
             mapOf(
@@ -69,15 +92,36 @@ class StaffOrdersController(
     }
 
     @GetMapping("/staff/orders/{orderId}")
-    fun getStaffOrder(@PathVariable orderId: String): ResponseEntity<Map<String, Any>> {
-        val uuid = try {
-            UUID.fromString(orderId)
-        } catch (e: Exception) {
-            throw DomainException(ErrorCode.ITEM_NOT_FOUND, "Order not found")
-        }
+    fun getStaffOrder(
+        @PathVariable orderId: String,
+        @AuthenticationPrincipal jwt: Jwt,
+    ): ResponseEntity<Map<String, Any>> {
+        val profile = authorize(jwt, "order.read")
+        val uuid = parseOrderId(orderId)
 
-        val sql = "SELECT id, session_id, status, display_code, total_minor, note, created_at FROM customer_order WHERE id = CAST(:id AS UUID)"
-        val orders = jdbc.query(sql, mapOf("id" to uuid.toString())) { rs, _ ->
+        val sql = """
+            SELECT o.id, o.session_id, o.status, o.display_code, o.total_minor, o.note, o.created_at
+            FROM customer_order o
+            WHERE o.id = CAST(:id AS UUID)
+              AND o.restaurant_id = CAST(:restaurantId AS UUID)
+              AND (:restrictStation = FALSE OR EXISTS (
+                  SELECT 1 FROM order_item oi
+                  JOIN user_station us ON us.station_id = oi.station_id
+                  JOIN station s ON s.id = us.station_id
+                  WHERE oi.order_id = o.id AND oi.status IN ('QUEUED', 'IN_PREPARATION', 'READY', 'DELIVERED')
+                    AND us.user_id = CAST(:userId AS UUID)
+                    AND s.restaurant_id = CAST(:restaurantId AS UUID)
+              ))
+        """.trimIndent()
+        val orders = jdbc.query(
+            sql,
+            mapOf(
+                "id" to uuid.toString(),
+                "restaurantId" to profile.account.restaurantId.toString(),
+                "restrictStation" to profile.roles.contains("KITCHEN"),
+                "userId" to profile.account.id.toString(),
+            ),
+        ) { rs, _ ->
             mapOf(
                 "id" to rs.getString("id"),
                 "sessionId" to rs.getString("session_id"),
@@ -89,7 +133,7 @@ class StaffOrdersController(
             )
         }
 
-        val order = orders.firstOrNull() ?: throw DomainException(ErrorCode.ITEM_NOT_FOUND, "Order not found")
+        val order = orders.firstOrNull() ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found")
         return ResponseEntity.ok(order)
     }
 
@@ -97,20 +141,23 @@ class StaffOrdersController(
     fun acceptOrder(
         @PathVariable orderId: String,
         @RequestHeader(name = "Idempotency-Key", required = false) idempotencyKey: String?,
-        @RequestBody(required = false) request: AcceptOrderRequest?
+        @RequestBody(required = false) request: AcceptOrderRequest?,
+        @AuthenticationPrincipal jwt: Jwt,
     ): ResponseEntity<Map<String, Any>> {
+        val profile = authorize(jwt, "order.accept")
+        val restaurantId = profile.account.restaurantId.toString()
         val scope = "order:accept"
         val requestBodyJson = request?.toString() ?: "{}"
 
         return idempotencyService.executeIdempotent(scope, idempotencyKey, requestBodyJson) {
-            val uuid = UUID.fromString(orderId)
-            val orderRecord = fetchOrderAggregate(uuid)
+            val uuid = parseOrderId(orderId)
+            val orderRecord = fetchOrderAggregate(uuid, restaurantId)
             val now = Instant.now(clock)
 
             val excludedIds = request?.excludedItems?.map { UUID.fromString(it.itemId) }?.toSet() ?: emptySet()
             val acceptedOrder = orderRecord.accept(now, excludedIds)
 
-            updateOrderInDb(acceptedOrder)
+            updateOrderInDb(acceptedOrder, restaurantId)
 
             ResponseEntity.ok(mapOf("id" to orderId, "status" to acceptedOrder.status.name))
         }
@@ -120,14 +167,17 @@ class StaffOrdersController(
     fun rejectOrder(
         @PathVariable orderId: String,
         @RequestHeader(name = "Idempotency-Key", required = false) idempotencyKey: String?,
-        @RequestBody request: RejectOrderRequest
+        @RequestBody request: RejectOrderRequest,
+        @AuthenticationPrincipal jwt: Jwt,
     ): ResponseEntity<Map<String, Any>> {
+        val profile = authorize(jwt, "order.reject")
+        val restaurantId = profile.account.restaurantId.toString()
         val scope = "order:reject"
         val requestBodyJson = request.toString()
 
         return idempotencyService.executeIdempotent(scope, idempotencyKey, requestBodyJson) {
-            val uuid = UUID.fromString(orderId)
-            val orderRecord = fetchOrderAggregate(uuid)
+            val uuid = parseOrderId(orderId)
+            val orderRecord = fetchOrderAggregate(uuid, restaurantId)
             val now = Instant.now(clock)
 
             val reason = try {
@@ -139,15 +189,22 @@ class StaffOrdersController(
             val rejection = Rejection(reason, request.reasonText)
             val rejectedOrder = orderRecord.reject(now, rejection)
 
-            updateOrderInDb(rejectedOrder)
+            updateOrderInDb(rejectedOrder, restaurantId)
 
             ResponseEntity.ok(mapOf("id" to orderId, "status" to rejectedOrder.status.name))
         }
     }
 
-    private fun fetchOrderAggregate(orderId: UUID): Order {
-        val orderSql = "SELECT id, status, created_at, accepted_at, decided_at, rejection_reason, rejection_text FROM customer_order WHERE id = CAST(:id AS UUID)"
-        val orderRows = jdbc.query(orderSql, mapOf("id" to orderId.toString())) { rs, _ ->
+    private fun fetchOrderAggregate(orderId: UUID, restaurantId: String): Order {
+        val orderSql = """
+            SELECT id, status, created_at, accepted_at, decided_at, rejection_reason, rejection_text
+            FROM customer_order WHERE id = CAST(:id AS UUID)
+              AND restaurant_id = CAST(:restaurantId AS UUID)
+        """.trimIndent()
+        val orderRows = jdbc.query(
+            orderSql,
+            mapOf("id" to orderId.toString(), "restaurantId" to restaurantId),
+        ) { rs, _ ->
             val status = OrderStatus.valueOf(rs.getString("status"))
             val createdAt = rs.getTimestamp("created_at").toInstant()
             val acceptedAt = rs.getTimestamp("accepted_at")?.toInstant()
@@ -177,7 +234,7 @@ class StaffOrdersController(
             Triple(status, createdAt, items)
         }
 
-        val record = orderRows.firstOrNull() ?: throw DomainException(ErrorCode.ITEM_NOT_FOUND, "Order not found")
+        val record = orderRows.firstOrNull() ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found")
         val (status, createdAt, items) = record
 
         val order = Order.create(orderId, items, createdAt)
@@ -190,24 +247,48 @@ class StaffOrdersController(
         }
     }
 
-    private fun updateOrderInDb(order: Order) {
+    private fun updateOrderInDb(order: Order, restaurantId: String) {
         val updateOrderSql = """
             UPDATE customer_order
-            SET status = :status, accepted_at = :acceptedAt, decided_at = :decidedAt
-            WHERE id = CAST(:id AS UUID)
+            SET status = :status, accepted_at = :acceptedAt, decided_at = :decidedAt,
+                rejection_reason = :rejectionReason, rejection_text = :rejectionText
+            WHERE id = CAST(:id AS UUID) AND restaurant_id = CAST(:restaurantId AS UUID)
         """
         jdbc.update(updateOrderSql, mapOf(
             "status" to order.status.name,
             "acceptedAt" to order.acceptedAt?.let { java.sql.Timestamp.from(it) },
             "decidedAt" to order.decidedAt?.let { java.sql.Timestamp.from(it) },
-            "id" to order.id.toString()
+            "rejectionReason" to order.rejection?.reason?.name,
+            "rejectionText" to order.rejection?.text,
+            "id" to order.id.toString(),
+            "restaurantId" to restaurantId,
         ))
 
         order.items.forEach { item ->
             jdbc.update(
-                "UPDATE order_item SET status = :status WHERE id = CAST(:id AS UUID)",
-                mapOf("status" to item.status.name, "id" to item.id.toString())
+                """
+                UPDATE order_item SET status = :status
+                WHERE id = CAST(:id AS UUID) AND EXISTS (
+                    SELECT 1 FROM customer_order o
+                    WHERE o.id = order_item.order_id AND o.restaurant_id = CAST(:restaurantId AS UUID)
+                )
+                """.trimIndent(),
+                mapOf("status" to item.status.name, "id" to item.id.toString(), "restaurantId" to restaurantId)
             )
         }
+    }
+
+    private fun authorize(jwt: Jwt, permission: String): StaffProfile {
+        val profile = identityService.me(jwt.subject, jwt.getClaim("rid"), jwt.getClaim("tv"))
+        if (permission !in profile.permissions) {
+            throw DomainException(ErrorCode.FORBIDDEN, "Staff permission is required")
+        }
+        return profile
+    }
+
+    private fun parseOrderId(orderId: String): UUID = try {
+        UUID.fromString(orderId)
+    } catch (_: IllegalArgumentException) {
+        throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found")
     }
 }

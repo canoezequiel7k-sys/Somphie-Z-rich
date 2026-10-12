@@ -52,4 +52,14 @@ class ApiExceptionHandlerTest {
         assertEquals("42", response.headers.getFirst("Retry-After"))
         assertNull(response.body?.detail)
     }
+
+    @Test
+    fun `malformed request returns a generic problem response`() {
+        val response = handler.handleMalformedRequest()
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.statusCode)
+        assertEquals(MediaType.valueOf("application/problem+json"), response.headers.contentType)
+        assertEquals("MALFORMED_REQUEST", response.body?.code)
+        assertNull(response.body?.detail)
+    }
 }

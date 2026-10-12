@@ -19,8 +19,10 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RestController
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
+import java.util.HexFormat
 import java.util.UUID
 
 @RestController
@@ -37,15 +39,15 @@ class OrdersController(
         @RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
         @RequestBody request: CreateOrderRequest
     ): ResponseEntity<Map<String, Any>> {
+        val sessionAndParticipant = resolveSessionAndParticipant(authorization)
+        requireOpenSession(sessionAndParticipant)
         if (request.items.isEmpty()) {
             throw DomainException(ErrorCode.ORDER_EMPTY, "Order must contain at least one item")
         }
 
         val scope = "order:create"
         val requestBodyJson = request.toString()
-
         return idempotencyService.executeIdempotent(scope, idempotencyKey, requestBodyJson) {
-            val sessionAndParticipant = resolveSessionAndParticipant(authorization)
             val sessionId = sessionAndParticipant["sessionId"] as String
             val participantId = sessionAndParticipant["participantId"] as String
             val restaurantId = sessionAndParticipant["restaurantId"] as String
@@ -53,7 +55,7 @@ class OrdersController(
             val now = Instant.now(clock)
 
             val orderItems = request.items.map { itemDto ->
-                val product = fetchProduct(itemDto.productId)
+                val product = fetchProduct(itemDto.productId, restaurantId)
                 val snapshot = ItemSnapshot(
                     productId = UUID.fromString(product["id"] as String),
                     productName = product["name"] as String,
@@ -158,15 +160,19 @@ class OrdersController(
     }
 
     @GetMapping("/orders/{orderId}")
-    fun getOrder(@PathVariable orderId: String): ResponseEntity<Map<String, Any>> {
+    fun getOrder(
+        @PathVariable orderId: String,
+        @RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+    ): ResponseEntity<Map<String, Any>> {
+        val sessionAndParticipant = resolveSessionAndParticipant(authorization)
         val uuid = try {
             UUID.fromString(orderId)
         } catch (e: Exception) {
-            throw DomainException(ErrorCode.ITEM_NOT_FOUND, "Order not found")
+            throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found")
         }
 
-        val sql = "SELECT id, status, display_code, total_minor, note, created_at FROM customer_order WHERE id = CAST(:id AS UUID)"
-        val orders = jdbc.query(sql, mapOf("id" to uuid.toString())) { rs, _ ->
+        val sql = "SELECT id, status, display_code, total_minor, note, created_at FROM customer_order WHERE id = CAST(:id AS UUID) AND session_id = CAST(:sessionId AS UUID)"
+        val orders = jdbc.query(sql, mapOf("id" to uuid.toString(), "sessionId" to sessionAndParticipant["sessionId"])) { rs, _ ->
             mapOf(
                 "id" to rs.getString("id"),
                 "status" to rs.getString("status"),
@@ -177,21 +183,40 @@ class OrdersController(
             )
         }
 
-        val order = orders.firstOrNull() ?: throw DomainException(ErrorCode.ITEM_NOT_FOUND, "Order not found")
+        val order = orders.firstOrNull() ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found")
         return ResponseEntity.ok(order)
     }
 
     @PostMapping("/orders/{orderId}/cancel")
-    fun cancelOrder(@PathVariable orderId: String): ResponseEntity<Map<String, Any>> {
+    fun cancelOrder(
+        @PathVariable orderId: String,
+        @RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+    ): ResponseEntity<Map<String, Any>> {
+        val sessionAndParticipant = resolveSessionAndParticipant(authorization)
+        requireOpenSession(sessionAndParticipant)
         val uuid = try {
             UUID.fromString(orderId)
         } catch (e: Exception) {
-            throw DomainException(ErrorCode.ITEM_NOT_FOUND, "Order not found")
+            throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found")
+        }
+
+        val sessionId = sessionAndParticipant.getValue("sessionId")
+        val participantId = sessionAndParticipant.getValue("participantId")
+        val order = jdbc.query(
+            """
+            SELECT participant_id FROM customer_order
+            WHERE id = CAST(:id AS UUID) AND session_id = CAST(:sessionId AS UUID)
+            """.trimIndent(),
+            mapOf("id" to uuid.toString(), "sessionId" to sessionId),
+        ) { rs, _ -> rs.getString("participant_id") }.firstOrNull()
+            ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found")
+        if (order != participantId && sessionAndParticipant["role"] != "HOST") {
+            throw DomainException(ErrorCode.FORBIDDEN, "Only the author or session host can cancel this order")
         }
 
         val updated = jdbc.update(
-            "UPDATE customer_order SET status = 'CANCELLED' WHERE id = CAST(:id AS UUID) AND status = 'PENDING_REVIEW'",
-            mapOf("id" to uuid.toString())
+            "UPDATE customer_order SET status = 'CANCELLED' WHERE id = CAST(:id AS UUID) AND session_id = CAST(:sessionId AS UUID) AND status = 'PENDING_REVIEW'",
+            mapOf("id" to uuid.toString(), "sessionId" to sessionId)
         )
 
         if (updated == 0) {
@@ -202,21 +227,55 @@ class OrdersController(
     }
 
     private fun resolveSessionAndParticipant(authorization: String?): Map<String, String> {
-        val activeSession = jdbc.query(
-            "SELECT ts.id AS session_id, ts.restaurant_id, sp.id AS participant_id FROM table_session ts JOIN session_participant sp ON ts.id = sp.session_id WHERE ts.status = 'OPEN' LIMIT 1",
-            emptyMap<String, Any>()
+        val token = authorization
+            ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
+            ?.substringAfter(' ')
+            ?.takeIf { it.isNotBlank() }
+            ?: throw DomainException(ErrorCode.UNAUTHENTICATED, "Guest token is required")
+        val tokenHash = HexFormat.of().formatHex(
+            MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8)),
+        )
+        val participant = jdbc.query(
+            """
+            SELECT ts.id AS session_id, ts.restaurant_id, ts.status AS session_status,
+                   ts.closed_at, sp.id AS participant_id, sp.role, sp.revoked_at
+            FROM table_session ts
+            JOIN session_participant sp ON ts.id = sp.session_id
+            WHERE sp.token_hash = :tokenHash
+            """.trimIndent(),
+            mapOf("tokenHash" to tokenHash),
         ) { rs, _ ->
             mapOf(
                 "sessionId" to rs.getString("session_id"),
                 "participantId" to rs.getString("participant_id"),
-                "restaurantId" to rs.getString("restaurant_id")
+                "restaurantId" to rs.getString("restaurant_id"),
+                "sessionStatus" to rs.getString("session_status"),
+                "closedAt" to rs.getTimestamp("closed_at")?.toInstant()?.toString().orEmpty(),
+                "role" to rs.getString("role"),
+                "revoked" to rs.getTimestamp("revoked_at")?.toInstant()?.toString().orEmpty(),
             )
-        }.firstOrNull()
+        }.firstOrNull() ?: throw DomainException(ErrorCode.UNAUTHENTICATED, "Invalid guest token")
 
-        return activeSession ?: throw DomainException(ErrorCode.SESSION_CLOSED, "No active session found")
+        if (participant["revoked"].orEmpty().isNotEmpty()) {
+            throw DomainException(ErrorCode.SESSION_ACCESS_REVOKED, "Guest access was revoked")
+        }
+        if (participant["sessionStatus"] == "CLOSED") {
+            val closedAt = participant["closedAt"]?.let(Instant::parse)
+            if (closedAt == null || closedAt.isBefore(Instant.now(clock).minusSeconds(CLOSED_SESSION_READ_SECONDS))) {
+                throw DomainException(ErrorCode.SESSION_CLOSED, "Session is no longer available")
+            }
+        }
+
+        return participant
     }
 
-    private fun fetchProduct(productId: String): Map<String, Any> {
+    private fun requireOpenSession(session: Map<String, String>) {
+        if (session["sessionStatus"] != "OPEN") {
+            throw DomainException(ErrorCode.SESSION_CLOSED, "Session is closed")
+        }
+    }
+
+    private fun fetchProduct(productId: String, restaurantId: String): Map<String, Any> {
         val uuid = try {
             UUID.fromString(productId)
         } catch (e: Exception) {
@@ -224,8 +283,14 @@ class OrdersController(
         }
 
         val product = jdbc.query(
-            "SELECT id, name, price_minor, station_id FROM product WHERE id = CAST(:id AS UUID)",
-            mapOf("id" to uuid.toString())
+            """
+            SELECT p.id, p.name, p.price_minor, p.station_id
+            FROM product p
+            JOIN subcategory sub ON sub.id = p.subcategory_id
+            JOIN category c ON c.id = sub.category_id
+            WHERE p.id = CAST(:id AS UUID) AND c.restaurant_id = CAST(:restaurantId AS UUID)
+            """.trimIndent(),
+            mapOf("id" to uuid.toString(), "restaurantId" to restaurantId)
         ) { rs, _ ->
             mapOf(
                 "id" to rs.getString("id"),
@@ -236,5 +301,9 @@ class OrdersController(
         }.firstOrNull()
 
         return product ?: throw DomainException(ErrorCode.PRODUCT_NOT_FOUND, "Product not found")
+    }
+
+    private companion object {
+        const val CLOSED_SESSION_READ_SECONDS = 24 * 60 * 60L
     }
 }

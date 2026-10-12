@@ -19,8 +19,10 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RestController
 import java.security.SecureRandom
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.Base64
+import java.util.HexFormat
 import java.util.UUID
 
 @RestController
@@ -218,12 +220,12 @@ class FloorController(
     }
 
     private fun generateGuestToken(): String {
-        val bytes = ByteArray(24)
+        val bytes = ByteArray(32)
         secureRandom.nextBytes(bytes)
         return "gt_" + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
     }
 
     private fun hashToken(token: String): String {
-        return token.hashCode().toString()
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8)))
     }
 }
