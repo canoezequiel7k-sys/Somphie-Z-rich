@@ -1,0 +1,7 @@
+management: # Permite diagnosticar la instalación únicamente en desarrollo local.
+  endpoint: # Ajustes del endpoint de salud.
+    health: # Configuración específica del perfil dev.
+      show-details: always # Facilita el diagnóstico local sin ampliar los perfiles públicos.
+logging: # Aumenta el detalle solo del código propio durante desarrollo.
+  level: # Controla el nivel por paquete.
+    com.somphie: DEBUG # Ayuda a estudiar el flujo sin activar trazas globales.

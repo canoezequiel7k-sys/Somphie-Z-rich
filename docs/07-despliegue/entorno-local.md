@@ -20,7 +20,7 @@
 | PostgreSQL | 5432 | Base local (volumen persistente `postgres-data`) |
 | Mailpit | 8025 (UI) / 1025 (SMTP) | Buzón de desarrollo |
 | Prism | 4010 | Mock desde `openapi.yaml` (para Web/Android sin backend) |
-| Backend | 8080 | API cuando se implemente WP-BE-20; hoy no está en Compose |
+| Backend | 8080 | Esqueleto Spring Boot y `/version`, ejecutados desde Gradle; no está en Compose |
 | Web (Vite) | 5173 | Cliente/admin cuando se implemente WP-WEB-20; hoy no está en Compose |
 
 ## 3. Primer arranque (esquema)
@@ -30,7 +30,7 @@ if [ ! -f infra/.env ]; then cp infra/.env.example infra/.env; fi # Crea variabl
 cd infra && docker compose up -d        # Inicia PostgreSQL, Mailpit y Prism desde su carpeta.
 ```
 
-En Windows PowerShell, el equivalente es `Copy-Item .\infra\.env.example .\infra\.env`, luego `Set-Location .\infra` y `docker compose up -d`. Para apagar el entorno sin borrar la base, usar `docker compose down` desde `infra/`. El backend funcional con Spring (`bootRun`), Web y Android todavía no están implementados.
+En Windows PowerShell, el equivalente es `Copy-Item .\infra\.env.example .\infra\.env`, luego `Set-Location .\infra` y `docker compose up -d`. Para apagar el entorno sin borrar la base, usar `docker compose down` desde `infra/`. El proceso Gradle se ejecuta en el host y no carga automáticamente `infra/.env`; los valores predeterminados de `application.yml` coinciden con `.env.example`, y los personalizados deben exportarse en la terminal o el IDE. Con PostgreSQL arriba, iniciá el backend base desde la raíz con `.\backend\gradlew.bat -p backend bootRun`; Flyway aplica las migraciones al iniciar, `/version` devuelve build y versión del contrato, y `/actuator/health` confirma salud. Todavía no hay endpoints de negocio ni persistencia de entidades operativas.
 
 ## 4. Variables de entorno (`.env.example`)
 | Variable | Ejemplo | Notas |
@@ -57,8 +57,8 @@ Contraseñas de demo documentadas en el README del backend (**solo demo**, nunca
 ## 6. Comandos de calidad
 | Acción | Comando |
 |---|---|
-| Backend: tests | `./gradlew test` |
-| Backend: tests + ArchUnit + contrato | `./gradlew check` |
+| Backend: tests | `.\backend\gradlew.bat -p backend test` (desde la raíz, PowerShell) |
+| Backend: tests, Flyway, Testcontainers PostgreSQL y ArchUnit | `.\backend\gradlew.bat -p backend check` (desde la raíz, PowerShell) |
 | Web: lint/tipos/tests | `pnpm lint && pnpm typecheck && pnpm test` |
 | Web: E2E | `pnpm e2e` |
 | Android: unit | `./gradlew testDebugUnitTest` |

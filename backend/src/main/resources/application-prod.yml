@@ -1,0 +1,3 @@
+logging: # Evita logs de depuración en producción.
+  level: # Define el nivel general del perfil productivo.
+    root: WARN # Registra advertencias y errores sin detalles de desarrollo.

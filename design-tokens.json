@@ -1,0 +1,95 @@
+{
+  "color": {
+    "palette": {
+      "cream": "#F6F1E8",
+      "coffee": "#3A2B22",
+      "caramel": "#945C34",
+      "sage": "#61715B",
+      "blueGray": "#59696E"
+    },
+    "semantic": {
+      "surface": {
+        "base": "#F6F1E8",
+        "raised": "#FBF8F2",
+        "inverse": "#3A2B22"
+      },
+      "text": {
+        "primary": "#3A2B22",
+        "secondary": "#5B4B40",
+        "inverse": "#F6F1E8"
+      },
+      "accent": {
+        "default": "#945C34",
+        "onDefault": "#F6F1E8",
+        "pressed": "#7A4828"
+      },
+      "secondary": {
+        "default": "#61715B",
+        "onDefault": "#F6F1E8"
+      },
+      "neutral": {
+        "default": "#59696E",
+        "onDefault": "#F6F1E8"
+      },
+      "border": {
+        "subtle": "#DED5C8"
+      }
+    }
+  },
+  "typography": {
+    "fontFamily": {
+      "display": ["Fraunces", "Georgia", "serif"],
+      "body": ["Inter", "system-ui", "sans-serif"]
+    },
+    "fontSizeRem": {
+      "xs": 0.75,
+      "sm": 0.875,
+      "md": 1,
+      "lg": 1.25,
+      "xl": 1.5,
+      "2xl": 2,
+      "3xl": 2.5
+    },
+    "lineHeight": {
+      "body": 1.5,
+      "heading": 1.2
+    },
+    "numeric": "tabular-nums"
+  },
+  "spacingPx": {
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48,
+    "4xl": 64
+  },
+  "radiusPx": {
+    "sm": 8,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "motionMs": {
+    "microFeedbackMin": 100,
+    "microFeedbackMax": 150,
+    "elementMin": 200,
+    "elementMax": 250,
+    "screenMin": 250,
+    "screenMax": 300
+  },
+  "touchTargetPx": {
+    "web": 44,
+    "androidDp": 48
+  },
+  "layoutPx": {
+    "customerMaxWidth": 480,
+    "adminMaxWidth": 1440
+  },
+  "contrastRatio": {
+    "normalTextMinimum": 4.5,
+    "largeTextMinimum": 3
+  }
+}

@@ -22,22 +22,35 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | `CHANGELOG.md` del contrato hasta 0.2.5 | ✅ | `docs/04-api/CHANGELOG.md` |
 | Estructura de carpetas y `AGENTS.md` por carpeta | ✅ | `backend/`, `web/`, `android/` |
 | Entorno local WP-OPS-20: Compose, variables de ejemplo y plantillas PR/issue | ✅ validado desde un clon temporal limpio en Windows | `infra/`, `.github/` |
-| CI WP-OPS-21: backend, docs y escaneo de secretos; estados explícitos para Web/Android sin proyectos | 🔄 configuración y validaciones locales listas; ejecución en GitHub pendiente | `.github/workflows/`, `.markdownlint-cli2.yaml`, `.gitleaksignore` |
-| Archivos de marca: `ic_icon.svg` (1,54 MB) y `boceto_v.1.0.png` (1,75 MB) | ✅ existen; **sin revisar** (superan el límite de lectura de 1 MB del agente) | `design/img/` |
+| CI WP-OPS-21: backend, docs y escaneo de secretos; estados explícitos para Web/Android sin proyectos | 🔄 ejecución compartida: Backend CI, Documentation CI y Secret scanning verdes; Web/Android fallan explícitamente porque aún no existen sus proyectos | `.github/workflows/`, `.markdownlint-cli2.yaml`, `.gitleaksignore` |
+| Marca | 🔄 Se recibió `design/img/ic_logo.svg`; el dueño confirmó usarlo sin rediseño. El icono y boceto anteriores fueron retirados por el dueño; falta icono de app independiente | `design/img/` |
 | Backend: **dominio puro** de WP-BE-10 (`Money`, `Payment`/`Bill`, ajustes, reembolsos/anulaciones, `Order`/`OrderItem`, `TableSession`, `JoinCode`). JDK 25, Gradle 9.8.1, Kotlin 2.4.0, JUnit 6.1.2 | ✅ 235 pruebas; 0 fallos, errores u omitidas; cobertura de líneas 97,61 % (corrida final del 2026-10-12) | `backend/` |
+| Backend ejecutable WP-BE-20: Spring, perfiles, Actuator, `/version`, Problem+JSON, `Clock`, Testcontainers y ArchUnit base | ✅ `clean check jacocoTestReport`: 242 pruebas, 0 fallos/errores/omitidas; cobertura de líneas 715/750 (95,33 %) | `backend/` |
+| WP-BE-21: migración Flyway V1 y semilla obligatoria | ✅ `clean check jacocoTestReport`: 243 pruebas, 0 fallos/errores/omitidas; cobertura 715/750 (95,33 %) | `backend/` |
+| WP-UX-10: identidad visual y tokens | ✅ Paleta aprobada, tokens publicados y pares principales con contraste WCAG AA | `design-tokens.json`, `docs/05-diseno/sistema-visual.md` |
+| Carta demo | ✅ Recibida: 47 productos, 11 subcategorías, precios de demostración en ARS | Insumo para WP-BE-30 |
+| Horario del restaurante | ✅ Recibido; zona horaria pendiente de confirmar antes de persistirlo | Apertura y cierre semanal |
 
 ### 1.2 Qué NO existe todavía
-- Código de `web/` y `android/` (solo tienen `AGENTS.md`). En `backend/` existe únicamente el dominio puro: **no** hay Spring, base de datos, API ni persistencia (Fase 2). *(El texto original de esta línea decía que backend, web y android solo tenían `AGENTS.md`.)*
-- Ejecución remota de WP-OPS-21 en GitHub; además, los proyectos ejecutables de Web y Android (WP-WEB-20 y WP-AND-20). Hasta que existan, sus checks informan que la validación no se ejecutó y fallan explícitamente.
-- Tokens de diseño (paleta, tipografía, espaciado) derivados de la marca. Los archivos de marca **sí existen** (ver 1.1), pero `design/img/README.md` todavía pide `ic_icon.png` y hoy el ícono es `ic_icon.svg`.
+- Código de `web/` y `android/` (solo tienen `AGENTS.md`). El backend ya tiene runtime Spring y endpoints operativos de versión/salud, pero todavía no incluye API de negocio ni persistencia.
+- Persistencia de entidades y flujos de negocio posteriores a la base inicial WP-BE-21; los proyectos ejecutables de Web y Android (WP-WEB-20 y WP-AND-20). Sus checks informan que la validación no se ejecutó hasta que existan.
+- No hay un isotipo independiente para favicon/Android; `design/img/ic_logo.svg` queda sin editar y la Q-21 sigue abierta solo para ese derivado.
 - Catálogo de acciones de auditoría.
-- Pruebas de integración (PostgreSQL), de contrato, de arquitectura (ArchUnit), de concurrencia, web y Android. Hoy solo hay pruebas unitarias del dominio del backend.
+- Pruebas de contrato, concurrencia, web y Android; WP-BE-20 ya incorpora integración con PostgreSQL Testcontainers y una regla base de ArchUnit.
 
 ### 1.3 Advertencias para quien continúe
 1. **La fuente de verdad es este repositorio local.** Cualquier copia en otro lado (zips, sandboxes, descargas) puede estar desactualizada. En particular, **no sobrescribir** `CHANGELOG.md`, `openapi.yaml` ni `reglas-negocio.md` con versiones viejas.
 2. Existen **copias duplicadas en la raíz** (`decisiones.md`, `cambios-v0.2.md`, `roadmap-fases.md`, `README.md`) además de las de `docs/`. La versión oficial es la de `docs/` (ver Paso 7).
 3. Las secciones "v0.2" están **apendadas al final** de varios documentos y tienen precedencia sobre el texto anterior. Se integrarán en el Paso 8.
 4. Nadie debe cambiar nombres de estados, errores o campos del contrato por su cuenta (`AGENTS.md` §2).
+
+### 1.4 Traspaso al siguiente agente (2026-10-12)
+- **Paquetes locales listos:** WP-BE-20/21 y WP-UX-10; este avance reúne runtime Spring, configuración, migración/semillas, pruebas y tokens de diseño. No implica que exista API de negocio, catálogo ni UI.
+- **WP-OPS-21 sigue abierto:** en GitHub están verdes Backend CI, Documentation CI y Secret scanning; Web/Android fallan explícitamente porque aún no existen sus proyectos. No declarar toda la CI verde ni cerrar el paquete hasta revisar sus checks reales.
+- **Siguiente paso sugerido:** WP-UX-11, wireframes de baja fidelidad para el mapa completo y plantillas de estados. Leer `docs/05-diseno/mapa-pantallas.md`, `docs/05-diseno/sistema-visual.md` y `docs/08-agentes/ux-ui.md`; después, seguir dependencias de `docs/08-agentes/roadmap-fases.md` hacia WP-WEB-20/WP-AND-20.
+- **Insumos y límites:** carta ficticia de 47 productos con precios demo en ARS, aún no cargada; confirmar zona horaria antes de persistir horarios. Mantener `design/img/ic_logo.svg` intacto y no derivar un isotipo sin resolver Q-21/autorización.
+- **Validación local más reciente:** `.\backend\gradlew.bat -p backend check` no pudo completar Testcontainers porque Docker Desktop informó que no puede iniciar; 239 pruebas reportadas, con error de inicialización en `BackendSmokeTest`. No es un resultado verde; repetir cuando Docker esté disponible.
+- **Regla de continuidad:** leer `AGENTS.md` y esta bitácora antes de tocar archivos; respetar la jerarquía documental, preservar cambios existentes y no hacer commit/push sin autorización.
 
 ---
 ## 2. Decisiones tomadas hoy (D-142 … D-157)
@@ -419,6 +432,36 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Auditoría de dependencias:** `nube.md` §4 describe un escaneo informativo de dependencias, pero el alcance aprobado de WP-OPS-21 en `roadmap-fases.md` incluye Gitleaks y no esa auditoría. No se agregó una herramienta; queda registrada la discrepancia para asignarla a un paquete futuro si corresponde.
 - **Limitaciones:** Actions no puede ejecutarse ni confirmarse antes de subir los cambios; por eso el paquete sigue abierto hasta que los workflows corran en GitHub. El link checker no encontró enlaces Markdown que probar y Web/Android todavía no tienen aplicaciones para validar.
 - **Siguiente paso:** revisión manual, luego PR/ejecución en GitHub Actions y cierre cuando los workflows aplicables estén verdes; no se hicieron commits ni pushes.
+
+### 2026-10-12 — WP-BE-20 ✅
+- **Qué:** esqueleto Spring Boot + Kotlin, perfiles externos, Actuator (`health`), `/version` alineado con OpenAPI, respuestas Problem+JSON, `Clock` UTC, Testcontainers PostgreSQL y regla ArchUnit para mantener el dominio puro. El filtro genera `traceId` por solicitud y el manejador lo incluye en errores sin exponer mensajes internos.
+- **Por qué:** WP-OPS-20 ya está validado y el roadmap prioriza completar la base backend antes de iniciar clientes; WP-BE-21 necesita un runtime verificable sin acoplar reglas de negocio a Spring.
+- **Validación:** `.\backend\gradlew.bat -p backend clean check jacocoTestReport` pasó: 242 pruebas, 0 fallos, errores u omitidas; 715/750 líneas cubiertas (95,33 %). Testcontainers usó PostgreSQL 16.15-alpine. `git diff --check` pasó.
+- **Archivos:** `backend/build.gradle.kts`; aplicación/API/configuración y perfiles bajo `backend/src/`; pruebas Spring/Testcontainers y ArchUnit; `README.md`; `docs/07-despliegue/entorno-local.md`; `infra/.env.example`; esta bitácora.
+- **Qué estudiar:** arranque Spring Boot, perfiles externos, errores Problem+JSON, reloj inyectable, Testcontainers y límites arquitectónicos verificables.
+- **Estado:** WP-BE-20 cumple el DoD local de `check`; no implementa persistencia de negocio ni avanza WP-BE-21.
+
+### 2026-10-12 — WP-BE-21 ✅
+- **Qué:** Flyway V1 crea restaurante, ajustes, roles, permisos y estaciones; siembra defaults operativos y la matriz de permisos documentada.
+- **Por qué:** el roadmap prioriza persistir la base técnica antes de construir API de negocio o clientes.
+- **Validación:** `.\backend\gradlew.bat -p backend clean check jacocoTestReport` pasó: 243 pruebas, 0 fallos, errores u omitidas; cobertura total 715/750 líneas (95,33 %). Testcontainers aplicó V1 sobre PostgreSQL vacío y verificó tablas, semillas y permisos básicos; `git diff --check` pasó.
+- **Archivos:** `backend/build.gradle.kts`, `backend/src/main/resources/db/migration/V1__initial_foundation.sql`, prueba Testcontainers y esta bitácora.
+- **Qué estudiar:** versionado de esquema, restricciones SQL, claves foráneas y semillas idempotentes.
+- **Estado:** completado localmente; no incluye usuarios demo, catálogo, mesas ni lógica de negocio.
+
+### 2026-10-12 — WP-UX-10 ✅
+- **Qué:** paleta aprobada (crema, café, caramelo, salvia y gris azulado), tokens compartidos en `design-tokens.json`, espaciado, tipografía, radios, movimiento y tabla de contraste; se documentó el logo entregado sin editarlo.
+- **Por qué:** habilita decisiones visuales consistentes entre Web y Android antes de construir sus interfaces.
+- **Validación:** JSON parseado correctamente; los pares principales obtienen 12,05:1 (café/crema), 7,39:1 (texto secundario/crema), 4,86:1 (crema/caramelo), 6,70:1 (crema/caramelo presionado), 4,64:1 (crema/salvia) y 5,09:1 (crema/gris azulado), todos AA para texto normal. `git diff --check` pasó.
+- **Archivos:** `design-tokens.json`, `docs/05-diseno/sistema-visual.md`, `design/img/README.md` y esta bitácora.
+- **Qué estudiar:** tokens semánticos y contraste WCAG AA; las fuentes quedan como stacks con fallback y aún no están autohospedadas.
+- **Estado:** WP-UX-10 completado; el ícono independiente de app sigue pendiente y no se derivó del logo.
+
+### 2026-10-12 — Insumos iniciales de catálogo
+- **Qué:** se recibió una carta demo de 47 productos en 11 subcategorías con precios numéricos de demostración en ARS; horario: lun-vie 07:00, sáb-dom 08:00; cierre dom-jue 23:00, vie-sáb 00:30 del día siguiente.
+- **Por qué:** servirá como fuente de datos para el catálogo; no se cargó todavía en backend.
+- **Qué estudiar:** el horario cruza medianoche viernes y sábado; confirmar zona horaria antes de configurar reglas persistentes. La ficha de productos deberá mantener categoría, subcategoría, descripción, precio y espacio para imagen.
+- **Próximo paso:** usar la carta en WP-BE-30 cuando corresponda al roadmap; las pantallas visuales siguen WP-UX-11.
 
 ### Historial previo (resumen, para contexto)
 - **v0.1:** plan maestro convertido en 52 documentos (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes).

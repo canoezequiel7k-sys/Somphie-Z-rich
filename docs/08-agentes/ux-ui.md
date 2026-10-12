@@ -50,6 +50,6 @@ Definir y mantener la **identidad visual y la experiencia** premium de Somphie Z
 - [ ] Tokens y componentes actualizados.
 
 ## Cambios v0.2 (leer)
-- Marca en `design/img/` (`ic_icon.png`, ver su README). Pendiente Q-21 (SVG/logo horizontal).
+- Marca actual en `design/img/ic_logo.svg` (ver su README); conservar el activo sin editar. Sigue pendiente Q-21 para definir un isotipo independiente.
 - Nuevos diseños: hoja de opciones, selector de idioma, campo de propina, ajustes en cuenta (cliente y personal), botón/insignia de llamado al mozo, placeholder de imagen.
 - Textos (copy) en **es-AR y en** para la web cliente.

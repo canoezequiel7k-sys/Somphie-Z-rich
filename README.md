@@ -1,7 +1,7 @@
 # Somphie Zúrich — Sistema integral de gestión de cafetería
 
 > **Documentación v0.2 — Fase 0 (Especificación funcional).** Incluye las decisiones D-101…D-159 y las preguntas Q-01…Q-20 resueltas (Q-21 sigue pendiente); el resumen de v0.2 está en `docs/00-gobierno/cambios-v0.2.md`.
-> Estado: documentación funcional y contrato API vigentes; WP-BE-10 (dominio puro) está completo. El backend ejecutable, la persistencia y los clientes aún no están implementados.
+> Estado: WP-BE-10 (dominio puro), WP-BE-20 (runtime Spring base) y WP-BE-21 (esquema inicial Flyway y semillas base) están completos. La API de negocio, persistencia de sus entidades y clientes aún no están implementados.
 > Idioma de los documentos: español. Idioma del código, API y base de datos: inglés (ver D-103).
 > **¿Retomas el trabajo o eres un agente nuevo?** Lee primero `docs/00-gobierno/advances.md`: estado actual, decisiones D-142…D-159, plan paso a paso y bitácora.
 
@@ -139,4 +139,4 @@ docker compose up -d # Levanta PostgreSQL, Mailpit y Prism en segundo plano.
 
 Compose inicia PostgreSQL (`localhost:5432`), Mailpit (`http://localhost:8025`, SMTP `localhost:1025`) y Prism (`http://localhost:4010`), que sirve el contrato de `docs/04-api/openapi.yaml`. Los datos de PostgreSQL persisten en un volumen Docker. Para detener los servicios sin borrar esos datos, ejecutá `docker compose down` desde `infra/`.
 
-`infra/.env` contiene valores ficticios de desarrollo; no uses esos valores en producción ni subas ese archivo a Git. Hoy `backend/` solo contiene el dominio Kotlin: el servidor Spring Boot y el comando `bootRun` se agregarán en WP-BE-20.
+`infra/.env` contiene valores ficticios de desarrollo; no uses esos valores en producción ni subas ese archivo a Git. WP-BE-20 agrega el servidor base: con PostgreSQL levantado en Compose, ejecutá `.\backend\gradlew.bat -p backend bootRun` desde la raíz y comprobá `http://localhost:8080/version` y `/actuator/health`. Todavía no hay endpoints de negocio ni persistencia de entidades.

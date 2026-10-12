@@ -1,6 +1,6 @@
 # Sistema visual — Somphie Zúrich
 
-> Dirección: **cafetería de especialidad, cálida, contemporánea y elegante.** Propuesta de partida 🟡; la paleta y la tipografía finales se cierran en WP-UX-10 (Q-06). Premium = consistencia, jerarquía y calma, no cantidad de efectos.
+> Dirección: **cafetería de especialidad, cálida, contemporánea y elegante.** La paleta fue aprobada para WP-UX-10; la tipografía usa las primeras alternativas ya propuestas, con archivos de fuente aún pendientes. Premium = consistencia, jerarquía y calma, no cantidad de efectos.
 
 ## 1. Principios
 1. **Claridad primero:** una acción principal por pantalla.
@@ -11,36 +11,32 @@
 
 ## 2. Color (tokens semánticos)
 
-| Token | Valor propuesto | Uso |
+| Grupo / token | Valor | Uso |
 |---|---|---|
-| `surface.base` | `#FAF6EF` (marfil) | Fondo principal |
-| `surface.raised` | `#F3EBDD` (crema) | Tarjetas, hojas |
-| `surface.inverse` | `#3B2A20` (espresso) | Barras, énfasis profundo |
-| `text.primary` | `#3B2A20` | Texto principal (contraste ≈ 12:1 sobre marfil) |
-| `text.secondary` | `#6B5646` | Texto de apoyo (verificar ≥ 4.5:1) |
-| `accent.default` | `#C28A4B` (caramelo) | Acento, botón primario (texto **espresso** encima, ≈ 4.6:1) |
-| `accent.pressed` | `#A87438` | Estado presionado |
-| `secondary.default` | `#8A9A7B` (salvia) | Chips, fondos suaves (**no** como texto sobre marfil) |
-| `state.success` | `#4F7A57` | Éxito, "Listo" |
-| `state.warning` | `#B7791F` | Demora, atención |
-| `state.error` | `#B3402F` | Errores |
-| `state.info` | `#4A6B8A` | Información |
-| `border.subtle` | `#E4D8C5` | Divisores |
+| `palette.cream` / `surface.base` | `#F6F1E8` | Fondo cálido principal |
+| `palette.coffee` / `text.primary` / `surface.inverse` | `#3A2B22` | Texto y superficies de máximo contraste |
+| `palette.caramel` / `accent.default` | `#945C34` | Acento y acción primaria con texto crema |
+| `palette.sage` / `secondary.default` | `#61715B` | Detalles e indicadores secundarios con texto crema |
+| `palette.blueGray` / `neutral.default` | `#59696E` | Acentos neutros con texto crema |
+| `surface.raised` | `#FBF8F2` | Tarjetas y hojas |
+| `text.secondary` | `#5B4B40` | Texto de apoyo |
+| `accent.pressed` | `#7A4828` | Estado presionado |
+| `border.subtle` | `#DED5C8` | Divisores |
 
-> **Regla de contraste:** el caramelo y la salvia **no** se usan como color de texto sobre marfil. Todo par texto/fondo debe pasar **WCAG AA** (4.5:1 texto normal, 3:1 texto grande/íconos). WP-UX-10 valida cada par con una herramienta de contraste y deja la tabla de resultados.
+Contraste WCAG calculado con luminancia relativa: café sobre crema **12,05:1**; crema sobre caramelo **4,86:1**, salvia **4,64:1** y gris azulado **5,09:1**. Todos superan AA para texto normal (4,5:1). El color no es el único indicador de estados.
 
 **Modo oscuro:** fuera del MVP; los tokens semánticos lo permiten luego.
 
-## 3. Tipografía (propuesta)
+## 3. Tipografía
 | Rol | Propuesta | Alternativa | Notas |
 |---|---|---|---|
-| Display / títulos | Serif elegante (p. ej. *Fraunces* o *Cormorant Garamond*) | Playfair Display | Solo para títulos y precios destacados |
-| Texto / UI | Sans humanista (p. ej. *Inter* o *DM Sans*) | Source Sans 3 | Todo lo operativo |
+| Display / títulos | *Fraunces* (fallback Georgia) | Cormorant Garamond | Solo para títulos y precios destacados |
+| Texto / UI | *Inter* (fallback del sistema) | DM Sans | Todo lo operativo |
 | Numérico | Cifras tabulares (`font-variant-numeric: tabular-nums`) | — | Precios y totales alineados |
 
 - Escala (web, rem): 12 / 14 / 16 / 20 / 24 / 32 / 40. Interlineado 1.4–1.6 en texto.
 - Android: escala Material 3 mapeada a estos tamaños.
-- Fuentes **autohospedadas** (rendimiento y CSP). Siempre con *fallback stack*.
+- Los nombres de fuente quedan como stacks en los tokens; antes de usarlos en producción, autohospedar los archivos y conservar los fallbacks.
 
 ## 4. Espaciado, forma y elevación
 | Token | Valor |
@@ -129,4 +125,4 @@ Cercano y claro, trato de **vos**. Sin jerga técnica en errores.
 - Logo/isotipo, íconos, ilustraciones de estados vacíos, fotografías de ejemplo.
 
 ## 12. Marca (D-134)
-Archivos en `design/img/`: `ic_icon.png` (isotipo, cuadrado, fondo transparente, ≥ 1024×1024). Pendiente Q-21: versión SVG y logo horizontal. A partir de `ic_icon.png` UX deriva favicon, íconos de Android y la cabecera del comprobante.
+`design/img/ic_logo.svg` es el activo entregado por el dueño: tiene un `viewBox` cuadrado y se conserva intacto, sin rediseñarlo ni reemplazarlo. No hay un isotipo independiente para favicon/Android; la derivación queda pendiente de Q-21 o de autorización expresa.

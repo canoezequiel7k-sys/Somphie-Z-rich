@@ -1,0 +1,26 @@
+spring: # Configuración común que pueden sobrescribir las variables del entorno.
+  application: # Identifica el servicio en logs y herramientas del framework.
+    name: somphie-backend # Usa un nombre constante en todos los entornos.
+  profiles: # Define un modo seguro para el arranque local.
+    default: dev # Activa desarrollo si no se selecciona SPRING_PROFILES_ACTIVE.
+  datasource: # Lee las mismas variables que provee infra/.env.example.
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/somphie} # Usa PostgreSQL local como valor de desarrollo.
+    username: ${DB_USER:somphie} # No incorpora usuarios reales al repositorio.
+    password: ${DB_PASSWORD:change-me-local-only} # El valor de reserva solo sirve para el Compose local.
+    driver-class-name: org.postgresql.Driver # Declara explícitamente el driver PostgreSQL del runtime.
+server: # Evita que el manejo por defecto filtre detalles técnicos.
+  error: # Limita información de errores generados por Spring.
+    include-message: never # Los mensajes internos no se devuelven al cliente.
+    include-stacktrace: never # Las trazas se reservan para el entorno de logs.
+management: # Publica solo la comprobación necesaria para liveness y readiness.
+  endpoints: # Ajusta los endpoints HTTP del Actuator.
+    web: # Configuración de la interfaz web de administración.
+      exposure: # Mantiene mínimo el conjunto accesible desde HTTP.
+        include: health # Expone únicamente la salud del servicio.
+  endpoint: # Configura individualmente los indicadores.
+    health: # Ajustes del endpoint de salud.
+      probes: # Habilita indicadores para orquestadores.
+        enabled: true # Separa liveness y readiness en rutas de Actuator.
+      show-details: never # No publica detalles de infraestructura fuera del perfil dev.
+somphie: # Valores del producto no inferibles desde las librerías.
+  contract-version: 0.2.5 # Debe permanecer alineada con info.version en docs/04-api/openapi.yaml.

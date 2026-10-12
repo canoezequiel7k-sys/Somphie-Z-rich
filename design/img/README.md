@@ -1,6 +1,6 @@
 # Marca de Somphie Zúrich
 
-Archivos esperados (Q-06 / Q-21):
+Inventario actual y requisitos de marca (Q-06 / Q-21):
 
 | Archivo | Uso | Requisitos |
 |---|---|---|
@@ -8,4 +8,4 @@ Archivos esperados (Q-06 / Q-21):
 | `ic_logo.png` (opcional) | Logo horizontal para web y PDF | Fondo transparente |
 | `ic_icon.svg` / `ic_logo.svg` (ideal) | Master vectorial | Si existe, se usa en lugar del PNG |
 
-Si el ícono es solo PNG, UX pide una versión de mayor resolución antes de derivar tamaños.
+Hoy está disponible `ic_logo.svg`, entregado por el dueño. Tiene `viewBox` cuadrado y cuatro imágenes raster incrustadas; conservarlo sin rediseño ni edición. No hay un archivo independiente `ic_icon.svg`, así que favicon e ícono Android quedan pendientes hasta recibir o autorizar una derivación.

@@ -1,0 +1,3 @@
+logging: # Mantiene logs moderados en la demo pública.
+  level: # Define el nivel general del perfil demo.
+    root: INFO # Registra eventos operativos sin imprimir detalles de depuración.
