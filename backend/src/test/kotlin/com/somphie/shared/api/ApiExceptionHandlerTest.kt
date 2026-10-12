@@ -40,4 +40,16 @@ class ApiExceptionHandlerTest {
         assertEquals("INTERNAL_ERROR", response.body?.code)
         assertNull(response.body?.detail)
     }
+
+    @Test
+    fun `login lockout preserves retry interval in response header`() {
+        val response = handler.handleDomain(
+            DomainException(ErrorCode.ACCOUNT_TEMPORARILY_LOCKED, "private login state", mapOf("retryAfterSec" to 42)),
+        )
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, response.statusCode)
+        assertEquals("ACCOUNT_TEMPORARILY_LOCKED", response.body?.code)
+        assertEquals("42", response.headers.getFirst("Retry-After"))
+        assertNull(response.body?.detail)
+    }
 }

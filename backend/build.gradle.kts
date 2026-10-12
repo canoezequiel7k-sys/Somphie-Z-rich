@@ -22,6 +22,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator") // Agrega health/readiness sin publicar métricas sensibles.
     implementation("org.springframework.boot:spring-boot-starter-jdbc") // Conecta la aplicación a PostgreSQL hasta que llegue JPA.
     implementation("org.springframework.boot:spring-boot-starter-validation") // Habilita validación estándar de solicitudes HTTP.
+    implementation("org.springframework.boot:spring-boot-starter-security") // Provee BCrypt, filtros sin sesión y soporte de autorización.
+    implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server") // Usa JWT/JWK de Spring Security para validar y emitir access tokens.
     implementation("org.jetbrains.kotlin:kotlin-reflect") // Permite que Spring inspeccione constructores y tipos Kotlin.
     implementation("org.springframework.boot:spring-boot-starter-flyway") // Registra la auto-configuración de migraciones de Spring Boot.
     runtimeOnly("org.postgresql:postgresql") // Provee el driver de PostgreSQL configurado por variables de entorno.

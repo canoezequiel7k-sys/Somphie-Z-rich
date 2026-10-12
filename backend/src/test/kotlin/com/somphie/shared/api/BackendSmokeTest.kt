@@ -72,6 +72,12 @@ class BackendSmokeTest {
             "SELECT count(*) FROM flyway_schema_history WHERE version = '1' AND success",
             Int::class.java,
         ))
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM flyway_schema_history WHERE version = '8' AND success",
+            Int::class.java,
+        ))
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT count(*) FROM app_user", Int::class.java))
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT count(*) FROM refresh_token", Int::class.java))
         assertEquals(1, jdbcTemplate.queryForObject("SELECT count(*) FROM restaurant", Int::class.java))
         assertEquals(1, jdbcTemplate.queryForObject("SELECT count(*) FROM restaurant_settings", Int::class.java))
         assertEquals(4, jdbcTemplate.queryForObject("SELECT count(*) FROM role", Int::class.java))

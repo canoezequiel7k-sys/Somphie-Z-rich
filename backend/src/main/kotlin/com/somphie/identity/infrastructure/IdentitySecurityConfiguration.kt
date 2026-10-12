@@ -1,0 +1,126 @@
+package com.somphie.identity.infrastructure
+
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import org.springframework.http.HttpMethod
+import org.springframework.http.MediaType
+import org.springframework.security.config.annotation.web.builders.HttpSecurity
+import org.springframework.security.config.http.SessionCreationPolicy
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
+import org.springframework.security.crypto.password.PasswordEncoder
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm
+import org.springframework.security.oauth2.jwt.JwtDecoder
+import org.springframework.security.oauth2.jwt.JwtEncoder
+import org.springframework.security.oauth2.jwt.JwtException
+import org.springframework.security.oauth2.jwt.JwtValidationException
+import org.springframework.security.oauth2.jwt.JwtValidators
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder
+import org.springframework.security.core.AuthenticationException
+import org.springframework.security.web.AuthenticationEntryPoint
+import org.springframework.security.web.SecurityFilterChain
+import com.nimbusds.jose.proc.SecurityContext
+import com.nimbusds.jose.jwk.source.ImmutableSecret
+import java.net.URI
+import java.util.Base64
+import javax.crypto.SecretKey
+import javax.crypto.spec.SecretKeySpec
+
+@Configuration
+class IdentitySecurityConfiguration {
+    @Bean
+    fun passwordEncoder(): PasswordEncoder = BCryptPasswordEncoder(12)
+
+    @Bean
+    fun jwtSecretKey(@Value("\${somphie.jwt.secret}") encodedSecret: String): SecretKey {
+        val key = try {
+            Base64.getDecoder().decode(encodedSecret)
+        } catch (exception: IllegalArgumentException) {
+            throw IllegalStateException("JWT_SECRET must be Base64-encoded", exception)
+        }
+        require(key.size >= 32) { "JWT_SECRET must contain at least 256 bits" }
+        return SecretKeySpec(key, "HmacSHA256")
+    }
+
+    @Bean
+    fun jwtEncoder(secretKey: SecretKey): JwtEncoder =
+        NimbusJwtEncoder(ImmutableSecret<SecurityContext>(secretKey))
+
+    @Bean
+    fun jwtDecoder(secretKey: SecretKey): JwtDecoder {
+        val delegate = NimbusJwtDecoder.withSecretKey(secretKey)
+            .macAlgorithm(MacAlgorithm.HS256)
+            .build()
+        delegate.setJwtValidator(JwtValidators.createDefaultWithIssuer(JWT_ISSUER))
+        return JwtDecoder { token ->
+            try {
+                delegate.decode(token)
+            } catch (exception: JwtValidationException) {
+                if (exception.errors.any { it.description?.contains("expired", ignoreCase = true) == true }) {
+                    throw ExpiredAccessTokenException(exception)
+                }
+                throw exception
+            }
+        }
+    }
+
+    @Bean
+    fun identitySecurityFilterChain(
+        http: HttpSecurity,
+        jwtDecoder: JwtDecoder,
+    ): SecurityFilterChain {
+        val entryPoint = IdentityAuthenticationEntryPoint()
+        http
+            .csrf { it.disable() }
+            .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+            .authorizeHttpRequests {
+                it.requestMatchers(HttpMethod.POST, "/auth/login", "/auth/refresh").permitAll()
+                it.requestMatchers("/auth/logout", "/auth/change-password", "/me").authenticated()
+                it.anyRequest().permitAll()
+            }
+            .oauth2ResourceServer {
+                it.jwt { jwt -> jwt.decoder(jwtDecoder) }
+                it.authenticationEntryPoint(entryPoint)
+            }
+            .exceptionHandling { it.authenticationEntryPoint(entryPoint) }
+            .addFilterAfter(
+                PasswordChangeRequiredFilter(),
+                org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter::class.java,
+            )
+        return http.build()
+    }
+
+    private companion object {
+        const val JWT_ISSUER = "somphie-backend"
+    }
+}
+
+private class ExpiredAccessTokenException(cause: Throwable) : JwtException("Access token expired", cause)
+
+private class IdentityAuthenticationEntryPoint : AuthenticationEntryPoint {
+    override fun commence(
+        request: jakarta.servlet.http.HttpServletRequest,
+        response: jakarta.servlet.http.HttpServletResponse,
+        authException: AuthenticationException,
+    ) {
+        val code = if (hasExpiredTokenCause(authException)) "TOKEN_EXPIRED" else "UNAUTHENTICATED"
+        response.status = 401
+        response.contentType = MediaType.APPLICATION_PROBLEM_JSON_VALUE
+        response.setHeader("WWW-Authenticate", "Bearer")
+        val problemType = URI.create("https://api.somphiezurich.example/errors/${code.lowercase().replace('_', '-')}")
+        val traceId = org.slf4j.MDC.get("traceId") ?: ""
+        response.writer.write(
+            """{"type":"$problemType","title":"No se pudo autenticar la solicitud","status":401,"code":"$code","traceId":"$traceId"}""",
+        )
+    }
+
+    private fun hasExpiredTokenCause(exception: Throwable?): Boolean {
+        var current = exception
+        while (current != null) {
+            if (current is ExpiredAccessTokenException) return true
+            current = current.cause
+        }
+        return false
+    }
+}

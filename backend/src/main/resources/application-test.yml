@@ -1,3 +1,6 @@
 logging: # Reduce ruido de librerías durante las pruebas automatizadas.
   level: # Limita el nivel a errores en el entorno test.
     root: WARN # Conserva fallos importantes sin llenar la salida de Gradle.
+somphie:
+  jwt:
+    secret: dGVzdC1vbmx5LWtleS0zMi1ieXRlcy1zb21waGllLTIwMjY= # Clave pública exclusiva de pruebas.

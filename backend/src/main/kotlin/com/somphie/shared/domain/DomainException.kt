@@ -8,6 +8,16 @@ package com.somphie.shared.domain
  * no se inventan (AGENTS.md §2, regla 2).
  */
 enum class ErrorCode {
+    // --- Identidad (catálogo §2) ---
+    INVALID_CREDENTIALS,
+    ACCOUNT_DISABLED,
+    ACCOUNT_TEMPORARILY_LOCKED,
+    TOKEN_EXPIRED,
+    UNAUTHENTICATED,
+    PASSWORD_TOO_WEAK,
+    REFRESH_TOKEN_REUSED,
+    PASSWORD_CHANGE_REQUIRED,
+
     // --- Pedidos (catálogo §4) ---
     ORDER_EMPTY,
     ORDER_ALREADY_DECIDED,

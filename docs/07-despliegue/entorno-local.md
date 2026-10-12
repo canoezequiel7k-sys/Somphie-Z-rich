@@ -37,7 +37,8 @@ En Windows PowerShell, el equivalente es `Copy-Item .\infra\.env.example .\infra
 |---|---|---|
 | `SPRING_PROFILES_ACTIVE` | `dev` | `dev`, `test`, `demo`, `prod` |
 | `DB_URL` / `DB_USER` / `DB_PASSWORD` | `jdbc:postgresql://localhost:5432/somphie` | Contraseña local de ejemplo |
-| `JWT_SECRET` | *(generar)* | ≥ 256 bits; **nunca** versionar el real |
+| `JWT_SECRET` | *(generar en Base64)* | ≥ 256 bits; obligatorio para emitir/validar JWT; **nunca** versionar el real |
+| `DEMO_STAFF_PASSWORD` | `demo-only-password` | Solo perfiles `dev`/`demo`; mínimo 10 caracteres |
 | `WEB_BASE_URL` | `http://localhost:5173` | Para armar URLs de QR |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Lista explícita |
 | `MAIL_HOST` / `MAIL_PORT` | `localhost` / `1025` | Mailpit |
@@ -52,7 +53,7 @@ En Windows PowerShell, el equivalente es `Copy-Item .\infra\.env.example .\infra
 | `bar@somphie.demo` | BAR | BAR |
 | `kitchen@somphie.demo` | KITCHEN | KITCHEN |
 
-Contraseñas de demo documentadas en el README del backend (**solo demo**, nunca reutilizar). Menú de ejemplo (≈ 12–15 productos de café, pastelería y cocina ligera) y 8 mesas con `tableCode` fijos para poder generar QR de prueba.
+Contraseña de los usuarios demo: `DEMO_STAFF_PASSWORD` (por defecto `demo-only-password`, la misma del ejemplo OpenAPI; **solo demo**, nunca reutilizar). Menú de ejemplo (≈ 12–15 productos de café, pastelería y cocina ligera) y 8 mesas con `tableCode` fijos para poder generar QR de prueba.
 
 ## 6. Comandos de calidad
 | Acción | Comando |

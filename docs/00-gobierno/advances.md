@@ -7,7 +7,7 @@
 Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 bloqueado
 
 ---
-## 1. Estado actual (snapshot al 2026-10-11; secciones 1.1 y 1.2 actualizadas el 2026-10-12 con el estado del backend)
+## 1. Estado actual (snapshot actualizado el 2026-10-12)
 
 ### 1.1 Qué existe
 | Pieza | Estado | Dónde |
@@ -27,16 +27,17 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Backend: **dominio puro** de WP-BE-10 (`Money`, `Payment`/`Bill`, ajustes, reembolsos/anulaciones, `Order`/`OrderItem`, `TableSession`, `JoinCode`). JDK 25, Gradle 9.8.1, Kotlin 2.4.0, JUnit 6.1.2 | ✅ 235 pruebas; 0 fallos, errores u omitidas; cobertura de líneas 97,61 % (corrida final del 2026-10-12) | `backend/` |
 | Backend ejecutable WP-BE-20: Spring, perfiles, Actuator, `/version`, Problem+JSON, `Clock`, Testcontainers y ArchUnit base | ✅ `clean check jacocoTestReport`: 242 pruebas, 0 fallos/errores/omitidas; cobertura de líneas 715/750 (95,33 %) | `backend/` |
 | WP-BE-21: migración Flyway V1 y semilla obligatoria | ✅ `clean check jacocoTestReport`: 243 pruebas, 0 fallos/errores/omitidas; cobertura 715/750 (95,33 %) | `backend/` |
+| Backend de negocio (avance registrado hasta WP-BE-45) | ✅ Implementados y registrados: WP-BE-32/33, WP-BE-40/41/42/44/45. Esto no significa que el backend completo esté terminado; continuar según pendientes y dependencias de `docs/08-agentes/roadmap-fases.md` | `backend/`, sección 6 de esta bitácora |
 | WP-UX-10: identidad visual y tokens | ✅ Paleta aprobada, tokens publicados y pares principales con contraste WCAG AA | `design-tokens.json`, `docs/05-diseno/sistema-visual.md` |
 | Carta demo | ✅ Recibida: 47 productos, 11 subcategorías, precios de demostración en ARS | Insumo para WP-BE-30 |
 | Horario del restaurante | ✅ Recibido; zona horaria pendiente de confirmar antes de persistirlo | Apertura y cierre semanal |
 
-### 1.2 Qué NO existe todavía
-- Código de `web/` y `android/` (solo tienen `AGENTS.md`). El backend ya tiene runtime Spring y endpoints operativos de versión/salud, pero todavía no incluye API de negocio ni persistencia.
-- Persistencia de entidades y flujos de negocio posteriores a la base inicial WP-BE-21; los proyectos ejecutables de Web y Android (WP-WEB-20 y WP-AND-20). Sus checks informan que la validación no se ejecutó hasta que existan.
+### 1.2 Qué falta o requiere seguimiento
+- El backend ya incluye API de negocio y persistencia para los paquetes registrados arriba, pero aún no cubre todas las fases del roadmap. No dar por terminado el backend hasta cerrar y validar todos los WP-BE pendientes.
+- La lista de trabajo que compartió el dueño marca WP-BE-32/33 como pendientes, mientras que las entradas de esta bitácora las registran como ✅. Revisar el estado real del código y reconciliar ambas listas antes de planificar esos paquetes.
+- Confirmar el estado actual de los proyectos Web y Android antes de afirmar que no existen o que sus checks no aplican.
 - No hay un isotipo independiente para favicon/Android; `design/img/ic_logo.svg` queda sin editar y la Q-21 sigue abierta solo para ese derivado.
-- Catálogo de acciones de auditoría.
-- Pruebas de contrato, concurrencia, web y Android; WP-BE-20 ya incorpora integración con PostgreSQL Testcontainers y una regla base de ArchUnit.
+- Revisar que el catálogo de acciones de auditoría y las pruebas de contrato, concurrencia e integración estén completos para los flujos ya implementados; WP-BE-20 incorpora integración con PostgreSQL Testcontainers y una regla base de ArchUnit.
 
 ### 1.3 Advertencias para quien continúe
 1. **La fuente de verdad es este repositorio local.** Cualquier copia en otro lado (zips, sandboxes, descargas) puede estar desactualizada. En particular, **no sobrescribir** `CHANGELOG.md`, `openapi.yaml` ni `reglas-negocio.md` con versiones viejas.
@@ -45,13 +46,15 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 4. Nadie debe cambiar nombres de estados, errores o campos del contrato por su cuenta (`AGENTS.md` §2).
 
 ### 1.4 Traspaso al siguiente agente (2026-10-12)
-- **Paquetes locales listos:** WP-BE-20/21 y WP-UX-10; este avance reúne runtime Spring, configuración, migración/semillas, pruebas y tokens de diseño. No implica que exista API de negocio, catálogo ni UI.
-- **WP-OPS-21 sigue abierto:** en GitHub están verdes Backend CI, Documentation CI y Secret scanning; Web/Android fallan explícitamente porque aún no existen sus proyectos. No declarar toda la CI verde ni cerrar el paquete hasta revisar sus checks reales.
-- **Instrucción para el próximo agente:** tomar únicamente WP-UX-11. WP-UX-10 ya está completo y aporta identidad/tokens; los wireframes son la dependencia de diseño que falta para construir las interfaces sin inventar flujos. Leer `docs/05-diseno/mapa-pantallas.md`, `docs/05-diseno/sistema-visual.md`, `docs/08-agentes/ux-ui.md` y el DoD de WP-UX-11 en `docs/08-agentes/roadmap-fases.md`.
-- **Qué entregar en WP-UX-11:** wireframes de baja fidelidad para todas las pantallas y superficies vigentes del mapa, matriz de cobertura y plantillas de estados aplicables. No implementar Web/Android ni avanzar otro paquete; al terminar, registrar evidencia y el siguiente paso según dependencias del roadmap.
-- **Insumos y límites:** carta ficticia de 47 productos con precios demo en ARS, aún no cargada; confirmar zona horaria antes de persistir horarios. Mantener `design/img/ic_logo.svg` intacto y no derivar un isotipo sin resolver Q-21/autorización.
-- **Validación local más reciente:** `.\backend\gradlew.bat -p backend check` no pudo completar Testcontainers porque Docker Desktop informó que no puede iniciar; 239 pruebas reportadas, con error de inicialización en `BackendSmokeTest`. No es un resultado verde; repetir cuando Docker esté disponible.
-- **Regla de continuidad:** leer `AGENTS.md` y esta bitácora antes de tocar archivos; respetar la jerarquía documental, preservar cambios existentes y no hacer commit/push sin autorización.
+- **Prioridad acordada por el dueño:** completar el backend antes de cambiar el foco a Web/Android, para que esos agentes reciban APIs y reglas implementadas con contexto claro.
+- **Último paquete informado:** WP-BE-45 ✅ (auditoría base, migración V7 y registro transaccional); su detalle está en la sección 6. También están registradas como completas WP-BE-32/33, WP-BE-40/41/42/44. Estas marcas son el estado documentado; ejecutar las validaciones del roadmap antes de considerar el backend terminado.
+- **En curso:** WP-BE-43 (`identity` staff) ya tiene implementación y pruebas, pero no se cierra: la integración Testcontainers no pudo arrancar sin Docker. Ver entrada de la sección 6.
+- **Archivos tocados:** migración `V8__identity.sql`, módulo `backend/src/main/kotlin/com/somphie/identity/`, configuración Gradle/JWT, manejador de errores, filtro de trace, pruebas unitarias e integración, variables y guía local.
+- **Después de validar WP-BE-43:** WP-BE-46 (aislamiento por restaurante; pruebas con dos restaurantes), sin entrada de cierre. Revalidar WP-BE-44 porque el roadmap lo hace dependiente de identidad y su controlador actual no aplica autenticación visible.
+- **Discrepancia WP-BE-32/33:** ambos tienen código y migraciones, así que no se duplican. Las pruebas focalizadas pasan, pero no cubren opciones/i18n ni el adaptador de archivos; su DoD todavía requiere evidencia antes de confirmarlos como listos.
+- **Dependencias y límites:** contrato primero; no inventar estados, errores ni campos. Coordinar cambios observables con Arquitectura y actualizar OpenAPI + `CHANGELOG.md`. Los clientes pueden avanzar con mocks según `docs/08-agentes/dependencias.md`. Mantener `design/img/ic_logo.svg` intacto y no derivar un isotipo sin resolver Q-21/autorización.
+- **Validación:** revisar el resultado más reciente del backend CI y ejecutar los checks definidos en `backend/` para cada paquete; una ejecución bloqueada por Docker no cuenta como verde. Registrar el comando y resultado real al cerrar.
+- **Regla de continuidad:** leer `AGENTS.md`, esta bitácora y la guía backend antes de tocar archivos; respetar la jerarquía documental, preservar cambios existentes y no hacer commit/push sin autorización.
 
 ---
 ## 2. Decisiones tomadas hoy (D-142 … D-157)
@@ -561,6 +564,17 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Por qué:** Cumple con WP-BE-45 de la Fase 4 del roadmap y el catálogo de auditoría, garantizando trazabilidad completa y no repudio de las operaciones sensibles.
 - **Archivos:** `backend/src/main/resources/db/migration/V7__audit.sql`, `backend/src/main/kotlin/com/somphie/audit/AuditService.kt`, `backend/src/main/kotlin/com/somphie/orders/api/OrdersController.kt` y esta bitácora.
 - **Qué estudiar:** Registros de auditoría *append-only* en la misma transacción de base de datos y propagación de trazas con MDC (Mapped Diagnostic Context).
+
+### 2026-10-12 — WP-BE-43 🔄 (integración pendiente)
+- **Qué hicimos:** Se agregó `identity` staff: login con BCrypt, JWT HS256 de 15 min, refresh opaco rotativo guardado como hash, detección de reutilización y revocación de familia, `/me`, logout, cambio de contraseña, permisos/estaciones desde la base, seed solo `dev`/`demo`, bloqueo de 5 intentos por 15 min y auditoría del bloqueo/cambio de clave. Los tokens temporales ahora reciben `PASSWORD_CHANGE_REQUIRED` en cualquier ruta salvo cambio de contraseña.
+- **Por qué:** Implementar WP-BE-43 respetando RN-IDN-02…06 y el contrato 0.2.5, sin cambiar OpenAPI.
+- **Archivos:** `backend/build.gradle.kts`, `backend/src/main/resources/db/migration/V8__identity.sql`, `backend/src/main/resources/application*.yml`, `backend/src/main/kotlin/com/somphie/identity/`, `backend/src/main/kotlin/com/somphie/shared/api/ApiExceptionHandler.kt`, `TraceIdFilter.kt`, `backend/src/main/kotlin/com/somphie/shared/domain/DomainException.kt`, pruebas de `identity` y `shared/api`, `infra/.env.example`, `docs/07-despliegue/entorno-local.md`.
+- **Validación real:** pruebas focalizadas de identidad, filtro de contraseña temporal, errores, arquitectura y catálogo ✅ (18 tests). `.\backend\gradlew.bat -p backend check` 🔴: 256 tests, 2 fallos de inicialización Testcontainers (`IdentityIntegrationTest` y `BackendSmokeTest`) porque no hay Docker; no cuenta como verde. Las pruebas de integración compilan, pero falta ejecutarlas con Docker disponible. `git diff --check` ✅.
+- **Qué estudiar:** hash BCrypt vs contraseña en claro, JWT firmado vs refresh opaco, rotación/reutilización, `SELECT … FOR UPDATE`, bloqueo de fuerza bruta y transacciones de auditoría.
+- **Siguiente:** ejecutar `check` con Docker y verificar las nuevas pruebas de integración; si pasa, cerrar WP-BE-43. Luego WP-BE-46 y revalidación de WP-BE-44/autorización staff.
+- **Continuación:** se corrigió la prueba criptográfica para fijar HS256, usar timestamps compatibles con el reloj y contemplar la tolerancia de expiración del decoder. Se implementó y probó el rechazo `PASSWORD_CHANGE_REQUIRED` para tokens temporales; el cierre del paquete sigue pendiente de las pruebas Testcontainers con Docker.
+- **WP-BE-43 — corrección puntual:** `PasswordChangeRequiredFilter.kt` permite la excepción solo para `POST` cuya URI coincide exactamente con `contextPath + /auth/change-password`; `IdentityIntegrationTest.kt` conserva las aserciones originales y ya no incluye instrumentación temporal. Validación: prueba focalizada ✅; `.\backend\gradlew.bat -p backend check` ejecutó 266 tests sin fallos, errores ni omitidos, pero falla JaCoCo con 61 % de líneas frente al mínimo de 90 %. `git diff --check` ✅. WP-BE-43 sigue abierto hasta resolver la cobertura global.
+- **WP-BE-43 — pruebas ampliadas:** se agregaron casos conductuales para login bloqueado/cuenta deshabilitada, refresh inválido, claims desactualizados, logout, cambio de contraseña y claims JWT; el filtro ahora prueba el servletPath vacío y rechaza métodos/rutas similares. Suite identity: 26/26 ✅. `.\backend\gradlew.bat -p backend check`: 275 tests, 0 fallos; JaCoCo bloquea el build con 61,83 % (1218/1970) frente al 90 %. Cobertura identity: api 90,77 %, application 94,05 %, domain 82,61 %, infrastructure 83,89 %. `jacocoTestReport` ✅. WP-BE-43 sigue sin cierre por el umbral global; no se tocaron módulos ajenos ni producción. Estudiar: mocks y pruebas de integración con persistencia.
 
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)

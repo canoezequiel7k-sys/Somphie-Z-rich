@@ -5,9 +5,11 @@ import com.somphie.shared.domain.ErrorCode
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import org.springframework.http.HttpStatus
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
+import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import java.net.URI
@@ -20,17 +22,20 @@ class ApiExceptionHandler {
     fun handleDomain(exception: DomainException): ResponseEntity<ApiProblem> {
         val status = exception.code.httpStatus()
         val code = exception.code.name
-        return response(
-            ApiProblem(
+        val problem = ApiProblem(
                 type = URI.create("$ERRORS_BASE/${code.lowercase().replace('_', '-')}"),
                 title = "No se pudo completar la operación",
                 status = status.value(),
                 code = code,
                 traceId = MDC.get(TRACE_ID_KEY),
                 extra = exception.extra.ifEmpty { null },
-            ),
-            status,
-        )
+            )
+        val retryAfter = (exception.extra["retryAfterSec"] as? Number)?.toLong()
+        val response = ResponseEntity.status(status).contentType(PROBLEM_JSON)
+        if (exception.code == ErrorCode.ACCOUNT_TEMPORARILY_LOCKED && retryAfter != null) {
+            response.header(HttpHeaders.RETRY_AFTER, retryAfter.toString())
+        }
+        return response.body(problem)
     }
 
     /** Devuelve 400 con un código estable cuando el cuerpo no se puede interpretar como JSON. */
@@ -42,6 +47,21 @@ class ApiExceptionHandler {
             status = HttpStatus.BAD_REQUEST.value(),
             code = "MALFORMED_REQUEST",
             traceId = MDC.get(TRACE_ID_KEY),
+        ),
+        HttpStatus.BAD_REQUEST,
+    )
+
+    @ExceptionHandler(MethodArgumentNotValidException::class)
+    fun handleValidation(exception: MethodArgumentNotValidException): ResponseEntity<ApiProblem> = response(
+        ApiProblem(
+            type = URI.create("$ERRORS_BASE/validation-failed"),
+            title = "Solicitud inválida",
+            status = HttpStatus.BAD_REQUEST.value(),
+            code = "VALIDATION_FAILED",
+            traceId = MDC.get(TRACE_ID_KEY),
+            fieldErrors = exception.bindingResult.fieldErrors
+                .map { ApiFieldError(it.field, "INVALID") }
+                .distinctBy { it.field },
         ),
         HttpStatus.BAD_REQUEST,
     )
@@ -71,12 +91,23 @@ class ApiExceptionHandler {
 
     /** Traduce únicamente los estados definidos para los errores que el dominio ya puede producir. */
     private fun ErrorCode.httpStatus(): HttpStatus = when (this) {
+        ErrorCode.INVALID_CREDENTIALS,
+        ErrorCode.TOKEN_EXPIRED,
+        ErrorCode.UNAUTHENTICATED,
+        ErrorCode.REFRESH_TOKEN_REUSED,
+        -> HttpStatus.UNAUTHORIZED
+        ErrorCode.ACCOUNT_DISABLED,
+        ErrorCode.PASSWORD_CHANGE_REQUIRED,
+        -> HttpStatus.FORBIDDEN
+        ErrorCode.ACCOUNT_TEMPORARILY_LOCKED,
+        -> HttpStatus.TOO_MANY_REQUESTS
         ErrorCode.ORDER_EMPTY,
         ErrorCode.ORDER_ALL_ITEMS_EXCLUDED,
         ErrorCode.PAYMENT_AMOUNT_INVALID,
         ErrorCode.TIP_INVALID,
         ErrorCode.TIP_EXCEEDS_LIMIT,
         ErrorCode.ADJUSTMENT_INVALID,
+        ErrorCode.PASSWORD_TOO_WEAK,
         -> HttpStatus.UNPROCESSABLE_CONTENT
         ErrorCode.ITEM_NOT_FOUND,
         ErrorCode.PARTICIPANT_NOT_FOUND,
