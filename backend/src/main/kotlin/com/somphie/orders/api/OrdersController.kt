@@ -1,5 +1,6 @@
 package com.somphie.orders.api
 
+import com.somphie.audit.AuditService
 import com.somphie.orders.domain.CreateOrderRequest
 import com.somphie.orders.domain.ItemSnapshot
 import com.somphie.orders.domain.Order
@@ -26,6 +27,7 @@ import java.util.UUID
 class OrdersController(
     private val jdbc: NamedParameterJdbcTemplate,
     private val idempotencyService: IdempotencyService,
+    private val auditService: AuditService,
     private val clock: Clock
 ) {
 
@@ -113,6 +115,17 @@ class OrdersController(
                 ))
             }
 
+            // Record audit event in the same transaction
+            auditService.record(
+                restaurantId = restaurantId,
+                actorType = "CUSTOMER",
+                actorId = participantId,
+                action = "ORDER_CREATED",
+                targetType = "ORDER",
+                targetId = order.id.toString(),
+                afterSummary = "{\"status\":\"${order.status.name}\",\"totalMinor\":$totalMinor}"
+            )
+
             val responseBody = mapOf(
                 "id" to order.id.toString(),
                 "displayCode" to "#001",
@@ -185,7 +198,7 @@ class OrdersController(
             throw DomainException(ErrorCode.ORDER_NOT_CANCELLABLE, "Order cannot be cancelled")
         }
 
-        return ResponseEntity.ok(mapOf("id" to uuid.toString(), "status" to "CANCELLED"))
+        return ResponseEntity.ok(mapOf("id" to uuid.toString(), "status"  to "CANCELLED"))
     }
 
     private fun resolveSessionAndParticipant(authorization: String?): Map<String, String> {

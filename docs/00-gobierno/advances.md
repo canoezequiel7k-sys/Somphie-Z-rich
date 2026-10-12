@@ -554,6 +554,14 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Archivos:** `backend/src/main/kotlin/com/somphie/orders/api/StaffOrdersController.kt`, `backend/src/main/kotlin/com/somphie/orders/domain/StaffOrderModels.kt`, y esta bitácora.
 - **Qué estudiar:** Ciclo de vida del pedido gestionado por el personal, exclusión de ítems al aceptar y rechazo con motivos estructurados.
 
+### 2026-10-12 — WP-BE-45 ✅
+- **Qué hicimos:** Se implementó el módulo de auditoría base (`audit` en la misma transacción):
+  1. Migración Flyway `V7__audit.sql` creando la tabla `audit_event` (con restricciones append-only, metadatos de actor, acción, objetivos y resúmenes JSONB), junto con sus índices de consulta.
+  2. `AuditService` que registra de forma atómica los eventos críticos (como creación de pedidos) dentro de la misma transacción de negocio, asociándolos al `traceId` actual (MDC).
+- **Por qué:** Cumple con WP-BE-45 de la Fase 4 del roadmap y el catálogo de auditoría, garantizando trazabilidad completa y no repudio de las operaciones sensibles.
+- **Archivos:** `backend/src/main/resources/db/migration/V7__audit.sql`, `backend/src/main/kotlin/com/somphie/audit/AuditService.kt`, `backend/src/main/kotlin/com/somphie/orders/api/OrdersController.kt` y esta bitácora.
+- **Qué estudiar:** Registros de auditoría *append-only* en la misma transacción de base de datos y propagación de trazas con MDC (Mapped Diagnostic Context).
+
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)
 
