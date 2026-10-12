@@ -64,7 +64,7 @@ Contraseñas de demo documentadas en el README del backend (**solo demo**, nunca
 | Web: E2E | `pnpm e2e` |
 | Android: unit | `./gradlew testDebugUnitTest` |
 | Android: UI | `./gradlew connectedDebugAndroidTest` |
-| Contrato | `pnpm spectral lint docs/04-api/openapi.yaml` |
+| Contrato | `npx @redocly/cli lint docs/04-api/openapi.yaml` |
 
 ## 7. Problemas frecuentes en Windows
 | Síntoma | Causa | Solución |

@@ -38,7 +38,7 @@ gantt
 **Salida:** Backend, Web y Android pueden desarrollar contra un contrato acordado.
 | WP | Agente | Descripción | Dep. | DoD |
 |---|---|---|---|---|
-| WP-ARQ-10 | ARQ | `openapi.yaml` v0.1: núcleo (menú, acceso/sesión, pedidos, staff pedidos/colas, errores, eventos) con **ejemplos**. **v0.2:** incluye opciones/modificadores, `Accept-Language`, propina en pagos, ajustes de cuenta y llamados al mozo | WP-ARQ-01 | Spectral limpio; Prism lo sirve; revisado con Web y Android |
+| WP-ARQ-10 | ARQ | `openapi.yaml` v0.1: núcleo (menú, acceso/sesión, pedidos, staff pedidos/colas, errores, eventos) con **ejemplos**. **v0.2:** incluye opciones/modificadores, `Accept-Language`, propina en pagos, ajustes de cuenta y llamados al mozo | WP-ARQ-01 | Redocly limpio; Prism lo sirve; revisado con Web y Android |
 | WP-ARQ-11 | ARQ | ADRs finales (0001–0009) aceptados; plantilla ADR | WP-ARQ-01 | Estado `aceptada` |
 | WP-ARQ-12 | ARQ | Colecciones Bruno del caso feliz y errores | WP-ARQ-10 | En `docs/04-api/bruno/` |
 | WP-UX-10 | UX | Identidad (Q-06), `design-tokens.json`, contraste AA verificado | WP-ARQ-01 | Tokens publicados |
@@ -51,7 +51,7 @@ gantt
 | WP | Agente | Descripción | Dep. | DoD |
 |---|---|---|---|---|
 | WP-OPS-20 | OPS | Monorepo, `.gitattributes`, `.gitignore`, compose (PostgreSQL, Mailpit, Prism), `.env.example`, plantillas PR/issue | — | `docker compose up` OK en Windows limpio |
-| WP-OPS-21 | OPS | CI: backend, web, android, docs (Spectral, markdownlint), gitleaks | WP-OPS-20 | Workflows verdes |
+| WP-OPS-21 | OPS | CI: backend, web, android, docs (Redocly, markdownlint), gitleaks | WP-OPS-20 | Workflows verdes |
 | WP-BE-20 | BE | Esqueleto Spring Boot + Kotlin, perfiles, Actuator, `/version`, manejador Problem+JSON, `Clock`, Testcontainers, ArchUnit base | WP-OPS-20 | `./gradlew check` verde |
 | WP-BE-21 | BE | Flyway V1: restaurante, settings, permisos, roles, estaciones; semilla obligatoria | WP-BE-20 | Migra desde cero |
 | WP-WEB-20 | WEB | Esqueleto Vite+React+TS, router, providers, tokens CSS, i18n (es-AR + en, textos por clave), cliente API generado, MSW, ESLint boundaries, Vitest | WP-ARQ-10, WP-UX-10 | `pnpm check` verde; pantalla "hola" contra Prism |

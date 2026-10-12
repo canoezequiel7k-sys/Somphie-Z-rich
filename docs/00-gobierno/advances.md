@@ -153,6 +153,10 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | H-19 | **`limitMinor` de `ADJUSTMENT_LIMIT_EXCEEDED`:** `catalogo-errores.md` lo lista como extra pero no define qué representa. En el ejemplo se asumió "15 % de los cargos brutos" (ver Paso 4) | A decidir (dueño) |
 | H-20 | **Acciones de auditoría propuestas 🟡:** `RN-AUD-01` exige auditar revocación de participantes, catálogo, usuarios/roles/estaciones, QR, ajustes y logins fallidos, pero ningún documento nombraba esos códigos. Propuestos en `catalogo-auditoria.md` §3 (`PARTICIPANT_REVOKED`, `CATALOG_CHANGED`, `USER_CHANGED`, `TABLE_QR_REGENERATED`, `SETTINGS_CHANGED`, `LOGIN_FAILED_REPEATED`). Tampoco se audita hoy: llamados al mozo ni rotación del `joinCode` | A confirmar (dueño) |
 | H-21 | **Pedido tomado por el personal (RN-ORD-18):** nace `ACCEPTED` y se audita con `ORDER_CREATED` (`after.status = ACCEPTED`); no se emite `ORDER_ACCEPTED` aparte. Es una interpretación mía: ningún documento lo dice | A confirmar (dueño) |
+| H-22 | **Deshacer tras el atajo `QUEUED → READY`:** al deshacer vuelve a `IN_PREPARATION` con `startedAt` vacío; `estados-y-transiciones.md` §3 no dice qué hacer | A confirmar (dueño) |
+| H-24 | **Prioridad de errores en un ajuste:** si fallan a la vez el saldo y el límite del Mozo, el catálogo no dice cuál se informa. Se eligió: inválido → saldo → límite (`AdjustmentRules.validate`) | A confirmar (dueño) |
+| H-25 | **`ADJUSTMENT_ITEM_INVALID` (cortesía):** exige saber si el ítem está cancelado o ya tiene cortesía; el dominio todavía no tiene el snapshot completo de `OrderItem` con id y precio | Tanda del agregado `Order` |
+| H-23 | **Prioridad de errores en un pago:** si fallan a la vez el monto principal y la propina (o hay pago vacío), el catálogo no dice cuál se informa. Se eligió: vacío (`TIP_INVALID`) → monto → propina | A confirmar (dueño) |
 
 ---
 ## 4. Plan paso a paso
@@ -304,6 +308,28 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Estado de esta tanda:** ✅ (compila y pasa sobre JDK 25 + Kotlin 2.4.0 + Gradle 9.8.1). El **Paso 9 sigue 🔄**: WP-BE-10 todavía no está completo.
 - **Falta de WP-BE-10 (próximas tandas):** `Money` y cargos; agregado `Order` (aceptar, rechazar, cancelar, expirar, exclusiones, usa la derivación); `TableSession` y su cierre; `Payment`/`Bill` (saldo, propina, ajustes); `JoinCode`. Después: tokens de diseño (WP-UX-10, Q-21).
 - **Commits sugeridos:** `chore(backend): add gradle build with kotlin and junit` y `feat(backend): add item transitions and order status derivation (WP-BE-10)`.
+
+### 2026-10-12 — Paso 9 🔄 — WP-BE-10, tanda 2: dinero y cuenta (a la espera de `gradlew test`)
+- **Qué:** `Money` (centavos, no negativo, aritmética exacta, porcentaje en puntos básicos con redondeo half-up, RN-ADJ-03); `Balance` (saldo con signo); cuenta derivada (`ChargeLine.isBillable`, `BillableCharges`, `BillCalculator` → `BillSummary`: cargos, ajustes, pagado neto, propinas, saldo); y `PaymentRules` (RN-BIL-03, RN-TIP-01/03/04, D-146, D-158) con los datos extra del catálogo (`minMinor`, `balanceMinor`, `maxTipMinor`). Seis códigos nuevos en `ErrorCode`, todos del catálogo.
+- **Por qué:** "una sola definición" de cada suma (regla de oro 3). La cuenta se deriva y no se guarda, así no puede desincronizarse. Los topes de propina se comparan con enteros exactos (sin elegir un redondeo que ningún documento define).
+- **Archivos (en `backend/src`):** `main/.../shared/domain/Money.kt`, `shared/domain/DomainException.kt` (ampliado), `billing/domain/BillingStatuses.kt`, `billing/domain/Bill.kt`, `billing/domain/PaymentRules.kt`; pruebas `test/.../shared/domain/MoneyTest.kt`, `billing/domain/BillCalculatorTest.kt`, `billing/domain/PaymentRulesTest.kt` (unas 90 nuevas; total esperado ~157).
+- **Pruebas destacadas:** el redondeo se compara contra `BigDecimal` (30.000 casos); la validación del monto contra una regla independiente (unas 68.000 combinaciones); el ejemplo numérico del contrato (`1.450.000 − 145.000 − 500.000 = 805.000`).
+- **Hallazgo nuevo:** **H-23** (prioridad de errores en un pago). `billing` usa los enums de `orders`: la dirección de dependencia se confirma con ArchUnit en el WP-BE-20.
+- **Qué estudiar:** *value class* y por qué dinero = `Long` de centavos (no `Double`); *puntos básicos* y redondeo half-up con enteros; *prueba contra un oráculo* (comparar con una regla independiente); por qué la cuenta se deriva en vez de guardarse.
+- **Estado:** 🔄 hasta que el dueño corra `.\gradlew.bat test`.
+- **Commit sugerido:** `feat(backend): add money, bill calculation and payment rules (WP-BE-10)`
+
+### 2026-10-12 — Paso 9 🔄 — WP-BE-10, tanda 3: ajustes, reembolsos y anulaciones (a la espera de `gradlew test`)
+- **Revisión de la tanda 2:** se contrastó contra su descripción y contra RN-BIL/RN-TIP/catálogo de errores: está completa. Lo que faltaba del plan original (ítem 5: "Payment, Bill y ajustes") no estaba en ninguna tanda; se hace acá.
+- **Qué:** `AdjustmentRules` (importe del descuento %, monto, manual y cortesía; `ADJUSTMENT_INVALID`, `ADJUSTMENT_EXCEEDS_BALANCE`, límite ACUMULADO del Mozo `ADJUSTMENT_LIMIT_EXCEEDED`, tope absoluto opcional); `RefundRules` (`REFUND_EXCEEDS_PAID` y los efectos monetarios del cierre forzado: reembolso automático si saldo < 0, "no cobrado" si saldo > 0, D-159); `VoidRules` (anular pago y anular ajuste con ventana de 10 min y "solo los propios"). `ErrorCode` suma 7 códigos, todos del catálogo: `ADJUSTMENT_INVALID`, `ADJUSTMENT_EXCEEDS_BALANCE`, `ADJUSTMENT_LIMIT_EXCEEDED`, `ADJUSTMENT_NOT_VOIDABLE`, `PAYMENT_NOT_VOIDABLE`, `REFUND_EXCEEDS_PAID`, `FORBIDDEN`.
+- **Por qué:** son las reglas de dinero que quedaban por cubrir antes de armar `TableSession` (cuyo cierre usa saldo, reembolso automático y "no cobrado"). Siguen siendo funciones puras: el contexto (saldo, sumas, quién es el Mozo) lo arma la capa de aplicación bajo lock.
+- **Archivos (en `backend/src`):** `main/.../billing/domain/AdjustmentRules.kt`, `RefundAndVoidRules.kt`, `shared/domain/DomainException.kt` (ampliado); pruebas `test/.../billing/domain/AdjustmentRulesTest.kt` y `RefundAndVoidRulesTest.kt` (unas 30 pruebas nuevas, incluida una contra un "oráculo" de 201 montos).
+- **Hallazgos nuevos:** **H-24** (prioridad de errores en un ajuste: se eligió inválido → saldo → límite; el catálogo no la fija). **H-25** (`ADJUSTMENT_ITEM_INVALID` de la cortesía, RN-ADJ-04: falta el snapshot completo de `OrderItem` con su id; queda para la tanda del agregado `Order`, que lo trae). Sobre **H-19**: `limitMinor` se informa como el tope efectivo en centavos (15 % de los cargos brutos, o el tope absoluto si es menor); sigue pendiente que el dueño lo confirme.
+- **Documentación corregida de paso:** `build.gradle.kts` citaba D-149 para "un solo módulo" (es ADR-0002); `entorno-local.md` y `roadmap-fases.md` ya no nombran Spectral (D-148); `catalogo-auditoria.md` dice `audit_event` como en `modelo-datos.md`.
+- **Qué estudiar:** *límite acumulado vs. por operación*; *`sealed`/datos incoherentes como error de validación* (`AdjustmentRequest`); *entero exacto vs. redondeo* en un tope; por qué el "no cobrado" es un valor derivado y no se guarda.
+- **Falta de WP-BE-10:** agregado `Order` (aceptar, rechazar, cancelar, expirar, exclusiones; trae H-25), `TableSession` y su cierre (`SESSION_BALANCE_PENDING`, etc.), `JoinCode`. Después: tokens de diseño (WP-UX-10, Q-21; el SVG de marca es un PNG incrustado, ver Q-21).
+- **Estado:** 🔄 hasta que el dueño corra `.\gradlew.bat test` (tandas 2 y 3 juntas; total esperado ≈ 187 pruebas).
+- **Commit sugerido:** `feat(backend): add adjustment, refund and void rules (WP-BE-10)`
 
 ### Historial previo (resumen, para contexto)
 - **v0.1:** plan maestro convertido en 52 documentos (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes).

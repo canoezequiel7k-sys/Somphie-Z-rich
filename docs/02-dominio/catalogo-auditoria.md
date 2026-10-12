@@ -1,6 +1,6 @@
 # Catálogo de acciones de auditoría
 
-> Vocabulario **cerrado** de `audit_log.action` (D-151). Los códigos de la sección 2 salen **textualmente** de `estados-y-transiciones.md` y `reglas-negocio.md`. Los de la sección 3 los exige `RN-AUD-01` pero ningún documento los nombraba: son **propuestos (🟡)** hasta que el dueño los confirme.
+> Vocabulario **cerrado** de `audit_event.action` (D-151). Los códigos de la sección 2 salen **textualmente** de `estados-y-transiciones.md` y `reglas-negocio.md`. Los de la sección 3 los exige `RN-AUD-01` pero ningún documento los nombraba: son **propuestos (🟡)** hasta que el dueño los confirme.
 > Para agregar una acción: primero se agrega aquí (con su origen), después se usa en el código. Una acción que no está en este catálogo no se puede escribir.
 
 ## 1. Reglas generales (vienen de RN-AUD)
