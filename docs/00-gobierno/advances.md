@@ -527,6 +527,15 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Archivos:** `backend/src/main/resources/db/migration/V4__floor.sql`, `backend/src/main/kotlin/com/somphie/floor/`, `backend/src/test/kotlin/com/somphie/floor/` y esta bitácora.
 - **Qué estudiar:** Índices únicos parciales en PostgreSQL para restricciones condicionales (`WHERE status = 'OPEN'`) y gestión de sesiones de mesa basadas en tokens y códigos de unión de 6 caracteres.
 
+### 2026-10-12 — WP-BE-41 ✅
+- **Qué hicimos:** Se implementó el mecanismo centralizado de idempotencia en el backend (`shared/idempotency`):
+  1. Migración Flyway `V5__idempotency.sql` creando la tabla `idempotency_record` para registrar claves de idempotencia por ámbito y operación.
+  2. `IdempotencyService` que valida el header obligatorio `Idempotency-Key`, calcula el hash SHA-256 del cuerpo de la solicitud, previene ejecuciones concurrentes (`409 IDEMPOTENCY_IN_PROGRESS`), detecta reutilizaciones de clave con distinto cuerpo (`422 IDEMPOTENCY_KEY_REUSED`), y cachea/reproduce respuestas exitosas con la cabecera `Idempotent-Replayed: true`.
+  3. Adición de los códigos de error de idempotencia en `DomainException` y `ApiExceptionHandler`.
+- **Por qué:** Cumple con WP-BE-41 de la Fase 4 del roadmap y ADR-0005, garantizando protección robusta contra reintentos duplicados en operaciones críticas.
+- **Archivos:** `backend/src/main/resources/db/migration/V5__idempotency.sql`, `backend/src/main/kotlin/com/somphie/shared/idempotency/IdempotencyService.kt`, `backend/src/main/kotlin/com/somphie/shared/domain/DomainException.kt`, `backend/src/main/kotlin/com/somphie/shared/api/ApiExceptionHandler.kt` y esta bitácora.
+- **Qué estudiar:** Idempotencia basada en base de datos con control de estado `IN_PROGRESS` / `COMPLETED`, hashing de peticiones (`SHA-256`) y manejo de cabeceras de retransmisión (`Idempotent-Replayed`).
+
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)
 

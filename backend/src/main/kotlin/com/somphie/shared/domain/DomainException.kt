@@ -58,6 +58,11 @@ enum class ErrorCode {
     RESOURCE_NOT_FOUND,
     PRODUCT_NOT_FOUND,
     CATEGORY_NOT_FOUND,
+
+    // --- Idempotencia (catálogo §1) ---
+    IDEMPOTENCY_KEY_REQUIRED,
+    IDEMPOTENCY_KEY_REUSED,
+    IDEMPOTENCY_IN_PROGRESS,
 }
 
 /**

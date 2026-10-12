@@ -84,10 +84,13 @@ class ApiExceptionHandler {
         ErrorCode.CATEGORY_NOT_FOUND,
         -> HttpStatus.NOT_FOUND
         ErrorCode.PRODUCT_NOT_FOUND,
+        ErrorCode.IDEMPOTENCY_KEY_REUSED,
         -> HttpStatus.UNPROCESSABLE_CONTENT
         ErrorCode.FORBIDDEN,
         ErrorCode.ADJUSTMENT_LIMIT_EXCEEDED,
         -> HttpStatus.FORBIDDEN
+        ErrorCode.IDEMPOTENCY_KEY_REQUIRED,
+        -> HttpStatus.BAD_REQUEST
         ErrorCode.ORDER_ALREADY_DECIDED,
         ErrorCode.ORDER_NOT_CANCELLABLE,
         ErrorCode.ORDER_EXPIRED,
@@ -108,6 +111,7 @@ class ApiExceptionHandler {
         ErrorCode.ADJUSTMENT_ITEM_INVALID,
         ErrorCode.PAYMENT_NOT_VOIDABLE,
         ErrorCode.REFUND_EXCEEDS_PAID,
+        ErrorCode.IDEMPOTENCY_IN_PROGRESS,
         -> HttpStatus.CONFLICT
     }
 
