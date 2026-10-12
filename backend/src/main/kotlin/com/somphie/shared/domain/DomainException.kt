@@ -53,6 +53,11 @@ enum class ErrorCode {
 
     // --- Genérico (catálogo §1): falta de permiso o de alcance sobre el recurso ---
     FORBIDDEN,
+
+    // --- Recursos y Catálogo (catálogo §1, §4) ---
+    RESOURCE_NOT_FOUND,
+    PRODUCT_NOT_FOUND,
+    CATEGORY_NOT_FOUND,
 }
 
 /**

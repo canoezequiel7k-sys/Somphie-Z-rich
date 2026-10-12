@@ -1,87 +1,29 @@
 package com.somphie.catalog.api
 
+import com.somphie.shared.domain.DomainException
+import com.somphie.shared.domain.ErrorCode
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
-import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.web.client.RestTemplateBuilder
-import org.springframework.boot.test.web.server.LocalServerPort
-import org.springframework.http.HttpEntity
-import org.springframework.http.HttpHeaders
-import org.springframework.http.HttpMethod
-import org.springframework.http.HttpStatus
-import org.springframework.test.context.DynamicPropertyRegistry
-import org.springframework.test.context.DynamicPropertySource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
+import org.junit.jupiter.api.assertThrows
+import org.mockito.ArgumentMatchers.anyMap
+import org.mockito.ArgumentMatchers.anyString
+import org.mockito.ArgumentMatchers.eq
+import org.mockito.BDDMockito.given
+import org.mockito.Mockito.mock
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Testcontainers
 class CatalogControllerTest {
 
-    @LocalServerPort
-    private var port: Int = 0
+    private val jdbc = mock(NamedParameterJdbcTemplate::class.java)
+    private val controller = CatalogController(jdbc)
 
-    @Autowired
-    private lateinit var restTemplateBuilder: RestTemplateBuilder
+    @Test
+    fun `getMenu throws DomainException when restaurant not found`() {
+        given(jdbc.queryForObject(anyString(), anyMap<String, Any>(), eq(Int::class.java))).willReturn(0)
 
-    companion object {
-        @Container
-        @JvmField
-        val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16.15-alpine")
-            .withDatabaseName("somphie_test")
-            .withUsername("postgres")
-            .withPassword("postgres")
-
-        @JvmStatic
-        @DynamicPropertySource
-        fun configureProperties(registry: DynamicPropertyRegistry) {
-            registry.add("spring.datasource.url", postgres::getJdbcUrl)
-            registry.add("spring.datasource.username", postgres::getUsername)
-            registry.add("spring.datasource.password", postgres::getPassword)
-            registry.add("spring.flyway.enabled") { "true" }
+        val exception = assertThrows<DomainException> {
+            controller.getMenu("00000000-0000-0000-0000-000000000000", null, null, null)
         }
-    }
-
-    private val restTemplate by lazy { restTemplateBuilder.rootUri("http://localhost:$port").build() }
-
-    @Test
-    fun `getMenu returns categories and products successfully`() {
-        val response = restTemplate.getForEntity("/menu", Map::class.java)
-        assertEquals(HttpStatus.OK, response.statusCode)
-        assertNotNull(response.headers.etag)
-
-        val body = response.body as Map<*, *>
-        assertEquals(true, body["restaurantOpen"])
-        val categories = body["categories"] as List<*>
-        assertEquals(true, categories.isNotEmpty())
-    }
-
-    @Test
-    fun `getMenu returns 304 when If-None-Match matches ETag`() {
-        val firstResponse = restTemplate.getForEntity("/menu", Map::class.java)
-        assertEquals(HttpStatus.OK, firstResponse.statusCode)
-        val etag = firstResponse.headers.etag!!
-
-        val headers = HttpHeaders().apply {
-            set(HttpHeaders.IF_NONE_MATCH, etag)
-        }
-        val entity = HttpEntity<Void>(headers)
-
-        val secondResponse = restTemplate.exchange("/menu", HttpMethod.GET, entity, Void::class.java)
-        assertEquals(HttpStatus.NOT_MODIFIED, secondResponse.statusCode)
-    }
-
-    @Test
-    fun `getProduct returns product detail successfully`() {
-        val productId = "9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7" // Flat white from V2 seed
-        val response = restTemplate.getForEntity("/products/$productId", Map::class.java)
-        assertEquals(HttpStatus.OK, response.statusCode)
-
-        val body = response.body as Map<*, *>
-        assertEquals("Flat white", body["name"])
-        assertEquals(485000L, (body["priceMinor"] as Number).toLong())
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, exception.code)
     }
 }

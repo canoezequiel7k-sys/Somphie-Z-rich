@@ -19,7 +19,7 @@ class CatalogControllerUnitTest {
 
     @Test
     fun `getMenu throws DomainException when restaurant not found`() {
-        given(jdbc.queryForObject(anyString(), anyMap(), eq(Int::class.java))).willReturn(0)
+        given(jdbc.queryForObject(anyString(), anyMap<String, Any>(), eq(Int::class.java))).willReturn(0)
 
         val exception = assertThrows<DomainException> {
             controller.getMenu("00000000-0000-0000-0000-000000000000", null, null, null)

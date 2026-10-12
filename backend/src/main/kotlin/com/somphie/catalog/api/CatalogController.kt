@@ -33,7 +33,6 @@ class CatalogController(
     ): ResponseEntity<MenuResponse> {
         val targetRestaurantId = restaurantId ?: defaultRestaurantId
 
-        // Validate restaurant exists
         val restaurantExists = jdbc.queryForObject(
             "SELECT COUNT(1) FROM restaurant WHERE id = CAST(:id AS UUID)",
             mapOf("id" to targetRestaurantId),
@@ -41,12 +40,11 @@ class CatalogController(
         ) ?: 0
 
         if (restaurantExists == 0) {
-            throw DomainException(ErrorCode.NOT_FOUND, "Restaurant not found")
+            throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Restaurant not found")
         }
 
         val effectiveLocale = lang ?: acceptLanguage?.split(",")?.firstOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: "es-AR"
 
-        // Get currency and open status
         val currency = jdbc.queryForObject(
             "SELECT currency FROM restaurant WHERE id = CAST(:id AS UUID)",
             mapOf("id" to targetRestaurantId),
@@ -54,7 +52,7 @@ class CatalogController(
         ) ?: "ARS"
 
         val catalogVersion = 1L
-        val etag = W/"$catalogVersion-$effectiveLocale"
+        val etag = "W/\"$catalogVersion-$effectiveLocale\""
 
         if (ifNoneMatch != null && ifNoneMatch.replace("W/", "") == etag.replace("W/", "")) {
             return ResponseEntity.status(HttpStatus.NOT_MODIFIED)
@@ -63,7 +61,6 @@ class CatalogController(
                 .build()
         }
 
-        // Fetch categories and products
         val categories = fetchCategories(targetRestaurantId)
 
         val response = MenuResponse(
@@ -89,7 +86,7 @@ class CatalogController(
         val uuid = try {
             UUID.fromString(productId)
         } catch (e: Exception) {
-            throw DomainException(ErrorCode.NOT_FOUND, "Product not found")
+            throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Product not found")
         }
 
         val sql = """
@@ -125,16 +122,16 @@ class CatalogController(
             )
         }
 
-        val product = products.firstOrNull() ?: throw DomainException(ErrorCode.NOT_FOUND, "Product not found")
+        val product = products.firstOrNull() ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Product not found")
         return ResponseEntity.ok(product)
     }
 
     private fun fetchCategories(restaurantId: String): List<CategoryDto> {
         val catSql = """
-            SELECT id, name, sort_order
-            FROM category
-            WHERE restaurant_id = CAST(:restaurantId AS UUID)
-            ORDER BY sort_order ASC
+            SELECT c.id, c.name, c.sort_order
+            FROM category c
+            WHERE c.restaurant_id = CAST(:restaurantId AS UUID)
+            ORDER BY c.sort_order ASC
         """
 
         return jdbc.query(catSql, mapOf("restaurantId" to restaurantId)) { rs, _ ->

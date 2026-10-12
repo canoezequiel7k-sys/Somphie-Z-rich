@@ -80,7 +80,11 @@ class ApiExceptionHandler {
         -> HttpStatus.UNPROCESSABLE_CONTENT
         ErrorCode.ITEM_NOT_FOUND,
         ErrorCode.PARTICIPANT_NOT_FOUND,
+        ErrorCode.RESOURCE_NOT_FOUND,
+        ErrorCode.CATEGORY_NOT_FOUND,
         -> HttpStatus.NOT_FOUND
+        ErrorCode.PRODUCT_NOT_FOUND,
+        -> HttpStatus.UNPROCESSABLE_CONTENT
         ErrorCode.FORBIDDEN,
         ErrorCode.ADJUSTMENT_LIMIT_EXCEEDED,
         -> HttpStatus.FORBIDDEN
