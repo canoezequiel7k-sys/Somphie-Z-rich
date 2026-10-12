@@ -42,7 +42,7 @@ gantt
 | WP-ARQ-11 | ARQ | ADRs finales (0001–0009) aceptados; plantilla ADR | WP-ARQ-01 | Estado `aceptada` |
 | WP-ARQ-12 | ARQ | Colecciones Bruno del caso feliz y errores | WP-ARQ-10 | En `docs/04-api/bruno/` |
 | WP-UX-10 | UX | Identidad (Q-06), `design-tokens.json`, contraste AA verificado | WP-ARQ-01 | Tokens publicados |
-| WP-UX-11 | UX | Wireframes baja fidelidad de todas las pantallas + plantillas de estados | WP-UX-10 | Mapa de pantallas cubierto |
+| WP-UX-11 | UX | Wireframes de baja fidelidad de todas las pantallas/superficies de `docs/05-diseno/mapa-pantallas.md`, matriz de cobertura y plantillas de estados aplicables | WP-UX-10 | Cada pantalla vigente aparece en la matriz y tiene wireframe; estados de carga, vacío, error y sin conexión cubiertos según corresponda; sin implementar UI ni inventar reglas |
 | WP-BE-10 | BE | **Dominio puro** en Kotlin: `Order/OrderItem`, `recalculateStatus`, `TableSession`, `Payment`/`Bill`, VO (`Money`, `JoinCode`) con pruebas (incluye propiedades) | `estados-y-transiciones.md` | Dominio ≥ 90 % cubierto; tablas de transición verificadas |
 | WP-QA-10 | QA | Plan de pruebas, escenarios Gherkin de CU núcleo, generador de matriz de transiciones inválidas | Docs de dominio | `06-pruebas` ampliado |
 

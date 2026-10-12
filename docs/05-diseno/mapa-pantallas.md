@@ -1,6 +1,7 @@
 # Mapa de pantallas
 
-Cada pantalla lista: casos de uso, **datos** que consume (endpoints), **estados** a diseñar y notas. Todas deben cubrir: cargando · vacío · error · sin conexión (salvo que se indique).
+Cada pantalla lista: casos de uso, **datos** que consume (endpoints), **estados** a diseñar y notas. Todas deben cubrir: cargando · vacío · error · sin conexión (salvo que se indique). 
+Ver wireframes de baja fidelidad y matriz de cobertura en [wireframes.md](wireframes.md) (WP-UX-11).
 
 ## 1. Web cliente (`SC-C-*`)
 

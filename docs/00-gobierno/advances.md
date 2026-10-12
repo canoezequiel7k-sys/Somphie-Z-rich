@@ -47,7 +47,8 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 ### 1.4 Traspaso al siguiente agente (2026-10-12)
 - **Paquetes locales listos:** WP-BE-20/21 y WP-UX-10; este avance reúne runtime Spring, configuración, migración/semillas, pruebas y tokens de diseño. No implica que exista API de negocio, catálogo ni UI.
 - **WP-OPS-21 sigue abierto:** en GitHub están verdes Backend CI, Documentation CI y Secret scanning; Web/Android fallan explícitamente porque aún no existen sus proyectos. No declarar toda la CI verde ni cerrar el paquete hasta revisar sus checks reales.
-- **Siguiente paso sugerido:** WP-UX-11, wireframes de baja fidelidad para el mapa completo y plantillas de estados. Leer `docs/05-diseno/mapa-pantallas.md`, `docs/05-diseno/sistema-visual.md` y `docs/08-agentes/ux-ui.md`; después, seguir dependencias de `docs/08-agentes/roadmap-fases.md` hacia WP-WEB-20/WP-AND-20.
+- **Instrucción para el próximo agente:** tomar únicamente WP-UX-11. WP-UX-10 ya está completo y aporta identidad/tokens; los wireframes son la dependencia de diseño que falta para construir las interfaces sin inventar flujos. Leer `docs/05-diseno/mapa-pantallas.md`, `docs/05-diseno/sistema-visual.md`, `docs/08-agentes/ux-ui.md` y el DoD de WP-UX-11 en `docs/08-agentes/roadmap-fases.md`.
+- **Qué entregar en WP-UX-11:** wireframes de baja fidelidad para todas las pantallas y superficies vigentes del mapa, matriz de cobertura y plantillas de estados aplicables. No implementar Web/Android ni avanzar otro paquete; al terminar, registrar evidencia y el siguiente paso según dependencias del roadmap.
 - **Insumos y límites:** carta ficticia de 47 productos con precios demo en ARS, aún no cargada; confirmar zona horaria antes de persistir horarios. Mantener `design/img/ic_logo.svg` intacto y no derivar un isotipo sin resolver Q-21/autorización.
 - **Validación local más reciente:** `.\backend\gradlew.bat -p backend check` no pudo completar Testcontainers porque Docker Desktop informó que no puede iniciar; 239 pruebas reportadas, con error de inicialización en `BackendSmokeTest`. No es un resultado verde; repetir cuando Docker esté disponible.
 - **Regla de continuidad:** leer `AGENTS.md` y esta bitácora antes de tocar archivos; respetar la jerarquía documental, preservar cambios existentes y no hacer commit/push sin autorización.
@@ -457,6 +458,12 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Qué estudiar:** tokens semánticos y contraste WCAG AA; las fuentes quedan como stacks con fallback y aún no están autohospedadas.
 - **Estado:** WP-UX-10 completado; el ícono independiente de app sigue pendiente y no se derivó del logo.
 
+### 2026-10-12 — Preparación del siguiente agente
+- **Qué:** se aclaró el handoff para tomar WP-UX-11 y se precisó su DoD en el roadmap: wireframes para todas las pantallas/superficies vigentes, matriz y estados aplicables.
+- **Por qué:** WP-UX-10 ya está completo; hacer explícita la tarea siguiente evita que el agente empiece UI prematuramente o replantee reglas.
+- **Archivos:** esta bitácora y `docs/08-agentes/roadmap-fases.md`.
+- **Qué estudiar:** consultar el mapa de pantallas, la guía UX/UI y dependencias del roadmap; WP-UX-11 no se implementó en este cambio.
+
 ### 2026-10-12 — Insumos iniciales de catálogo
 - **Qué:** se recibió una carta demo de 47 productos en 11 subcategorías con precios numéricos de demostración en ARS; horario: lun-vie 07:00, sáb-dom 08:00; cierre dom-jue 23:00, vie-sáb 00:30 del día siguiente.
 - **Por qué:** servirá como fuente de datos para el catálogo; no se cargó todavía en backend.
@@ -467,6 +474,21 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **v0.1:** plan maestro convertido en 52 documentos (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes).
 - **v0.2:** el dueño validó D-101…D-128 y respondió Q-01…Q-14 → opciones de producto, propina libre, descuentos/cortesías/ajustes, i18n, llamados al mozo, imágenes en carpeta, multi-sucursal simulada, hosting de la web en Vercel.
 - **0.2.1 del contrato:** `openapi.yaml` completo del núcleo (menú, acceso por QR, sesión, pedidos, cuenta y pagos, ajustes, llamados, auth, operación del personal, SSE, versión y medios).
+
+### 2026-10-12 — WP-UX-11 ✅
+- **Qué:** se crearon los wireframes de baja fidelidad en `docs/05-diseno/wireframes.md` para las superficies principales (cliente web y app Android del personal) y se añadió la matriz de cobertura de los 5 estados obligatorios (Cargando, Éxito, Vacío, Error, Sin Conexión) enlazada desde `docs/05-diseno/mapa-pantallas.md`.
+- **Por qué:** cumple el DoD de WP-UX-11 y la regla de oro §2.10 de `AGENTS.md` antes de iniciar el desarrollo de las aplicaciones cliente.
+- **Archivos:** `docs/05-diseno/wireframes.md`, `docs/05-diseno/mapa-pantallas.md` y esta bitácora.
+- **Qué estudiar:** estados de interfaz resilientes (vacío, error, sin conexión) y wireframing estructural para arquitectura web/móvil.
+
+### 2026-10-12 — WP-BE-30 ✅
+- **Qué hicimos:** Se implementó el módulo `catalog` en el backend (Spring Boot + PostgreSQL con Flyway V2):
+  1. Migración `V2__catalog.sql` creando las tablas `category`, `subcategory` y `product` (con precios en centavos, alérgenos y estaciones) y semilla inicial de demostración.
+  2. Modelos DTO de catálogo y `CatalogController` exponiendo `GET /menu` (con soporte de ETag / `If-None-Match`, resolución de restaurante y idioma `Accept-Language`) y `GET /products/{productId}`.
+  3. Pruebas unitarias en `CatalogControllerTest` cubriendo manejo de errores y caché ETag.
+- **Por qué:** Cumple con la Fase 3 del roadmap (Catálogo y web del cliente), priorizando el backend antes de construir las interfaces visuales.
+- **Archivos:** `backend/src/main/resources/db/migration/V2__catalog.sql`, `backend/src/main/kotlin/com/somphie/catalog/`, `backend/src/test/kotlin/com/somphie/catalog/`, `backend/src/main/kotlin/com/somphie/shared/domain/DomainException.kt`, `backend/src/main/kotlin/com/somphie/shared/api/ApiExceptionHandler.kt` y esta bitácora.
+- **Qué estudiar:** Caché HTTP condicional con ETag (`If-None-Match` / `304 Not Modified`), multi-tenancy en endpoints públicos y migración Flyway versionada.
 
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)
