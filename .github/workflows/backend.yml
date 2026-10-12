@@ -1,0 +1,39 @@
+name: Backend CI # Identifica las validaciones automatizadas del dominio Kotlin.
+
+on: # Ejecuta el build ante cambios de backend o de su contrato asociado.
+  pull_request: # Valida cada propuesta antes de integrarla.
+    branches: [main] # Limita las PR al flujo de integración principal definido por el proyecto.
+    paths: # Evita ejecutar Gradle cuando el cambio no puede afectar al backend.
+      - "backend/**" # Incluye código, pruebas y wrapper del módulo backend.
+      - "docs/04-api/**" # Incluye cambios de contrato relevantes para backend.
+      - ".github/workflows/backend.yml" # Valida cambios en este mismo workflow.
+  push: # Revalida cambios integrados en la rama principal.
+    branches: [main] # Conserva main como rama de integración del repositorio.
+    paths: # Reutiliza los mismos filtros de impacto que para pull requests.
+      - "backend/**" # Incluye cambios del módulo backend.
+      - "docs/04-api/**" # Incluye cambios del contrato API.
+      - ".github/workflows/backend.yml" # Incluye modificaciones del pipeline.
+  workflow_dispatch: # Permite repetir el build manualmente desde GitHub.
+
+permissions: # Reduce los permisos del token al acceso de lectura requerido.
+  contents: read # Permite descargar el código sin habilitar escrituras al repositorio.
+
+jobs: # Agrupa las comprobaciones que deben pasar para backend.
+  check: # Ejecuta las tareas Gradle configuradas en el proyecto.
+    name: Gradle check # Muestra la validación y su herramienta en la interfaz de GitHub.
+    runs-on: ubuntu-24.04 # Fija una imagen Linux compatible con Gradle y JDK 25.
+    timeout-minutes: 30 # Evita dejar builds bloqueados consumiendo minutos indefinidamente.
+    steps: # Define la preparación y ejecución reproducible del build.
+      - name: Descargar el repositorio # Obtiene fuentes y wrapper sin persistir credenciales.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4; SHA fijo para evitar cambios silenciosos de la acción.
+        with: # Ajusta la descarga para el build sin permisos de escritura.
+          persist-credentials: false # No deja el token de Git configurado en el workspace.
+      - name: Preparar JDK 25 # Usa la versión de Java declarada por el toolchain de backend.
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4; SHA fijo para reproducibilidad.
+        with: # Declara distribución, versión y caché del entorno Java.
+          distribution: temurin # Usa una distribución OpenJDK mantenida y disponible en Actions.
+          java-version: "25" # Coincide con jvmToolchain(25) en backend/build.gradle.kts.
+      - name: Configurar Gradle y su caché # Reutiliza dependencias entre ejecuciones compatibles.
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3; SHA fijo de la acción.
+      - name: Ejecutar las validaciones del backend # Incluye tests y cobertura mediante la tarea check existente.
+        run: bash ./gradlew -p backend check # Bash evita depender del bit ejecutable ausente en el wrapper versionado.

@@ -1,0 +1,51 @@
+name: Android CI # Prepara las comprobaciones Android para cuando exista el proyecto Gradle.
+
+on: # Reacciona a cambios de Android y a cambios del propio pipeline.
+  pull_request: # Valida propuestas que afectan a la aplicación.
+    branches: [main] # Usa main como rama objetivo de integración.
+    paths: # Evita trabajos Android en cambios de otros módulos.
+      - "android/**" # Incluye fuentes, recursos y configuración Android.
+      - ".github/workflows/android.yml" # Incluye cambios de esta automatización.
+  push: # Repite la validación al integrar en main.
+    branches: [main] # Mantiene main como rama de integración.
+    paths: # Usa los mismos filtros del evento de PR.
+      - "android/**" # Incluye cambios del módulo Android.
+      - ".github/workflows/android.yml" # Incluye cambios de este workflow.
+  workflow_dispatch: # Permite consultar el estado manualmente.
+
+permissions: # Limita las capacidades del token del workflow.
+  contents: read # Solo se requiere leer el código.
+
+jobs: # Mantiene un check estable que solo pasa al validar realmente la aplicación.
+  validate: # Ejecuta detección y pruebas en el mismo job para evitar checks requeridos omitidos.
+    name: Android — validación # Este nombre estable sirve como check de rama antes y después de crear la app.
+    runs-on: ubuntu-24.04 # Usa runner Linux para Gradle y Android SDK.
+    timeout-minutes: 30 # Evita builds colgados consumiendo minutos.
+    defaults: # Ejecuta Gradle dentro del módulo Android.
+      run: # Configura el directorio predeterminado de shell.
+        working-directory: android # Mantiene las tareas dentro del módulo previsto.
+    steps: # Falla como pendiente si falta la app o ejecuta sus validaciones reales.
+      - name: Descargar el repositorio # Obtiene fuentes sin guardar credenciales.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4; SHA fijo para evitar cambios silenciosos de la acción.
+        with: # Desactiva el token persistente de Git.
+          persist-credentials: false # El build no necesita permisos de escritura.
+      - name: Detectar proyecto Gradle Android # Impide aprobar este check sin wrapper y configuración.
+        run: | # El job falla con estado explícito si el proyecto todavía no existe.
+          if [[ -f gradlew && ( -f settings.gradle || -f settings.gradle.kts ) ]]; then # Confirma el wrapper y la configuración raíz de Gradle.
+            echo "Proyecto Android detectado; se ejecutarán las validaciones reales." # Distingue la ruta que continúa hacia build, tests y lint.
+          else # No confunde un proyecto ausente con una validación superada.
+            echo "::error title=Validación Android no ejecutada::Faltan android/gradlew y/o android/settings.gradle[.kts]." # Publica el motivo como error visible.
+            printf '%s\n' '## Android: validación no ejecutada' '' 'Faltan `android/gradlew` y/o `settings.gradle[.kts]`; WP-AND-20 debe crear el proyecto antes de activar build, pruebas y lint.' >> "$GITHUB_STEP_SUMMARY" # Deja la condición pendiente en el resumen del job.
+            exit 1 # Hace fallar también el check estable requerido por GitHub.
+          fi # Cierra la detección previa a instalar Android SDK.
+      - name: Preparar JDK 17 # Usa el JDK compatible con las versiones actuales de Android Gradle Plugin.
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4; SHA fijo para reproducibilidad.
+        with: # Declara la distribución Java utilizada por Gradle.
+          distribution: temurin # Usa una distribución OpenJDK mantenida.
+          java-version: "17" # JDK LTS de compatibilidad amplia para Android Gradle Plugin.
+      - name: Instalar Android SDK # Provee sdkmanager y las herramientas del build de Android.
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3; SHA fijo de la acción.
+      - name: Configurar Gradle y su caché # Reutiliza distribuciones y dependencias entre ejecuciones.
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3; SHA fijo de la acción.
+      - name: Compilar, probar y analizar # Ejecuta los comandos Android documentados en entorno-local.md §6.
+        run: bash ./gradlew assembleDebug testDebugUnitTest lint # No presupone permisos de ejecución Unix en el wrapper.

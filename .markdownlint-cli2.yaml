@@ -1,0 +1,15 @@
+config: # Mantiene las reglas estándar salvo las convenciones preexistentes listadas abajo.
+  default: true # Activa las reglas recomendadas para todo el Markdown del repositorio.
+  MD001: false # Los documentos actuales conservan jerarquías de títulos históricas.
+  MD013: false # La documentación prioriza legibilidad y tablas, no un ancho fijo de línea.
+  MD022: false # Se mantienen los espacios existentes alrededor de títulos.
+  MD025: false # Algunos documentos reúnen varias secciones principales en un mismo archivo.
+  MD031: false # Se conserva el espaciado de bloques de código ya usado por la documentación.
+  MD032: false # Se conserva el espaciado de listas de los documentos existentes.
+  MD036: false # Hay énfasis usado como rótulo en documentación heredada.
+  MD038: false # Se conservan los espacios en código inline de las guías actuales.
+  MD040: false # El material heredado incluye bloques de ejemplo sin lenguaje declarado.
+  MD041: false # Plantillas y documentos existentes pueden comenzar con títulos secundarios.
+  MD056: false # Las tablas actuales no siempre tienen celdas con igual cantidad de columnas.
+  MD058: false # Se mantiene el espaciado histórico alrededor de tablas.
+  MD060: false # Las tablas existentes no siguen un único estilo de alineación de pipes.

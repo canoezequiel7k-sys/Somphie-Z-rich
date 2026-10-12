@@ -1,0 +1,56 @@
+name: Web CI # Prepara el chequeo que usará el proyecto web cuando exista.
+
+on: # Reacciona ante cambios web y del contrato consumido por sus clientes.
+  pull_request: # Evalúa cambios propuestos.
+    branches: [main] # Limita la integración al flujo principal del repositorio.
+    paths: # Evita ejecutar trabajo web por cambios ajenos.
+      - "web/**" # Incluye el cliente web y sus dependencias declaradas.
+      - "docs/04-api/**" # Incluye cambios del contrato usado por el cliente.
+      - ".github/workflows/web.yml" # Comprueba cambios en este workflow.
+  push: # Repite las validaciones después de integrar a main.
+    branches: [main] # Usa la rama principal como rama de integración.
+    paths: # Conserva los filtros de impacto de las PR.
+      - "web/**" # Incluye cambios del módulo web.
+      - "docs/04-api/**" # Incluye cambios del contrato API.
+      - ".github/workflows/web.yml" # Incluye modificaciones del pipeline.
+  workflow_dispatch: # Permite pedir el estado del módulo manualmente.
+
+permissions: # Restringe las acciones del workflow a lectura.
+  contents: read # El build no necesita escribir en el repositorio.
+
+jobs: # Mantiene un check estable que solo pasa al validar realmente la aplicación.
+  validate: # Ejecuta detección y pruebas en el mismo job para evitar checks requeridos omitidos.
+    name: Web — validación # Este nombre estable sirve como check de rama antes y después de crear la app.
+    runs-on: ubuntu-24.04 # Usa runner Linux para las herramientas Node.
+    timeout-minutes: 20 # Evita trabajos detenidos indefinidamente.
+    defaults: # Ejecuta las órdenes del módulo desde su propia carpeta.
+      run: # Fija el directorio de trabajo de los pasos de shell.
+        working-directory: web # Evita asumir un workspace raíz no documentado.
+    steps: # Falla como pendiente si falta la app o ejecuta sus validaciones reales.
+      - name: Descargar el repositorio # Obtiene los fuentes sin guardar credenciales.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4; SHA fijo para evitar cambios silenciosos de la acción.
+        with: # Configura una descarga de solo lectura.
+          persist-credentials: false # No conserva token Git tras el checkout.
+      - name: Detectar manifiesto y lockfile # Impide aprobar este check sin un proyecto instalable.
+        run: | # El job falla con estado explícito si el proyecto todavía no existe.
+          if [[ -f package.json && -f pnpm-lock.yaml ]]; then # Confirma manifiesto y lockfile dentro de web/.
+            echo "Proyecto web detectado; se ejecutarán las validaciones reales." # Distingue la ruta que continúa hacia los tests.
+          else # No confunde un proyecto ausente con una validación superada.
+            echo "::error title=Validación web no ejecutada::Faltan web/package.json y/o web/pnpm-lock.yaml." # Publica el motivo como error visible.
+            printf '%s\n' '## Web: validación no ejecutada' '' 'Faltan `web/package.json` y/o `web/pnpm-lock.yaml`; WP-WEB-20 debe añadir el proyecto y sus scripts antes de habilitar las pruebas reales.' >> "$GITHUB_STEP_SUMMARY" # Deja la condición pendiente en el resumen del job.
+            exit 1 # Hace fallar también el check estable requerido por GitHub.
+          fi # Cierra la detección previa a instalar dependencias.
+      - name: Activar pnpm desde el manifiesto # Lee packageManager del manifiesto web sin inventar su versión.
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4; SHA fijo de la acción.
+        with: # Indica el manifiesto fuera de la raíz del repositorio.
+          package_json_file: web/package.json # Permite inferir pnpm desde el proyecto ubicado en web/.
+      - name: Preparar Node.js # Usa el runtime fijado para la futura aplicación.
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4; SHA fijo para reproducibilidad.
+        with: # Configura Node y caché de pnpm usando el lockfile.
+          node-version: "24.21.0" # Fija la versión para evitar cambios de runtime entre ejecuciones.
+          cache: pnpm # Cachea el almacén según el lockfile presente en web/.
+          cache-dependency-path: web/pnpm-lock.yaml # Invalida la caché si cambian las dependencias.
+      - name: Instalar dependencias bloqueadas # Impide actualizar dependencias sin editar el lockfile.
+        run: pnpm install --frozen-lockfile # Reproduce exactamente el grafo versionado.
+      - name: Validar calidad y compilación # Ejecuta los comandos establecidos en nube.md §4.
+        run: pnpm lint && pnpm typecheck && pnpm test && pnpm build # Falla si falta un script o cualquiera de las verificaciones.

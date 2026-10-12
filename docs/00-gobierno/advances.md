@@ -17,17 +17,18 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Documentación v0.2 (opciones de producto, propina, ajustes, i18n, llamados al mozo, imágenes en carpeta, multi-sucursal simulada) | ✅ | secciones "v0.2" dentro de cada doc |
 | Decisiones D-101…D-159 y preguntas Q-01…Q-20 resueltas (Q-21 abierta) | ✅ | `docs/00-gobierno/decisiones.md` |
 | ADRs 0001–0009 (propuestas) | ✅ | `docs/00-gobierno/adr/` |
-| Contrato `openapi.yaml` **0.2.5** (WP-ARQ-10) | ✅ (el lint de Redocly sobre 0.2.5 queda pendiente porque la CLI no está disponible en este entorno) | `docs/04-api/openapi.yaml` |
+| Contrato `openapi.yaml` **0.2.5** (WP-ARQ-10) | ✅ (lint de Redocly ejecutado localmente en WP-OPS-21) | `docs/04-api/openapi.yaml` |
 | Config de lint `redocly.yaml` | ✅ (clave corregida, H-09) | raíz |
 | `CHANGELOG.md` del contrato hasta 0.2.5 | ✅ | `docs/04-api/CHANGELOG.md` |
 | Estructura de carpetas y `AGENTS.md` por carpeta | ✅ | `backend/`, `web/`, `android/` |
 | Entorno local WP-OPS-20: Compose, variables de ejemplo y plantillas PR/issue | ✅ validado desde un clon temporal limpio en Windows | `infra/`, `.github/` |
+| CI WP-OPS-21: backend, docs y escaneo de secretos; estados explícitos para Web/Android sin proyectos | 🔄 configuración y validaciones locales listas; ejecución en GitHub pendiente | `.github/workflows/`, `.markdownlint-cli2.yaml`, `.gitleaksignore` |
 | Archivos de marca: `ic_icon.svg` (1,54 MB) y `boceto_v.1.0.png` (1,75 MB) | ✅ existen; **sin revisar** (superan el límite de lectura de 1 MB del agente) | `design/img/` |
 | Backend: **dominio puro** de WP-BE-10 (`Money`, `Payment`/`Bill`, ajustes, reembolsos/anulaciones, `Order`/`OrderItem`, `TableSession`, `JoinCode`). JDK 25, Gradle 9.8.1, Kotlin 2.4.0, JUnit 6.1.2 | ✅ 235 pruebas; 0 fallos, errores u omitidas; cobertura de líneas 97,61 % (corrida final del 2026-10-12) | `backend/` |
 
 ### 1.2 Qué NO existe todavía
 - Código de `web/` y `android/` (solo tienen `AGENTS.md`). En `backend/` existe únicamente el dominio puro: **no** hay Spring, base de datos, API ni persistencia (Fase 2). *(El texto original de esta línea decía que backend, web y android solo tenían `AGENTS.md`.)*
-- CI de WP-OPS-21.
+- Ejecución remota de WP-OPS-21 en GitHub; además, los proyectos ejecutables de Web y Android (WP-WEB-20 y WP-AND-20). Hasta que existan, sus checks informan que la validación no se ejecutó y fallan explícitamente.
 - Tokens de diseño (paleta, tipografía, espaciado) derivados de la marca. Los archivos de marca **sí existen** (ver 1.1), pero `design/img/README.md` todavía pide `ic_icon.png` y hoy el ícono es `ic_icon.svg`.
 - Catálogo de acciones de auditoría.
 - Pruebas de integración (PostgreSQL), de contrato, de arquitectura (ArchUnit), de concurrencia, web y Android. Hoy solo hay pruebas unitarias del dominio del backend.
@@ -162,7 +163,7 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | H-26 | **Aceptación y expiración:** el TTL lo aplica exclusivamente el job; `accept` valida el estado actual y acepta si sigue `PENDING_REVIEW`, aunque haya superado el TTL. Si el job ya lo marcó `EXPIRED`, `accept` responde `ORDER_EXPIRED` | Confirmada por producto e implementada |
 | H-27 | **Transición inválida y carrera del job:** el dominio informa el error correspondiente; `expire` antes del TTL es error de programación (`IllegalArgumentException`). El job futuro debe usar actualización condicional y no sobrescribir pedidos decididos | Confirmada por producto; dominio implementado, infraestructura pendiente en WP-BE-40 |
 | H-28 | **Límite del TTL de pedidos:** el vencimiento es inclusivo (`elapsed >= ttl`); el job puede expirar justo al cumplirse el TTL | Confirmada por producto e implementada |
-| H-29 | **Cortesía sobre un ítem de un pedido que aún no se aceptó:** RN-ADJ-04 solo pide "no cancelado y sin cortesía previa"; un ítem `PENDING` cumple eso pero todavía no es un cargo facturable (RN-BIL-01). **Corrección aplicada el 2026-10-12:** RN-ADJ-04 exige ítem aceptado y `CourtesyRules` rechaza `PENDING` con `ADJUSTMENT_ITEM_INVALID`, con 2 pruebas nuevas | **Verificado en código y regla**; documentación alineada en contrato 0.2.3. Lint de Redocly sobre el contrato vigente 0.2.5 pendiente porque la CLI no está disponible en este entorno |
+| H-29 | **Cortesía sobre un ítem de un pedido que aún no se aceptó:** RN-ADJ-04 solo pide "no cancelado y sin cortesía previa"; un ítem `PENDING` cumple eso pero todavía no es un cargo facturable (RN-BIL-01). **Corrección aplicada el 2026-10-12:** RN-ADJ-04 exige ítem aceptado y `CourtesyRules` rechaza `PENDING` con `ADJUSTMENT_ITEM_INVALID`, con 2 pruebas nuevas | **Verificado en código y regla**; documentación alineada en contrato 0.2.3. El lint de Redocly sobre el contrato vigente 0.2.5 se ejecutó localmente en WP-OPS-21. |
 | H-30 | **Matriz de transiciones inválidas de `Order`:** faltaban estados derivados y su cobertura. `Order` ahora delega transiciones de ítems, deriva su propio estado, y `OrderTest` prueba decisiones inválidas desde `IN_PREPARATION`, `READY` y `DELIVERED`, además de los demás estados decididos | Resuelto en WP-BE-10; suite completa verificada |
 
 ---
@@ -406,6 +407,18 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Validación desde clon limpio de Windows:** se clonó el commit local en una carpeta temporal y se copiaron únicamente los archivos WP-OPS-20 pendientes de Git para probar la versión actual; no se copió ningún `.env` real. Con un `COMPOSE_PROJECT_NAME` aislado se ejecutaron `docker compose config` y `docker compose up -d`; PostgreSQL y Mailpit quedaron `healthy`, Prism quedó ejecutándose, `pg_isready` confirmó conexiones y Mailpit/Prism respondieron HTTP 2xx.
 - **Limpieza y alcance:** `docker compose down` retiró contenedores/red; se eliminó solo el volumen temporal aislado y la carpeta del clon. Se verificó que el volumen original `somphie-local_postgres-data` siguiera existiendo. `git diff --check` pasó e `infra/.env` está ignorado. No se hicieron commits ni pushes. Redocly y CI siguen fuera del alcance de WP-OPS-20.
 - **Siguiente paso:** WP-OPS-20 queda completo y su dependencia para WP-BE-20 está satisfecha; WP-OPS-21 permanece pendiente.
+
+### 2026-10-12 — WP-OPS-21 🔄
+- **Qué:** se agregaron workflows de backend, documentación, seguridad, Web y Android. Las acciones/herramientas usan versiones fijadas, Gradle cachea dependencias y gitleaks escanea todo el historial con checkout completo.
+- **Por qué:** WP-OPS-20 ya está validado; esta tarea agrega puertas automatizadas sin adelantar WP-BE-20, WP-WEB-20 ni WP-AND-20.
+- **Archivos:** `.github/workflows/{backend,docs,security,web,android}.yml`, `.markdownlint-cli2.yaml`, `.gitleaksignore` y esta bitácora. Se exceptúan únicamente 10 fingerprints históricos de ejemplos sintéticos `guestToken` del OpenAPI; se verificó cada línea y cualquier hallazgo distinto sigue bloqueando el escaneo.
+- **Qué estudiar:** filtros de rutas y permisos mínimos en GitHub Actions, caché de Gradle, lint de Markdown/OpenAPI y escaneo de historial con gitleaks.
+- **Validación inicial de WP-OPS-21:** `.\backend\gradlew.bat -p backend check` → `BUILD SUCCESSFUL`; Markdown → 60 archivos, 0 incidencias; Redocly → contrato válido; lychee 0.24.2 → 60 archivos, 0 enlaces Markdown detectados; Gitleaks 8.30.1 → 21 commits sin hallazgos no exceptuados; actionlint 1.7.12 validó los cinco workflows; `git diff --check` pasó.
+- **Validación de estas correcciones:** `.\backend\gradlew.bat -p backend check` → `BUILD SUCCESSFUL` (tareas sin cambios, actualizadas); `npx --yes markdownlint-cli2@0.23.3 "**/*.md"` → 60 archivos, 0 incidencias; `npx --yes @redocly/cli@2.62.1 lint docs/04-api/openapi.yaml` → contrato válido; Gitleaks 8.30.1 → 22 commits escaneados, sin hallazgos; `git diff --check` pasó. `actionlint` no está instalado, por lo que no se repitió tras las modificaciones.
+- **Web/Android:** cada workflow mantiene un único job con nombre estable. Si existe la aplicación, ejecuta validaciones reales; si falta, termina en fallo con estado “validación no ejecutada”, y si fallan los comandos el job también falla tras ejecutarlos. Ese job puede configurarse como check requerido y bloqueará merges mientras la app no exista; no se inspeccionó ni modificó la protección remota de ramas. `WP-WEB-20` y `WP-AND-20` habilitarán las tareas reales.
+- **Auditoría de dependencias:** `nube.md` §4 describe un escaneo informativo de dependencias, pero el alcance aprobado de WP-OPS-21 en `roadmap-fases.md` incluye Gitleaks y no esa auditoría. No se agregó una herramienta; queda registrada la discrepancia para asignarla a un paquete futuro si corresponde.
+- **Limitaciones:** Actions no puede ejecutarse ni confirmarse antes de subir los cambios; por eso el paquete sigue abierto hasta que los workflows corran en GitHub. El link checker no encontró enlaces Markdown que probar y Web/Android todavía no tienen aplicaciones para validar.
+- **Siguiente paso:** revisión manual, luego PR/ejecución en GitHub Actions y cierre cuando los workflows aplicables estén verdes; no se hicieron commits ni pushes.
 
 ### Historial previo (resumen, para contexto)
 - **v0.1:** plan maestro convertido en 52 documentos (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes).

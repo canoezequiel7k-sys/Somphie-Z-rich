@@ -1,0 +1,48 @@
+name: Documentation CI # Valida Markdown y el contrato OpenAPI versionado.
+
+on: # Ejecuta lint al cambiar documentación o las herramientas que la verifican.
+  pull_request: # Comprueba cambios antes de integrarlos.
+    branches: [main] # Usa la rama principal como destino de integración.
+    paths: # Reacciona ante cualquier documento o configuración de lint.
+      - "**/*.md" # Incluye documentación, instrucciones de agentes y plantillas.
+      - "docs/**" # Incluye el contrato OpenAPI y documentación aunque no sea Markdown.
+      - "redocly.yaml" # Incluye cambios de configuración de Redocly.
+      - ".markdownlint-cli2.yaml" # Incluye cambios de reglas Markdown.
+      - ".github/workflows/**" # Revalida cuando se modifica cualquier workflow.
+  push: # Repite los chequeos en cambios ya integrados.
+    branches: [main] # Solo ejecuta integración continua en main.
+    paths: # Mantiene los mismos filtros usados en las PR.
+      - "**/*.md" # Incluye Markdown en cualquier carpeta.
+      - "docs/**" # Incluye OpenAPI y el resto de la documentación.
+      - "redocly.yaml" # Incluye la configuración del contrato.
+      - ".markdownlint-cli2.yaml" # Incluye la configuración del linter.
+      - ".github/workflows/**" # Incluye cambios de automatización.
+  workflow_dispatch: # Permite solicitar una validación manual completa.
+
+permissions: # Otorga solo lectura del contenido que se va a analizar.
+  contents: read # No habilita modificaciones desde las herramientas de documentación.
+
+jobs: # Mantiene juntas las validaciones documentales independientes.
+  lint: # Ejecuta linters fijados a versiones exactas.
+    name: Markdown y OpenAPI # Hace visible el alcance conjunto en GitHub.
+    runs-on: ubuntu-24.04 # Usa una imagen Linux estable para Node.
+    timeout-minutes: 15 # Limita fallos por instalaciones o procesos colgados.
+    steps: # Prepara Node y ejecuta las dos herramientas documentales.
+      - name: Descargar el repositorio # Obtiene los archivos sin guardar credenciales.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4; SHA fijo para evitar cambios silenciosos de la acción.
+        with: # Desactiva credenciales no necesarias para lint.
+          persist-credentials: false # No mantiene el token de checkout en Git.
+      - name: Preparar Node.js # Provee npm para ejecutar CLIs sin agregar dependencias al monorepo.
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4; SHA fijo para reproducibilidad.
+        with: # Fija el runtime utilizado por versiones concretas de ambas herramientas.
+          node-version: "24.21.0" # Satisface los requisitos actuales de Redocly y markdownlint-cli2.
+      - name: Validar Markdown # Aplica markdownlint a todos los documentos Markdown del repositorio.
+        run: npx --yes markdownlint-cli2@0.23.3 "**/*.md" # Fija la versión y usa las reglas compatibles del archivo de configuración.
+      - name: Comprobar enlaces documentales # Cumple nube.md §4 sin omitir rutas externas o internas.
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2; SHA fijo y versión de lychee configurada abajo.
+        with: # Fija la herramienta, limita recursos y falla ante enlaces inválidos.
+          lycheeVersion: v0.24.2 # Evita que la acción descargue una versión variable.
+          args: --no-progress --max-concurrency 8 --max-retries 2 --timeout 20 './**/*.md' # Analiza todos los documentos Markdown con límites explícitos.
+          failIfEmpty: false # No falla mientras el repositorio todavía no contenga enlaces Markdown que revisar.
+      - name: Validar OpenAPI # Usa Redocly con la configuración oficial del proyecto.
+        run: npx --yes @redocly/cli@2.62.1 lint docs/04-api/openapi.yaml # Fija la CLI para que el resultado sea repetible.
