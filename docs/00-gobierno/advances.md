@@ -499,6 +499,16 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Archivos:** `backend/src/main/resources/db/migration/V3__options_and_i18n.sql`, `backend/src/main/kotlin/com/somphie/catalog/`, `backend/src/test/kotlin/com/somphie/catalog/` y esta bitácora.
 - **Qué estudiar:** Modificadores y deltas de precio en artículos de menú, y resolución de localización JSONB con fallback.
 
+### 2026-10-12 — WP-BE-33 ✅
+- **Qué hicimos:** Se implementó el puerto `ImageStorage` y el adaptador de carpeta local para servir imágenes estáticas del catálogo (`GET /media/{path}`):
+  1. Interfaz `ImageStorage` (puerto) en el dominio del catálogo.
+  2. `FolderImageStorageAdapter` para leer de forma segura archivos binarios desde la carpeta local `media/`.
+  3. `MediaController` exponiendo `GET /media/**` con cabeceras de caché (`Cache-Control`) y tipos MIME correctos (`image/webp`, `image/png`, `image/jpeg`).
+  4. Pruebas unitarias en `MediaControllerTest`.
+- **Por qué:** Cumple con WP-BE-33 de la Fase 3 del roadmap (imágenes del menú y puerto de almacenamiento).
+- **Archivos:** `backend/src/main/kotlin/com/somphie/catalog/domain/ImageStorage.kt`, `backend/src/main/kotlin/com/somphie/catalog/infrastructure/FolderImageStorageAdapter.kt`, `backend/src/main/kotlin/com/somphie/catalog/api/MediaController.kt`, `backend/src/test/kotlin/com/somphie/catalog/api/MediaControllerTest.kt` y esta bitácora.
+- **Qué estudiar:** Puertos y adaptadores (Hexagonal architecture aplicada al almacenamiento de archivos) y manejo seguro de rutas estáticas con control de traversals.
+
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)
 
