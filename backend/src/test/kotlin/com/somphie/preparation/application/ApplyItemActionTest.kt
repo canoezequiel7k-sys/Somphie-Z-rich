@@ -46,6 +46,7 @@ class ApplyItemActionTest {
         assertEquals("IN_PREPARATION", result["status"])
         assertEquals(1, repository.auditCount)
         assertEquals(2L, repository.lastExpectedVersion)
+        assertEquals(now, repository.lastActivityAt)
     }
 
     @Test
@@ -92,6 +93,7 @@ class ApplyItemActionTest {
         var saveCount = 0
         var auditCount = 0
         var lastExpectedVersion: Long? = null
+        var lastActivityAt: Instant? = null
 
         override fun lockForAction(restaurantId: UUID, itemId: UUID) =
             LockedPreparationOrder(order, true, emptySet())
@@ -105,9 +107,11 @@ class ApplyItemActionTest {
             expectedVersion: Long,
             cancelledItemId: UUID?,
             cancellationReason: String?,
+            activityAt: Instant,
         ): Boolean {
             saveCount++
             lastExpectedVersion = expectedVersion
+            lastActivityAt = activityAt
             this.order = order
             return true
         }

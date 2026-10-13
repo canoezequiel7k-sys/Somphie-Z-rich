@@ -11,11 +11,12 @@ import org.mockito.ArgumentMatchers.eq
 import org.mockito.BDDMockito.given
 import org.mockito.Mockito.mock
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import java.time.Clock
 
 class FloorControllerTest {
 
     private val jdbc = mock(NamedParameterJdbcTemplate::class.java)
-    private val controller = FloorController(jdbc)
+    private val controller = FloorController(jdbc, mock(JoinSessionService::class.java), Clock.systemUTC())
 
     @Test
     fun `getPublicTable throws DomainException when table not found`() {

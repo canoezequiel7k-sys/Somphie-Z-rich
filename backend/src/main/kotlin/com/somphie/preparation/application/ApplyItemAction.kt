@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 
 enum class ItemAction { START, READY, DELIVER, CANCEL, UNDO, DELIVER_READY }
@@ -35,6 +36,7 @@ interface PreparationActionRepository {
         expectedVersion: Long,
         cancelledItemId: UUID?,
         cancellationReason: String?,
+        activityAt: Instant,
     ): Boolean
     fun staffOrder(access: PreparationAccess, orderId: UUID): Map<String, Any>
     fun undoWindowMinutes(restaurantId: UUID): Long
@@ -138,6 +140,7 @@ class ApplyItemAction(
                 locked.order.version,
                 if (action == ItemAction.CANCEL) itemId else null,
                 reason,
+                now,
             )
         ) {
             throw DomainException(ErrorCode.ORDER_ALREADY_DECIDED, "Order was concurrently modified")

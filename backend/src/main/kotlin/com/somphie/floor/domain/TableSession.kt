@@ -176,6 +176,8 @@ class TableSession private constructor(
 
     /**
      * Expira una visita vacía al cumplirse el TTL inclusivo, usando la última actividad guardada en el agregado.
+     * Esta transición no programa ni persiste el cierre: eso corresponde al job de aplicación y su
+     * actualización condicional.
      */
     fun expireEmpty(
         now: Instant,

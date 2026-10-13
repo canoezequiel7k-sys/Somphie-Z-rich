@@ -324,6 +324,25 @@ class StaffOrdersController(
     }
 
     private fun fetchOrderAggregate(orderId: UUID, restaurantId: String): Order {
+        val sessionId = jdbc.query(
+            """
+            SELECT session_id FROM customer_order
+            WHERE id = CAST(:id AS UUID) AND restaurant_id = CAST(:restaurantId AS UUID)
+            """.trimIndent(),
+            mapOf("id" to orderId.toString(), "restaurantId" to restaurantId),
+        ) { rs, _ -> rs.getObject("session_id", UUID::class.java) }.firstOrNull()
+            ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found")
+        // Alinear con preparación y expiración evita que una transacción tome pedido y sesión en orden inverso.
+        val sessionLocked = jdbc.query(
+            """
+            SELECT id FROM table_session
+            WHERE id = :sessionId AND restaurant_id = CAST(:restaurantId AS UUID)
+            FOR UPDATE
+            """.trimIndent(),
+            mapOf("sessionId" to sessionId, "restaurantId" to restaurantId),
+        ) { rs, _ -> rs.getObject("id", UUID::class.java) }.isNotEmpty()
+        if (!sessionLocked) throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found")
+
         val orderSql = """
             SELECT id, status, created_at, accepted_at, decided_at, rejection_reason, rejection_text, version
             FROM customer_order WHERE id = CAST(:id AS UUID)
@@ -394,6 +413,23 @@ class StaffOrdersController(
     }
 
     private fun updateOrderInDb(order: Order, restaurantId: String, actorId: UUID) {
+        val activityUpdated = jdbc.update(
+            """
+            UPDATE table_session ts
+            SET last_activity_at = :now
+            WHERE ts.id = (
+                SELECT session_id FROM customer_order
+                WHERE id = :orderId AND restaurant_id = CAST(:restaurantId AS UUID)
+            ) AND ts.status = 'OPEN'
+            """.trimIndent(),
+            mapOf(
+                "now" to order.decidedAt?.let(java.sql.Timestamp::from),
+                "orderId" to order.id,
+                "restaurantId" to restaurantId,
+            ),
+        )
+        if (activityUpdated != 1) throw DomainException(ErrorCode.SESSION_CLOSED, "Session is closed")
+
         val updateOrderSql = """
             UPDATE customer_order
             SET status = :status, accepted_at = :acceptedAt, decided_at = :decidedAt,

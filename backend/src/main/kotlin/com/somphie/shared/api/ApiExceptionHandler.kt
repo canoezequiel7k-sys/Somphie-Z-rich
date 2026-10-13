@@ -32,7 +32,9 @@ class ApiExceptionHandler {
             )
         val retryAfter = (exception.extra["retryAfterSec"] as? Number)?.toLong()
         val response = ResponseEntity.status(status).contentType(PROBLEM_JSON)
-        if (exception.code == ErrorCode.ACCOUNT_TEMPORARILY_LOCKED && retryAfter != null) {
+        if ((exception.code == ErrorCode.ACCOUNT_TEMPORARILY_LOCKED ||
+                exception.code == ErrorCode.JOIN_CODE_RATE_LIMITED) && retryAfter != null
+        ) {
             response.header(HttpHeaders.RETRY_AFTER, retryAfter.toString())
         }
         return response.body(problem)
@@ -101,6 +103,7 @@ class ApiExceptionHandler {
         ErrorCode.SESSION_ACCESS_REVOKED,
         -> HttpStatus.FORBIDDEN
         ErrorCode.ACCOUNT_TEMPORARILY_LOCKED,
+        ErrorCode.JOIN_CODE_RATE_LIMITED,
         -> HttpStatus.TOO_MANY_REQUESTS
         ErrorCode.ORDER_EMPTY,
         ErrorCode.ORDER_ALL_ITEMS_EXCLUDED,
@@ -122,6 +125,7 @@ class ApiExceptionHandler {
         ErrorCode.IDEMPOTENCY_KEY_REUSED,
         -> HttpStatus.UNPROCESSABLE_CONTENT
         ErrorCode.FORBIDDEN,
+        ErrorCode.JOIN_CODE_INVALID,
         ErrorCode.ITEM_STATION_FORBIDDEN,
         ErrorCode.ADJUSTMENT_LIMIT_EXCEEDED,
         -> HttpStatus.FORBIDDEN

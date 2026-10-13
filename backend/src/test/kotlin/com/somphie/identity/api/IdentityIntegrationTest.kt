@@ -3,6 +3,7 @@ package com.somphie.identity.api
 import com.jayway.jsonpath.JsonPath
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -29,6 +30,7 @@ import java.security.MessageDigest
 import java.time.Instant
 import java.util.HexFormat
 import java.util.UUID
+import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -470,6 +472,12 @@ class IdentityIntegrationTest {
             """.trimIndent(),
             UUID.fromString(orderId),
         )
+        val staleActivity = Instant.now().minusSeconds(3600)
+        jdbc.update(
+            "UPDATE table_session SET last_activity_at = ? WHERE id = ?",
+            java.sql.Timestamp.from(staleActivity),
+            UUID.fromString(fixture.sessionId),
+        )
         jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
         jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'KITCHEN')", USER_ID)
         val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
@@ -516,6 +524,103 @@ class IdentityIntegrationTest {
             "IN_PREPARATION",
             jdbc.queryForObject("SELECT status FROM order_item WHERE id = ?", String::class.java, itemId),
         )
+        val lastActivity = jdbc.queryForObject(
+            "SELECT last_activity_at FROM table_session WHERE id = ?",
+            java.sql.Timestamp::class.java,
+            UUID.fromString(fixture.sessionId),
+        )!!.toInstant()
+        assertTrue(lastActivity.isAfter(staleActivity))
+        assertTrue(lastActivity.isAfter(Instant.now().minusSeconds(1800)))
+    }
+
+    @Test
+    fun `concurrent accept and reject serialize with preparation and preserve activity`() {
+        jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
+        jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'OWNER')", USER_ID)
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        listOf("accept", "reject").forEach { decision ->
+            val fixture = createGuestSession()
+            val orderId = createOrder(fixture)
+            addOrderItem(orderId, fixture)
+            val itemId = jdbc.queryForObject(
+                "SELECT id FROM order_item WHERE order_id = ?",
+                UUID::class.java,
+                UUID.fromString(orderId),
+            )!!
+            val staleActivity = Instant.now().minusSeconds(3600)
+            jdbc.update(
+                "UPDATE table_session SET last_activity_at = ? WHERE id = ?",
+                java.sql.Timestamp.from(staleActivity),
+                UUID.fromString(fixture.sessionId),
+            )
+            val start = CountDownLatch(1)
+            val executor = Executors.newFixedThreadPool(2)
+            val responses = try {
+                val decisionRequest = executor.submit(Callable {
+                    check(start.await(5, TimeUnit.SECONDS))
+                    val builder = post("/staff/orders/$orderId/$decision")
+                        .header("Authorization", "Bearer $staffToken")
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
+                    if (decision == "reject") {
+                        builder.contentType(MediaType.APPLICATION_JSON)
+                            .content("""{"reasonCode":"OTHER","reasonText":"Concurrent test"}""")
+                    }
+                    mockMvc.perform(builder).andReturn().response
+                })
+                val prepare = executor.submit(Callable {
+                    check(start.await(5, TimeUnit.SECONDS))
+                    mockMvc.perform(
+                        post("/staff/order-items/$itemId/start")
+                            .header("Authorization", "Bearer $staffToken")
+                            .header("Idempotency-Key", UUID.randomUUID().toString()),
+                    ).andReturn().response
+                })
+                start.countDown()
+                decisionRequest.get(15, TimeUnit.SECONDS) to prepare.get(15, TimeUnit.SECONDS)
+            } finally {
+                executor.shutdownNow()
+            }
+
+            assertEquals(200, responses.first.status)
+            assertTrue(responses.second.status == 200 || responses.second.status == 409)
+            if (responses.second.status == 409) {
+                assertEquals("ITEM_INVALID_TRANSITION", json(responses.second.contentAsString, "$.code"))
+            }
+            val finalOrderStatus = jdbc.queryForObject(
+                "SELECT status FROM customer_order WHERE id = ?",
+                String::class.java,
+                UUID.fromString(orderId),
+            )
+            val finalItemStatus = jdbc.queryForObject(
+                "SELECT status FROM order_item WHERE id = ?",
+                String::class.java,
+                itemId,
+            )
+            if (decision == "accept") {
+                assertTrue(finalOrderStatus == "ACCEPTED" || finalOrderStatus == "IN_PREPARATION")
+                assertTrue(finalItemStatus == "QUEUED" || finalItemStatus == "IN_PREPARATION")
+                assertEquals(if (finalItemStatus == "QUEUED") 2L else 3L, jdbc.queryForObject(
+                    "SELECT version FROM customer_order WHERE id = ?",
+                    Long::class.java,
+                    UUID.fromString(orderId),
+                ))
+            } else {
+                assertEquals("REJECTED", finalOrderStatus)
+                assertEquals("CANCELLED", finalItemStatus)
+                assertEquals(2L, jdbc.queryForObject(
+                    "SELECT version FROM customer_order WHERE id = ?",
+                    Long::class.java,
+                    UUID.fromString(orderId),
+                ))
+            }
+            val lastActivity = jdbc.queryForObject(
+                "SELECT last_activity_at FROM table_session WHERE id = ?",
+                java.sql.Timestamp::class.java,
+                UUID.fromString(fixture.sessionId),
+            )!!.toInstant()
+            assertTrue(lastActivity.isAfter(staleActivity))
+            assertTrue(lastActivity.isAfter(Instant.now().minusSeconds(1800)))
+        }
     }
 
     @Test

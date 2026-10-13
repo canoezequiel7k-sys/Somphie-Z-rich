@@ -21,6 +21,7 @@ import org.springframework.stereotype.Repository
 import tools.jackson.core.type.TypeReference
 import tools.jackson.databind.ObjectMapper
 import java.sql.Timestamp
+import java.time.Instant
 import java.util.UUID
 
 @Repository
@@ -157,6 +158,7 @@ class JdbcPreparationActionRepository(
         expectedVersion: Long,
         cancelledItemId: UUID?,
         cancellationReason: String?,
+        activityAt: Instant,
     ): Boolean {
         val changed = jdbc.update(
             """
@@ -173,6 +175,24 @@ class JdbcPreparationActionRepository(
             ),
         )
         if (changed != 1) return false
+        val sessionActivityUpdated = jdbc.update(
+            """
+            UPDATE table_session
+            SET last_activity_at = :activityAt
+            WHERE id = (
+                SELECT session_id FROM customer_order
+                WHERE id = :orderId AND restaurant_id = :restaurantId
+            ) AND status = 'OPEN'
+            """.trimIndent(),
+            mapOf(
+                "activityAt" to Timestamp.from(activityAt),
+                "orderId" to order.id,
+                "restaurantId" to restaurantId,
+            ),
+        )
+        if (sessionActivityUpdated != 1) {
+            throw DomainException(ErrorCode.SESSION_CLOSED, "Session is closed")
+        }
         order.items.forEach { item ->
             val updated = jdbc.update(
                 """

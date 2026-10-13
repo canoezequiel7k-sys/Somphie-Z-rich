@@ -10,14 +10,17 @@ import com.somphie.floor.domain.SessionInfoDto
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
 import jakarta.validation.Valid
+import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RestController
+import java.time.Clock
 import java.security.SecureRandom
 import java.security.MessageDigest
 import java.time.Instant
@@ -27,7 +30,9 @@ import java.util.UUID
 
 @RestController
 class FloorController(
-    private val jdbc: NamedParameterJdbcTemplate
+    private val jdbc: NamedParameterJdbcTemplate,
+    private val joinSessionService: JoinSessionService,
+    private val clock: Clock,
 ) {
 
     private val secureRandom = SecureRandom()
@@ -58,6 +63,7 @@ class FloorController(
     }
 
     @PostMapping("/public/tables/{tableCode}/sessions")
+    @Transactional
     fun openSession(
         @PathVariable tableCode: String,
         @Valid @RequestBody request: OpenSessionRequest
@@ -95,7 +101,7 @@ class FloorController(
         val joinCode = generateJoinCode()
         val guestToken = generateGuestToken()
         val tokenHash = hashToken(guestToken)
-        val now = Instant.now()
+        val now = Instant.now(clock)
 
         val insertSessionSql = """
             INSERT INTO table_session (id, restaurant_id, table_id, status, join_code, opened_at, opened_by_type, last_activity_at)
@@ -144,71 +150,23 @@ class FloorController(
     @PostMapping("/public/tables/{tableCode}/join")
     fun joinSession(
         @PathVariable tableCode: String,
-        @Valid @RequestBody request: JoinSessionRequest
+        @Valid @RequestBody request: JoinSessionRequest,
+        servletRequest: HttpServletRequest,
     ): ResponseEntity<SessionAccessResponse> {
-        val sessions = jdbc.query(
-            "SELECT ts.id AS session_id, ts.join_code, ts.status, dt.label AS table_label FROM dining_table dt JOIN table_session ts ON dt.id = ts.table_id AND ts.status = 'OPEN' WHERE dt.table_code = :tableCode",
-            mapOf("tableCode" to tableCode)
-        ) { rs, _ ->
-            mapOf(
-                "session_id" to rs.getString("session_id"),
-                "join_code" to rs.getString("join_code"),
-                "status" to rs.getString("status"),
-                "table_label" to rs.getString("table_label")
+        return when (val result = joinSessionService.join(
+            tableCode,
+            request.displayName,
+            request.joinCode,
+            // Usar la IP del socket; confiar en cabeceras forwarded requiere configurar un proxy de confianza.
+            servletRequest.remoteAddr,
+        )) {
+            is JoinSessionResult.Joined -> ResponseEntity.status(HttpStatus.CREATED).body(result.response)
+            is JoinSessionResult.Rejected -> throw DomainException(
+                result.code,
+                if (result.code == ErrorCode.JOIN_CODE_INVALID) "Join code is invalid" else "No active session for this table",
+                result.extra,
             )
         }
-
-        val sessionData = sessions.firstOrNull() ?: throw DomainException(ErrorCode.SESSION_CLOSED, "No active session for this table")
-
-        if (sessionData["join_code"] != request.joinCode) {
-            throw DomainException(ErrorCode.FORBIDDEN, "Invalid join code")
-        }
-
-        val sessionId = sessionData["session_id"] as String
-        val tableLabel = sessionData["table_label"] as String
-
-        val hostCount = jdbc.queryForObject(
-            "SELECT COUNT(1) FROM session_participant WHERE session_id = CAST(:sessionId AS UUID) AND role = 'HOST' AND revoked_at IS NULL",
-            mapOf("sessionId" to sessionId),
-            Int::class.java
-        ) ?: 0
-
-        val role = if (hostCount == 0) "HOST" else "MEMBER"
-
-        val participantId = UUID.randomUUID().toString()
-        val guestToken = generateGuestToken()
-        val tokenHash = hashToken(guestToken)
-        val now = Instant.now()
-
-        val insertParticipantSql = """
-            INSERT INTO session_participant (id, session_id, display_name, role, token_hash, joined_at)
-            VALUES (CAST(:participantId AS UUID), CAST(:sessionId AS UUID), :displayName, :role, :tokenHash, :joinedAt)
-        """
-        jdbc.update(insertParticipantSql, mapOf(
-            "participantId" to participantId,
-            "sessionId" to sessionId,
-            "displayName" to request.displayName,
-            "role" to role,
-            "tokenHash" to tokenHash,
-            "joinedAt" to java.sql.Timestamp.from(now)
-        ))
-
-        val response = SessionAccessResponse(
-            session = SessionInfoDto(
-                id = sessionId,
-                status = "OPEN",
-                tableLabel = tableLabel,
-                openedAt = now
-            ),
-            participant = ParticipantInfoDto(
-                id = participantId,
-                displayName = request.displayName,
-                role = role
-            ),
-            guestToken = guestToken
-        )
-
-        return ResponseEntity.status(HttpStatus.CREATED).body(response)
     }
 
     private fun generateJoinCode(): String {

@@ -107,6 +107,14 @@ class OrdersController(
                 throw DomainException(ErrorCode.PRICE_CHANGED, "Price changed", mapOf("currentTotalMinor" to totalMinor))
             }
 
+            val activityUpdated = jdbc.update(
+                "UPDATE table_session SET last_activity_at = :now WHERE id = CAST(:sessionId AS UUID) AND status = 'OPEN'",
+                mapOf("sessionId" to sessionId, "now" to java.sql.Timestamp.from(now)),
+            )
+            if (activityUpdated == 0) {
+                throw DomainException(ErrorCode.SESSION_CLOSED, "Session is closed")
+            }
+
             val insertOrderSql = """
                 INSERT INTO customer_order (id, restaurant_id, session_id, participant_id, status, display_code, summary, total_minor, note, created_at)
                 VALUES (CAST(:id AS UUID), CAST(:restaurantId AS UUID), CAST(:sessionId AS UUID), CAST(:participantId AS UUID), :status, :displayCode, :summary, :totalMinor, :note, :createdAt)
