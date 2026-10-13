@@ -92,6 +92,10 @@ stateDiagram-v2
 
 Cada transición guarda timestamp (`queuedAt`, `startedAt`, `readyAt`, `deliveredAt`, `cancelledAt`) y actor, para métricas de tiempos de preparación.
 
+**H-22 resuelta (2026-10-12):** si se deshace `READY` que vino directamente de `QUEUED`, el ítem vuelve a `IN_PREPARATION` con `startedAt = null`; no se inventa una hora de inicio que nunca ocurrió. Se conserva `queuedAt`.
+
+`deliver-ready` entrega en una única operación todos los ítems que estén `READY` en ese pedido. Usa un solo instante de transición y aumenta `Order.version` una sola vez; si no hay ítems listos no modifica el agregado.
+
 ## 4. Derivación del estado del pedido desde sus ítems
 
 Aplica cuando el pedido ya fue **aceptado**. Sea `S` el conjunto de estados de los ítems **no cancelados**:

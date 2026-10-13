@@ -100,7 +100,9 @@ class CatalogController(
                    p.allergens, p.image_path, p.image_version, p.image_alt
             FROM product p
             JOIN station s ON p.station_id = s.id
-            WHERE p.id = CAST(:id AS UUID)
+            JOIN subcategory sub ON sub.id = p.subcategory_id
+            JOIN category c ON c.id = sub.category_id
+            WHERE p.id = CAST(:id AS UUID) AND p.active = TRUE AND c.active = TRUE
         """
 
         val products = jdbc.query(sql, mapOf("id" to uuid.toString())) { rs, _ ->
@@ -146,7 +148,7 @@ class CatalogController(
         val catSql = """
             SELECT id, name, sort_order
             FROM category
-            WHERE restaurant_id = CAST(:restaurantId AS UUID)
+            WHERE restaurant_id = CAST(:restaurantId AS UUID) AND active = TRUE
             ORDER BY sort_order ASC
         """
 
@@ -173,6 +175,7 @@ class CatalogController(
             JOIN subcategory sub ON p.subcategory_id = sub.id
             JOIN station s ON p.station_id = s.id
             WHERE sub.category_id = CAST(:categoryId AS UUID)
+              AND p.active = TRUE
             ORDER BY p.sort_order ASC
         """
 
@@ -218,6 +221,7 @@ class CatalogController(
             FROM option_group og
             JOIN product_option_group pog ON og.id = pog.group_id
             WHERE pog.product_id = CAST(:productId AS UUID)
+              AND og.active = TRUE
             ORDER BY pog.sort_order ASC
         """
 
@@ -244,7 +248,7 @@ class CatalogController(
         val sql = """
             SELECT id, name, name_i18n, price_delta_minor, available, is_default, sort_order
             FROM product_option
-            WHERE group_id = CAST(:groupId AS UUID)
+            WHERE group_id = CAST(:groupId AS UUID) AND active = TRUE
             ORDER BY sort_order ASC
         """
 

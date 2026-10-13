@@ -5,6 +5,7 @@ import com.somphie.orders.domain.CreateOrderRequest
 import com.somphie.orders.domain.ItemSnapshot
 import com.somphie.orders.domain.Order
 import com.somphie.orders.domain.OrderItem
+import com.somphie.orders.domain.OptionSnapshot
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
 import com.somphie.shared.domain.Money
@@ -19,6 +20,8 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.transaction.annotation.Transactional
+import tools.jackson.databind.ObjectMapper
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
@@ -30,10 +33,21 @@ class OrdersController(
     private val jdbc: NamedParameterJdbcTemplate,
     private val idempotencyService: IdempotencyService,
     private val auditService: AuditService,
-    private val clock: Clock
+    private val clock: Clock,
+    private val objectMapper: ObjectMapper,
 ) {
+    private data class ProductRecord(
+        val id: String,
+        val name: String,
+        val nameI18n: Map<String, String>,
+        val priceMinor: Long,
+        val stationId: String,
+        val stationCode: String,
+        val available: Boolean,
+    )
 
     @PostMapping("/sessions/current/orders")
+    @Transactional
     fun createOrder(
         @RequestHeader(name = "Idempotency-Key", required = false) idempotencyKey: String?,
         @RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
@@ -54,15 +68,27 @@ class OrdersController(
 
             val now = Instant.now(clock)
 
+            val stationCodes = mutableMapOf<UUID, String>()
             val orderItems = request.items.map { itemDto ->
                 val product = fetchProduct(itemDto.productId, restaurantId)
+                stationCodes[UUID.fromString(product.stationId)] = product.stationCode
+                if (!product.available) {
+                    throw DomainException(ErrorCode.PRODUCT_UNAVAILABLE, "Product is unavailable")
+                }
+                val optionSnapshots = validateAndSnapshotOptions(
+                    productId = product.id,
+                    restaurantId = restaurantId,
+                    requestedOptionIds = itemDto.optionIds.orEmpty(),
+                )
                 val snapshot = ItemSnapshot(
-                    productId = UUID.fromString(product["id"] as String),
-                    productName = product["name"] as String,
-                    stationId = UUID.fromString(product["station_id"] as String),
+                    productId = UUID.fromString(product.id),
+                    productName = product.name,
+                    productNameI18n = product.nameI18n,
+                    stationId = UUID.fromString(product.stationId),
                     quantity = itemDto.quantity,
                     note = itemDto.note,
-                    basePrice = Money.of(product["price_minor"] as Long)
+                    basePrice = Money.of(product.priceMinor),
+                    options = optionSnapshots,
                 )
                 OrderItem.pending(UUID.randomUUID(), snapshot)
             }
@@ -76,7 +102,7 @@ class OrdersController(
             val totalMinor = order.items.sumOf { it.lineTotal.minor }
 
             if (totalMinor != request.acknowledgedTotalMinor) {
-                throw DomainException(ErrorCode.PAYMENT_AMOUNT_INVALID, "Price changed")
+                throw DomainException(ErrorCode.PRICE_CHANGED, "Price changed", mapOf("currentTotalMinor" to totalMinor))
             }
 
             val insertOrderSql = """
@@ -98,8 +124,8 @@ class OrdersController(
 
             order.items.forEach { item ->
                 val insertItemSql = """
-                    INSERT INTO order_item (id, order_id, session_id, product_id, product_name, station_id, quantity, base_price_minor, unit_price_minor, line_total_minor, note, status)
-                    VALUES (CAST(:id AS UUID), CAST(:orderId AS UUID), CAST(:sessionId AS UUID), CAST(:productId AS UUID), :productName, CAST(:stationId AS UUID), :quantity, :basePrice, :unitPrice, :lineTotal, :note, :status)
+                    INSERT INTO order_item (id, order_id, session_id, product_id, product_name, product_name_i18n, station_id, quantity, base_price_minor, options_delta_minor, unit_price_minor, line_total_minor, note, status, options_snapshot)
+                    VALUES (CAST(:id AS UUID), CAST(:orderId AS UUID), CAST(:sessionId AS UUID), CAST(:productId AS UUID), :productName, CAST(:productNameI18n AS JSONB), CAST(:stationId AS UUID), :quantity, :basePrice, :optionsDelta, :unitPrice, :lineTotal, :note, :status, CAST(:optionsSnapshot AS JSONB))
                 """
                 jdbc.update(insertItemSql, mapOf(
                     "id" to item.id.toString(),
@@ -107,13 +133,24 @@ class OrdersController(
                     "sessionId" to sessionId,
                     "productId" to item.snapshot.productId.toString(),
                     "productName" to item.snapshot.productName,
+                    "productNameI18n" to objectMapper.writeValueAsString(item.snapshot.productNameI18n),
                     "stationId" to item.snapshot.stationId.toString(),
                     "quantity" to item.snapshot.quantity,
                     "basePrice" to item.snapshot.basePrice.minor,
+                    "optionsDelta" to item.snapshot.optionsDelta.minor,
                     "unitPrice" to item.snapshot.unitPrice.minor,
                     "lineTotal" to item.snapshot.lineTotal.minor,
                     "note" to item.snapshot.note,
-                    "status" to item.status.name
+                    "status" to item.status.name,
+                    "optionsSnapshot" to objectMapper.writeValueAsString(item.snapshot.options.map {
+                        mapOf(
+                            "groupId" to it.groupId.toString(),
+                            "optionId" to it.optionId.toString(),
+                            "groupName" to it.groupName,
+                            "optionName" to it.optionName,
+                            "priceDeltaMinor" to it.priceDelta.minor,
+                        )
+                    })
                 ))
             }
 
@@ -128,16 +165,144 @@ class OrdersController(
                 afterSummary = "{\"status\":\"${order.status.name}\",\"totalMinor\":$totalMinor}"
             )
 
-            val responseBody = mapOf(
+            val responseBody = linkedMapOf<String, Any>(
                 "id" to order.id.toString(),
                 "displayCode" to "#001",
                 "status" to order.status.name,
+                "version" to order.version,
+                "createdBy" to mapOf(
+                    "participantId" to participantId,
+                    "displayName" to sessionAndParticipant.getValue("participantName"),
+                ),
+                "createdAt" to order.createdAt.toString(),
+                "items" to order.items.map { item ->
+                    linkedMapOf<String, Any>(
+                        "id" to item.id.toString(),
+                        "productId" to item.snapshot.productId.toString(),
+                        "productName" to item.snapshot.productName,
+                        "productNameI18n" to item.snapshot.productNameI18n,
+                        "basePriceMinor" to item.snapshot.basePrice.minor,
+                        "optionsDeltaMinor" to item.snapshot.optionsDelta.minor,
+                        "unitPriceMinor" to item.snapshot.unitPrice.minor,
+                        "quantity" to item.snapshot.quantity,
+                        "lineTotalMinor" to item.snapshot.lineTotal.minor,
+                        "station" to stationCodes.getValue(item.snapshot.stationId),
+                        "status" to item.status.name,
+                        "options" to item.snapshot.options.map {
+                            mapOf(
+                                "groupId" to it.groupId.toString(),
+                                "optionId" to it.optionId.toString(),
+                                "groupName" to it.groupName,
+                                "optionName" to it.optionName,
+                                "priceDeltaMinor" to it.priceDelta.minor,
+                            )
+                        },
+                    ).apply { item.snapshot.note?.let { put("note", it) } }
+                },
                 "totalMinor" to totalMinor
-            )
+            ).apply { request.note?.let { put("note", it) } }
 
             ResponseEntity.status(HttpStatus.CREATED).body(responseBody)
         }
     }
+
+        private data class OptionGroupRule(
+            val id: String,
+            val name: String,
+            val selectionType: String,
+            val required: Boolean,
+            val minSelections: Int,
+            val maxSelections: Int,
+        )
+
+        private data class SelectedOption(
+            val id: String,
+            val groupId: String,
+            val groupName: String,
+            val name: String,
+            val priceDeltaMinor: Long,
+            val available: Boolean,
+            val optionActive: Boolean,
+            val groupActive: Boolean,
+        )
+
+        private fun validateAndSnapshotOptions(
+            productId: String,
+            restaurantId: String,
+            requestedOptionIds: List<String>,
+        ): List<OptionSnapshot> {
+            if (requestedOptionIds.size > 10 || requestedOptionIds.size != requestedOptionIds.distinct().size) {
+                throw DomainException(ErrorCode.OPTION_SELECTION_INVALID, "Invalid option selection")
+            }
+            val selectedIds = requestedOptionIds.map {
+                try {
+                    UUID.fromString(it)
+                } catch (_: IllegalArgumentException) {
+                    throw DomainException(ErrorCode.OPTION_NOT_FOUND, "Selected option does not exist", mapOf("optionIds" to requestedOptionIds))
+                }
+            }
+            val groups = jdbc.query(
+                """
+                SELECT og.id, og.name, og.selection_type, og.required, og.min_selections, og.max_selections
+                FROM option_group og
+                JOIN product_option_group pog ON pog.group_id = og.id
+                WHERE pog.product_id = CAST(:productId AS UUID)
+                  AND og.restaurant_id = CAST(:restaurantId AS UUID)
+                  AND og.active = TRUE
+                """.trimIndent(),
+                mapOf("productId" to productId, "restaurantId" to restaurantId),
+            ) { rs, _ ->
+                OptionGroupRule(
+                    rs.getString("id"), rs.getString("name"), rs.getString("selection_type"),
+                    rs.getBoolean("required"), rs.getInt("min_selections"), rs.getInt("max_selections"),
+                )
+            }
+            val selected = if (selectedIds.isEmpty()) emptyList() else jdbc.query(
+                """
+                SELECT po.id, og.id AS group_id, og.name AS group_name, po.name, po.price_delta_minor,
+                       po.available, po.active AS option_active, og.active AS group_active
+                FROM product_option po
+                JOIN option_group og ON og.id = po.group_id
+                JOIN product_option_group pog ON pog.group_id = og.id
+                WHERE pog.product_id = CAST(:productId AS UUID)
+                  AND og.restaurant_id = CAST(:restaurantId AS UUID)
+                  AND po.id IN (:optionIds)
+                """.trimIndent(),
+                mapOf("productId" to productId, "restaurantId" to restaurantId, "optionIds" to selectedIds),
+            ) { rs, _ ->
+                SelectedOption(
+                    rs.getString("id"), rs.getString("group_id"), rs.getString("group_name"),
+                    rs.getString("name"), rs.getLong("price_delta_minor"), rs.getBoolean("available"),
+                    rs.getBoolean("option_active"), rs.getBoolean("group_active"),
+                )
+            }
+            if (selected.size != selectedIds.size) {
+                throw DomainException(ErrorCode.OPTION_NOT_FOUND, "Selected option does not belong to product", mapOf("optionIds" to requestedOptionIds))
+            }
+            val unavailable = selected.filterNot { it.available && it.optionActive && it.groupActive }.map { it.id }
+            if (unavailable.isNotEmpty()) {
+                throw DomainException(ErrorCode.OPTION_UNAVAILABLE, "Selected option is unavailable", mapOf("optionIds" to unavailable))
+            }
+            groups.forEach { group ->
+                val count = selected.count { it.groupId == group.id }
+                val valid = when (group.selectionType) {
+                    "SINGLE" -> count <= 1 && count <= group.maxSelections &&
+                        (!group.required || count >= group.minSelections)
+                    "MULTIPLE" -> count in group.minSelections..group.maxSelections
+                    else -> false
+                }
+                if (!valid) {
+                    throw DomainException(
+                        ErrorCode.OPTION_SELECTION_INVALID,
+                        "Option group selection is invalid",
+                        mapOf("groupId" to group.id, "min" to group.minSelections, "max" to group.maxSelections, "selected" to count),
+                    )
+                }
+            }
+            return selected.map {
+                OptionSnapshot(UUID.fromString(it.groupId), UUID.fromString(it.id), it.groupName, it.name, Money.of(it.priceDeltaMinor))
+            }
+        }
 
     @GetMapping("/sessions/current/orders")
     fun listSessionOrders(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) authorization: String?): ResponseEntity<List<Map<String, Any>>> {
@@ -188,6 +353,7 @@ class OrdersController(
     }
 
     @PostMapping("/orders/{orderId}/cancel")
+    @Transactional
     fun cancelOrder(
         @PathVariable orderId: String,
         @RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
@@ -214,14 +380,27 @@ class OrdersController(
             throw DomainException(ErrorCode.FORBIDDEN, "Only the author or session host can cancel this order")
         }
 
+        val now = java.sql.Timestamp.from(clock.instant())
         val updated = jdbc.update(
-            "UPDATE customer_order SET status = 'CANCELLED' WHERE id = CAST(:id AS UUID) AND session_id = CAST(:sessionId AS UUID) AND status = 'PENDING_REVIEW'",
-            mapOf("id" to uuid.toString(), "sessionId" to sessionId)
+            "UPDATE customer_order SET status = 'CANCELLED', decided_at = :now, version = version + 1 WHERE id = CAST(:id AS UUID) AND session_id = CAST(:sessionId AS UUID) AND status = 'PENDING_REVIEW'",
+            mapOf("id" to uuid.toString(), "sessionId" to sessionId, "now" to now)
         )
 
         if (updated == 0) {
             throw DomainException(ErrorCode.ORDER_NOT_CANCELLABLE, "Order cannot be cancelled")
         }
+        jdbc.update(
+            "UPDATE order_item SET status = 'CANCELLED', cancelled_at = :now WHERE order_id = :orderId AND status = 'PENDING'",
+            mapOf("now" to now, "orderId" to uuid),
+        )
+        auditService.record(
+            restaurantId = sessionAndParticipant.getValue("restaurantId"),
+            actorType = "CUSTOMER",
+            actorId = participantId,
+            action = "ORDER_CANCELLED",
+            targetType = "ORDER",
+            targetId = uuid.toString(),
+        )
 
         return ResponseEntity.ok(mapOf("id" to uuid.toString(), "status"  to "CANCELLED"))
     }
@@ -238,7 +417,7 @@ class OrdersController(
         val participant = jdbc.query(
             """
             SELECT ts.id AS session_id, ts.restaurant_id, ts.status AS session_status,
-                   ts.closed_at, sp.id AS participant_id, sp.role, sp.revoked_at
+                   ts.closed_at, sp.id AS participant_id, sp.display_name AS participant_name, sp.role, sp.revoked_at
             FROM table_session ts
             JOIN session_participant sp ON ts.id = sp.session_id
             WHERE sp.token_hash = :tokenHash
@@ -248,6 +427,7 @@ class OrdersController(
             mapOf(
                 "sessionId" to rs.getString("session_id"),
                 "participantId" to rs.getString("participant_id"),
+                "participantName" to rs.getString("participant_name"),
                 "restaurantId" to rs.getString("restaurant_id"),
                 "sessionStatus" to rs.getString("session_status"),
                 "closedAt" to rs.getTimestamp("closed_at")?.toInstant()?.toString().orEmpty(),
@@ -275,7 +455,7 @@ class OrdersController(
         }
     }
 
-    private fun fetchProduct(productId: String, restaurantId: String): Map<String, Any> {
+    private fun fetchProduct(productId: String, restaurantId: String): ProductRecord {
         val uuid = try {
             UUID.fromString(productId)
         } catch (e: Exception) {
@@ -284,19 +464,25 @@ class OrdersController(
 
         val product = jdbc.query(
             """
-            SELECT p.id, p.name, p.price_minor, p.station_id
+            SELECT p.id, p.name, p.name_i18n::text AS name_i18n, p.price_minor, p.station_id,
+                   s.code AS station_code, p.available, p.active, c.active AS category_active
             FROM product p
             JOIN subcategory sub ON sub.id = p.subcategory_id
             JOIN category c ON c.id = sub.category_id
+            JOIN station s ON s.id = p.station_id AND s.restaurant_id = c.restaurant_id
             WHERE p.id = CAST(:id AS UUID) AND c.restaurant_id = CAST(:restaurantId AS UUID)
             """.trimIndent(),
             mapOf("id" to uuid.toString(), "restaurantId" to restaurantId)
         ) { rs, _ ->
-            mapOf(
-                "id" to rs.getString("id"),
-                "name" to rs.getString("name"),
-                "price_minor" to rs.getLong("price_minor"),
-                "station_id" to rs.getString("station_id")
+            ProductRecord(
+                id = rs.getString("id"),
+                name = rs.getString("name"),
+                nameI18n = objectMapper.readValue(rs.getString("name_i18n") ?: "{}", stringMapType),
+                priceMinor = rs.getLong("price_minor"),
+                stationId = rs.getString("station_id"),
+                stationCode = rs.getString("station_code"),
+                available = rs.getBoolean("available") && rs.getBoolean("active") &&
+                    rs.getBoolean("category_active"),
             )
         }.firstOrNull()
 
@@ -305,5 +491,6 @@ class OrdersController(
 
     private companion object {
         const val CLOSED_SESSION_READ_SECONDS = 24 * 60 * 60L
+        val stringMapType = object : tools.jackson.core.type.TypeReference<Map<String, String>>() {}
     }
 }

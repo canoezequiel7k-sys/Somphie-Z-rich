@@ -11,6 +11,8 @@ import java.util.UUID
  * Es inmutable de verdad: solo contiene `String` y `Money` (un `Long`).
  */
 data class OptionSnapshot(
+    val groupId: UUID,
+    val optionId: UUID,
     val groupName: String,
     val optionName: String,
     val priceDelta: Money,

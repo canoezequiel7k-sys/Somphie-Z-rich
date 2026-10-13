@@ -57,7 +57,7 @@ class GetStationQueueTest {
             service.execute(access.copy(stationIds = emptySet()), stationId.toString(), null, 50, null)
         }
 
-        assertEquals(ErrorCode.FORBIDDEN, exception.code)
+        assertEquals(ErrorCode.ITEM_STATION_FORBIDDEN, exception.code)
     }
 
     @Test
@@ -71,6 +71,28 @@ class GetStationQueueTest {
 
         assertEquals(ErrorCode.VALIDATION_FAILED, invalidStatus.code)
         assertEquals(ErrorCode.VALIDATION_FAILED, invalidCursor.code)
+    }
+
+    @Test
+    fun `station list is scoped to assignments except for owners`() {
+        val listStations = GetAssignedStations(repository)
+
+        assertEquals(
+            listOf(StationListEntry(stationId, "BAR", "Barra")),
+            listStations.execute(access)["items"],
+        )
+        assertEquals(
+            listOf(StationListEntry(stationId, "BAR", "Barra")),
+            listStations.execute(access.copy(roles = setOf("OWNER"), stationIds = emptySet()))["items"],
+        )
+        assertEquals(
+            emptyList<StationListEntry>(),
+            listStations.execute(access.copy(restaurantId = UUID.randomUUID()))["items"],
+        )
+        val forbidden = assertThrows<DomainException> {
+            listStations.execute(access.copy(permissions = emptySet()))
+        }
+        assertEquals(ErrorCode.FORBIDDEN, forbidden.code)
     }
 
     private fun row(id: String, status: String, queuedAt: Instant) = StationQueueRecord(
@@ -93,6 +115,15 @@ class GetStationQueueTest {
     ) : StationQueueRepository {
         override fun stationBelongsToRestaurant(stationId: UUID, restaurantId: UUID): Boolean =
             this.stationId == stationId && this.restaurantId == restaurantId
+
+        override fun findStations(restaurantId: UUID, assignedStationIds: Set<UUID>?): List<StationListEntry> =
+            if (restaurantId == this.restaurantId &&
+                (assignedStationIds == null || this.stationId in assignedStationIds)
+            ) {
+                listOf(StationListEntry(this.stationId, "BAR", "Barra"))
+            } else {
+                emptyList()
+            }
 
         override fun findQueueItems(
             restaurantId: UUID,

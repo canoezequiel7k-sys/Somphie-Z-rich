@@ -84,7 +84,8 @@ class OrderItem private constructor(
     /**
      * Revierte un paso (RN-PRE-09). Deshacer una entrega solo vale dentro de [undoWindow]
      * (`deliveredUndoWindowMin`): pasado ese tiempo, `ITEM_UNDO_WINDOW_EXPIRED`.
-     * Al volver atrás se borra solo la marca de tiempo del estado que se abandona.
+     * Al volver atrás se borra solo la marca de tiempo del estado que se abandona. Si `READY`
+     * vino directamente de `QUEUED`, `startedAt` permanece nulo: no se inventa un inicio.
      */
     fun undo(now: Instant, undoWindow: Duration): OrderItem = when (status) {
         ItemStatus.IN_PREPARATION -> copyWith(status = ItemStatus.QUEUED, startedAt = null)
@@ -126,5 +127,16 @@ class OrderItem private constructor(
         /** Un ítem recién creado junto con su pedido (RN-ORD-05): nace `PENDING`, con su snapshot. */
         fun pending(id: UUID, snapshot: ItemSnapshot): OrderItem =
             OrderItem(id, snapshot, ItemStatus.PENDING, null, null, null, null, null)
+
+        fun restore(
+            id: UUID,
+            snapshot: ItemSnapshot,
+            status: ItemStatus,
+            queuedAt: Instant?,
+            startedAt: Instant?,
+            readyAt: Instant?,
+            deliveredAt: Instant?,
+            cancelledAt: Instant?,
+        ): OrderItem = OrderItem(id, snapshot, status, queuedAt, startedAt, readyAt, deliveredAt, cancelledAt)
     }
 }

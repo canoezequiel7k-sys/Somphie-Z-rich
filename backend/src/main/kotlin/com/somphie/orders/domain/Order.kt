@@ -51,6 +51,7 @@ class Order private constructor(
     /** Cuándo se tomó la decisión (aceptar, rechazar, cancelar o expirar). Sirve para `ORDER_ALREADY_DECIDED`. */
     val decidedAt: Instant?,
     val rejection: Rejection?,
+    val version: Long,
 ) {
 
     /**
@@ -85,13 +86,13 @@ class Order private constructor(
         val updated = items.map { if (it.id in excludedItemIds) it.exclude(now) else it.queue(now) }
         // El estado resultante sale de la derivación (§4), no de una regla repetida acá.
         val derived = OrderStatusDerivation.fromItems(updated.map { it.status })
-        return Order(id, derived, updated, createdAt, acceptedAt = now, decidedAt = now, rejection = null)
+        return Order(id, derived, updated, createdAt, acceptedAt = now, decidedAt = now, rejection = null, version = version + 1)
     }
 
     /** Rechaza el pedido (RN-ORD-09). Sus ítems `PENDING` pasan a `CANCELLED` y no cobran (RN-ORD-19). */
     fun reject(now: Instant, rejection: Rejection): Order {
         requirePendingForDecision()
-        return Order(id, OrderStatus.REJECTED, discardItems(now), createdAt, null, now, rejection)
+        return Order(id, OrderStatus.REJECTED, discardItems(now), createdAt, null, now, rejection, version + 1)
     }
 
     /**
@@ -106,7 +107,7 @@ class Order private constructor(
                 mapOf("currentStatus" to status),
             )
         }
-        return Order(id, OrderStatus.CANCELLED, discardItems(now), createdAt, null, now, null)
+        return Order(id, OrderStatus.CANCELLED, discardItems(now), createdAt, null, now, null, version + 1)
     }
 
     /**
@@ -117,7 +118,7 @@ class Order private constructor(
     fun expire(now: Instant, ttl: Duration): Order {
         if (status != OrderStatus.PENDING_REVIEW) throw alreadyDecided()
         require(isDueForExpiry(now, ttl)) { "Order $id is not due for expiry yet" }
-        return Order(id, OrderStatus.EXPIRED, discardItems(now), createdAt, null, now, null)
+        return Order(id, OrderStatus.EXPIRED, discardItems(now), createdAt, null, now, null, version + 1)
     }
 
     /** Delega el inicio al ítem y recalcula el estado agregado desde todos sus ítems. */
@@ -128,6 +129,23 @@ class Order private constructor(
 
     /** Delega la entrega al ítem y actualiza el pedido sin duplicar la regla de transición. */
     fun deliverItem(itemId: UUID, now: Instant): Order = transitionItem(itemId) { it.deliver(now) }
+
+    /** Entrega en una sola mutación todos los ítems que estaban listos; la versión sube una vez. */
+    fun deliverReadyItems(now: Instant): Order {
+        val ready = items.filter { it.status == ItemStatus.READY }
+        if (ready.isEmpty()) return this
+        val updatedItems = items.map { if (it.status == ItemStatus.READY) it.deliver(now) else it }
+        return Order(
+            id = id,
+            status = OrderStatusDerivation.fromItems(updatedItems.map { it.status }),
+            items = updatedItems,
+            createdAt = createdAt,
+            acceptedAt = acceptedAt,
+            decidedAt = decidedAt,
+            rejection = rejection,
+            version = version + 1,
+        )
+    }
 
     /** Delega la cancelación al ítem; el motivo y la autorización siguen siendo responsabilidad de aplicación. */
     fun cancelItem(itemId: UUID, now: Instant): Order = transitionItem(itemId) { it.cancel(now) }
@@ -164,6 +182,7 @@ class Order private constructor(
             acceptedAt = acceptedAt,
             decidedAt = decidedAt,
             rejection = rejection,
+            version = version + 1,
         )
     }
 
@@ -214,7 +233,32 @@ class Order private constructor(
             if (items.isEmpty()) throw DomainException(ErrorCode.ORDER_EMPTY, "An order needs at least one item")
             require(items.all { it.status == ItemStatus.PENDING }) { "New order items must be PENDING" }
             require(items.map { it.id }.toSet().size == items.size) { "Order items must have distinct ids" }
-            return Order(id, OrderStatus.PENDING_REVIEW, items, now, null, null, null)
+            return Order(id, OrderStatus.PENDING_REVIEW, items, now, null, null, null, 1)
+        }
+
+        fun restore(
+            id: UUID,
+            status: OrderStatus,
+            items: List<OrderItem>,
+            createdAt: Instant,
+            acceptedAt: Instant?,
+            decidedAt: Instant?,
+            rejection: Rejection?,
+            version: Long,
+        ): Order {
+            require(version >= 1) { "Order version must be positive" }
+            require(items.map { it.id }.toSet().size == items.size) { "Order items must have distinct ids" }
+            if (status in setOf(OrderStatus.ACCEPTED, OrderStatus.IN_PREPARATION, OrderStatus.READY, OrderStatus.DELIVERED, OrderStatus.CANCELLED) &&
+                items.any { it.status == ItemStatus.PENDING }
+            ) {
+                throw IllegalArgumentException("Accepted order cannot contain pending items")
+            }
+            if (status in setOf(OrderStatus.ACCEPTED, OrderStatus.IN_PREPARATION, OrderStatus.READY, OrderStatus.DELIVERED) &&
+                OrderStatusDerivation.fromItems(items.map { it.status }) != status
+            ) {
+                throw IllegalArgumentException("Persisted order status does not match its items")
+            }
+            return Order(id, status, items, createdAt, acceptedAt, decidedAt, rejection, version)
         }
 
         /** Pedido tomado por el personal (RN-ORD-18): nace `ACCEPTED`. Reutiliza `create` + `accept`. */

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Somphie Zúrich API
-  version: 0.2.5
+  version: 0.2.6
   summary: Contrato REST del backend de Somphie Zúrich (pedidos por QR, operación del personal, cuenta y pagos simulados).
   description: |
     Fuente de verdad del contrato (ADR-0008). Todo cambio se hace **primero aquí** y en `CHANGELOG.md`.
@@ -916,6 +916,7 @@ paths:
       tags: [Preparation]
       operationId: deliverReadyItems
       summary: Entregar todos los ítems listos de un pedido
+      description: Entrega en una única operación los ítems que estén READY al comenzar la transacción; si no hay ninguno, no modifica el pedido.
       security: [{staffJwt: []}]
       x-permission: item.deliver
       parameters:
@@ -983,7 +984,7 @@ paths:
               schema: {$ref: '#/components/schemas/StationQueue'}
               example:
                 items:
-                  - {itemId: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d, orderId: e91a7b3c-5d2f-4e8a-9b1c-3d5f7a9b1c2e, orderCode: '#042', tableLabel: Mesa 7, productName: Flat white, quantity: 2, optionsSummary: Grande · Avena, options: [{groupName: Tamaño, optionName: Grande, priceDeltaMinor: 80000}, {groupName: Leche, optionName: Avena, priceDeltaMinor: 60000}], note: Sin azúcar, status: QUEUED, queuedAt: '2026-10-11T15:04:01Z', delayed: false}
+                  - {itemId: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d, orderId: e91a7b3c-5d2f-4e8a-9b1c-3d5f7a9b1c2e, orderCode: '#042', tableLabel: Mesa 7, productName: Flat white, quantity: 2, optionsSummary: Grande · Avena, options: [{groupId: 3f9e1d2c-4b5a-4687-9a0b-c1d2e3f4a5b6, optionId: e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7081, groupName: Tamaño, optionName: Grande, priceDeltaMinor: 80000}, {groupId: 4a0f2e3d-5c6b-4798-8b1c-d2e3f4a5b6c7, optionId: f6a7b8c9-d0e1-4f2a-8b3c-4d5e6f708192, groupName: Leche, optionName: Avena, priceDeltaMinor: 60000}], note: Sin azúcar, status: QUEUED, queuedAt: '2026-10-11T15:04:01Z', delayed: false}
                 nextCursor: null
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
@@ -1693,7 +1694,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/VersionInfo'}
-              example: {build: 0.1.0, contractVersion: 0.2.5}
+              example: {build: 0.1.0, contractVersion: 0.2.6}
         '500': {$ref: '#/components/responses/InternalError'}
   /media/{path}:
     get:
@@ -2321,8 +2322,10 @@ components:
         acknowledgedTotalMinor: {$ref: '#/components/schemas/MoneyMinor'}
     OrderItemOption:
       type: object
-      required: [groupName, optionName, priceDeltaMinor]
+      required: [groupId, optionId, groupName, optionName, priceDeltaMinor]
       properties:
+        groupId: {$ref: '#/components/schemas/Uuid'}
+        optionId: {$ref: '#/components/schemas/Uuid'}
         groupName: {type: string}
         optionName: {type: string}
         priceDeltaMinor: {$ref: '#/components/schemas/MoneyMinor'}
@@ -2345,6 +2348,11 @@ components:
         station: {type: string}
         status: {$ref: '#/components/schemas/ItemStatus'}
         note: {type: string}
+        queuedAt: {$ref: '#/components/schemas/Timestamp'}
+        startedAt: {$ref: '#/components/schemas/Timestamp'}
+        readyAt: {$ref: '#/components/schemas/Timestamp'}
+        deliveredAt: {$ref: '#/components/schemas/Timestamp'}
+        cancelledAt: {$ref: '#/components/schemas/Timestamp'}
         options:
           type: array
           items: {$ref: '#/components/schemas/OrderItemOption'}

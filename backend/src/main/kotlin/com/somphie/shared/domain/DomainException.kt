@@ -30,6 +30,14 @@ enum class ErrorCode {
     ITEM_INVALID_TRANSITION,
     ITEM_NOT_CANCELLABLE,
     ITEM_UNDO_WINDOW_EXPIRED,
+    ITEM_STATION_FORBIDDEN,
+
+    // --- Opciones de catálogo (catálogo §7.1) ---
+    OPTION_NOT_FOUND,
+    OPTION_UNAVAILABLE,
+    OPTION_SELECTION_INVALID,
+    PRODUCT_UNAVAILABLE,
+    PRICE_CHANGED,
 
     // --- Sesiones y participantes (catálogo §3) ---
     SESSION_FULL, // La sesión alcanzó el máximo de participantes permitido.

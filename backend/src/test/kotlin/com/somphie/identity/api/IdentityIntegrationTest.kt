@@ -51,6 +51,7 @@ class IdentityIntegrationTest {
         jdbc.update("DELETE FROM auth_login_attempt")
         jdbc.update("DELETE FROM audit_event WHERE target_id = ?", USER_ID)
         jdbc.update("DELETE FROM refresh_token WHERE user_id = ?", USER_ID)
+        jdbc.update("DELETE FROM user_station WHERE user_id = ?", USER_ID)
         jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
         jdbc.update("DELETE FROM app_user WHERE id = ?", USER_ID)
         jdbc.update(
@@ -95,21 +96,36 @@ class IdentityIntegrationTest {
             "UPDATE customer_order SET status = 'ACCEPTED', accepted_at = CURRENT_TIMESTAMP - INTERVAL '20 minutes' WHERE id = ?",
             UUID.fromString(orderId),
         )
-        jdbc.update("UPDATE order_item SET status = 'QUEUED' WHERE order_id = ?", UUID.fromString(orderId))
+        jdbc.update(
+            """
+            UPDATE order_item oi SET status = 'QUEUED', queued_at = o.accepted_at
+            FROM customer_order o WHERE oi.order_id = o.id AND oi.order_id = ?
+            """.trimIndent(),
+            UUID.fromString(orderId),
+        )
         jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
         jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'KITCHEN')", USER_ID)
         val kitchenToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
 
         mockMvc.perform(
-            get("/staff/stations/$stationId/queue").header("Authorization", "******"),
+            get("/staff/stations/$stationId/queue").header("Authorization", "Bearer $kitchenToken"),
         ).andExpect(status().isForbidden)
-            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.code").value("ITEM_STATION_FORBIDDEN"))
+        mockMvc.perform(
+            get("/staff/stations").header("Authorization", "Bearer $kitchenToken"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items").isEmpty)
 
         jdbc.update("INSERT INTO user_station (user_id, station_id) VALUES (?, ?)", USER_ID, stationId)
+        mockMvc.perform(
+            get("/staff/stations").header("Authorization", "Bearer $kitchenToken"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(stationId.toString()))
         val firstPage = mockMvc.perform(
             get("/staff/stations/$stationId/queue")
                 .param("limit", "1")
-                .header("Authorization", "******"),
+                .header("Authorization", "Bearer $kitchenToken"),
         ).andExpect(status().isOk)
             .andExpect(jsonPath("$.items.length()").value(1))
             .andExpect(jsonPath("$.items[0].status").value("QUEUED"))
@@ -120,7 +136,7 @@ class IdentityIntegrationTest {
             get("/staff/stations/$stationId/queue")
                 .param("limit", "1")
                 .param("cursor", cursor)
-                .header("Authorization", "******"),
+                .header("Authorization", "Bearer $kitchenToken"),
         ).andExpect(status().isOk)
             .andExpect(jsonPath("$.items.length()").value(1))
             .andExpect(jsonPath("$.items[0].status").value("QUEUED"))
@@ -143,7 +159,7 @@ class IdentityIntegrationTest {
             OTHER_RESTAURANT_ID,
         )
         mockMvc.perform(
-            get("/staff/stations/$BAR_STATION_ID/queue").header("Authorization", "******"),
+            get("/staff/stations/$BAR_STATION_ID/queue").header("Authorization", "Bearer $kitchenToken"),
         ).andExpect(status().isNotFound)
             .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
     }
@@ -199,6 +215,20 @@ class IdentityIntegrationTest {
         jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
         jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'KITCHEN')", USER_ID)
         val stationId = addOrderItem(orderId, fixture)
+        addOrderItem(orderId, fixture)
+        val otherStationId = jdbc.queryForObject(
+            "SELECT id FROM station WHERE restaurant_id = ? AND id <> ? LIMIT 1",
+            UUID::class.java,
+            RESTAURANT_ID,
+            stationId,
+        )!!
+        val itemIds = jdbc.query(
+            "SELECT id FROM order_item WHERE order_id = ? ORDER BY id",
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            UUID.fromString(orderId),
+        )
+        jdbc.update("UPDATE order_item SET station_id = ? WHERE id = ?", otherStationId, itemIds.first())
+        val assignedItemId = itemIds.last()
         val kitchenToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
         mockMvc.perform(
             get("/staff/orders")
@@ -225,10 +255,223 @@ class IdentityIntegrationTest {
             .andExpect(jsonPath("$[0].id").value(orderId))
 
         mockMvc.perform(
+            get("/staff/orders/$orderId").header("Authorization", "Bearer $kitchenToken"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(assignedItemId.toString()))
+
+        mockMvc.perform(
             post("/staff/orders/$orderId/accept")
                 .header("Authorization", "Bearer $kitchenToken")
                 .header("Idempotency-Key", UUID.randomUUID().toString()),
         ).andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun `preparation action enforces station assignment persists once and replays idempotently`() {
+        val fixture = createGuestSession()
+        val orderId = createOrder(fixture)
+        val stationId = addOrderItem(orderId, fixture)
+        val itemId = jdbc.queryForObject(
+            "SELECT id FROM order_item WHERE order_id = ?",
+            UUID::class.java,
+            UUID.fromString(orderId),
+        )!!
+        jdbc.update(
+            "UPDATE customer_order SET status = 'ACCEPTED', accepted_at = CURRENT_TIMESTAMP WHERE id = ?",
+            UUID.fromString(orderId),
+        )
+        jdbc.update(
+            """
+            UPDATE order_item oi SET status = 'QUEUED', queued_at = o.accepted_at
+            FROM customer_order o WHERE oi.order_id = o.id AND oi.order_id = ?
+            """.trimIndent(),
+            UUID.fromString(orderId),
+        )
+        jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
+        jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'KITCHEN')", USER_ID)
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val key = UUID.randomUUID().toString()
+
+        mockMvc.perform(
+            post("/staff/order-items/$itemId/start")
+                .header("Authorization", "Bearer $staffToken")
+                .header("Idempotency-Key", key),
+        ).andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value("ITEM_STATION_FORBIDDEN"))
+        assertEquals(
+            1L,
+            jdbc.queryForObject("SELECT version FROM customer_order WHERE id = ?", Long::class.java, UUID.fromString(orderId)),
+        )
+
+        jdbc.update("INSERT INTO user_station (user_id, station_id) VALUES (?, ?)", USER_ID, stationId)
+        val first = mockMvc.perform(
+            post("/staff/order-items/$itemId/start")
+                .header("Authorization", "Bearer $staffToken")
+                .header("Idempotency-Key", key),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.version").value(2))
+            .andExpect(jsonPath("$.items[0].status").value("IN_PREPARATION"))
+            .andReturn()
+
+        mockMvc.perform(
+            post("/staff/order-items/$itemId/start")
+                .header("Authorization", "Bearer $staffToken")
+                .header("Idempotency-Key", key),
+        ).andExpect(status().isOk)
+            .andExpect(header().string("Idempotent-Replayed", "true"))
+            .andExpect(content().json(first.response.contentAsString))
+
+        assertEquals(
+            2L,
+            jdbc.queryForObject("SELECT version FROM customer_order WHERE id = ?", Long::class.java, UUID.fromString(orderId)),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject("SELECT count(*) FROM audit_event WHERE target_id = CAST(? AS UUID)", Int::class.java, itemId),
+        )
+        assertEquals(
+            "IN_PREPARATION",
+            jdbc.queryForObject("SELECT status FROM order_item WHERE id = ?", String::class.java, itemId),
+        )
+    }
+
+    @Test
+    fun `order creation validates options and persists a historical price snapshot`() {
+        val fixture = createGuestSession()
+        val productId = UUID.fromString("9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7")
+        val largeOptionId = "e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7081"
+        val oatOptionId = "f6a7b8c9-d0e1-4f2a-8b3c-4d5e6f708192"
+        val basePrice = jdbc.queryForObject(
+            "SELECT price_minor FROM product WHERE id = ?",
+            Long::class.java,
+            productId,
+        )!!
+        val total = basePrice + 140_000
+        val request = """{"items":[{"productId":"$productId","quantity":1,"optionIds":["$largeOptionId","$oatOptionId"]}],"acknowledgedTotalMinor":$total}"""
+
+        val response = mockMvc.perform(
+            post("/sessions/current/orders")
+                .header("Authorization", "Bearer ${fixture.token}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request),
+        ).andExpect(status().isCreated)
+            .andExpect(jsonPath("$.totalMinor").value(total))
+            .andExpect(jsonPath("$.items[0].optionsDeltaMinor").value(140_000))
+            .andExpect(jsonPath("$.items[0].options.length()").value(2))
+            .andReturn().response.contentAsString
+        val orderId = UUID.fromString(json(response, "$.id"))
+        val savedSnapshot = jdbc.queryForObject(
+            "SELECT options_snapshot::text FROM order_item WHERE order_id = ?",
+            String::class.java,
+            orderId,
+        )!!
+        try {
+            jdbc.update("UPDATE product_option SET name = 'Renamed', price_delta_minor = 0 WHERE id = ?", UUID.fromString(largeOptionId))
+            assertEquals(savedSnapshot, jdbc.queryForObject(
+                "SELECT options_snapshot::text FROM order_item WHERE order_id = ?",
+                String::class.java,
+                orderId,
+            ))
+        } finally {
+            jdbc.update("UPDATE product_option SET name = 'Grande', price_delta_minor = 80000 WHERE id = ?", UUID.fromString(largeOptionId))
+        }
+
+        val countBeforeInvalidRequest = jdbc.queryForObject("SELECT count(*) FROM customer_order", Int::class.java)!!
+        mockMvc.perform(
+            post("/sessions/current/orders")
+                .header("Authorization", "Bearer ${fixture.token}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"items":[{"productId":"$productId","quantity":1,"optionIds":["${UUID.randomUUID()}"]}],"acknowledgedTotalMinor":$basePrice}"""),
+        ).andExpect(status().`is`(422))
+            .andExpect(jsonPath("$.code").value("OPTION_NOT_FOUND"))
+        assertEquals(countBeforeInvalidRequest, jdbc.queryForObject("SELECT count(*) FROM customer_order", Int::class.java))
+        val groupId = jdbc.queryForObject(
+            "SELECT group_id FROM product_option WHERE id = ?",
+            UUID::class.java,
+            UUID.fromString(largeOptionId),
+        )!!
+        try {
+            jdbc.update("UPDATE product_option SET active = FALSE WHERE id = ?", UUID.fromString(largeOptionId))
+            assertEquals(
+                savedSnapshot,
+                jdbc.queryForObject(
+                    "SELECT options_snapshot::text FROM order_item WHERE order_id = ?",
+                    String::class.java,
+                    orderId,
+                ),
+            )
+            mockMvc.perform(
+                post("/sessions/current/orders")
+                    .header("Authorization", "Bearer ${fixture.token}")
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"items":[{"productId":"$productId","quantity":1,"optionIds":["$largeOptionId"]}],"acknowledgedTotalMinor":$basePrice}"""),
+            ).andExpect(status().isConflict)
+                .andExpect(jsonPath("$.code").value("OPTION_UNAVAILABLE"))
+            jdbc.update("UPDATE product_option SET active = TRUE WHERE id = ?", UUID.fromString(largeOptionId))
+            jdbc.update("UPDATE option_group SET active = FALSE WHERE id = ?", groupId)
+            mockMvc.perform(
+                post("/sessions/current/orders")
+                    .header("Authorization", "Bearer ${fixture.token}")
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"items":[{"productId":"$productId","quantity":1,"optionIds":["$largeOptionId"]}],"acknowledgedTotalMinor":$basePrice}"""),
+            ).andExpect(status().isConflict)
+                .andExpect(jsonPath("$.code").value("OPTION_UNAVAILABLE"))
+        } finally {
+            jdbc.update("UPDATE product_option SET active = TRUE WHERE id = ?", UUID.fromString(largeOptionId))
+            jdbc.update("UPDATE option_group SET active = TRUE WHERE id = ?", groupId)
+        }
+        mockMvc.perform(
+            post("/sessions/current/orders")
+                .header("Authorization", "Bearer ${fixture.token}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"items":[{"productId":"$productId","quantity":1}],"acknowledgedTotalMinor":$basePrice}"""),
+        ).andExpect(status().`is`(422))
+            .andExpect(jsonPath("$.code").value("OPTION_SELECTION_INVALID"))
+        assertEquals(countBeforeInvalidRequest, jdbc.queryForObject("SELECT count(*) FROM customer_order", Int::class.java))
+        try {
+            jdbc.update("UPDATE product SET active = FALSE WHERE id = ?", productId)
+            mockMvc.perform(
+                post("/sessions/current/orders")
+                    .header("Authorization", "Bearer ${fixture.token}")
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"items":[{"productId":"$productId","quantity":1,"optionIds":["$largeOptionId"]}],"acknowledgedTotalMinor":$basePrice}"""),
+            ).andExpect(status().isConflict)
+                .andExpect(jsonPath("$.code").value("PRODUCT_UNAVAILABLE"))
+        } finally {
+            jdbc.update("UPDATE product SET active = TRUE WHERE id = ?", productId)
+        }
+        assertEquals(countBeforeInvalidRequest, jdbc.queryForObject("SELECT count(*) FROM customer_order", Int::class.java))
+        val categoryId = jdbc.queryForObject(
+            """
+            SELECT sub.category_id
+            FROM product p
+            JOIN subcategory sub ON sub.id = p.subcategory_id
+            WHERE p.id = ?
+            """.trimIndent(),
+            UUID::class.java,
+            productId,
+        )!!
+        try {
+            jdbc.update("UPDATE category SET active = FALSE WHERE id = ?", categoryId)
+            mockMvc.perform(
+                post("/sessions/current/orders")
+                    .header("Authorization", "Bearer ${fixture.token}")
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"items":[{"productId":"$productId","quantity":1,"optionIds":["$largeOptionId","$oatOptionId"]}],"acknowledgedTotalMinor":$total}"""),
+            ).andExpect(status().isConflict)
+                .andExpect(jsonPath("$.code").value("PRODUCT_UNAVAILABLE"))
+        } finally {
+            jdbc.update("UPDATE category SET active = TRUE WHERE id = ?", categoryId)
+        }
+        assertEquals(countBeforeInvalidRequest, jdbc.queryForObject("SELECT count(*) FROM customer_order", Int::class.java))
     }
 
     @Test

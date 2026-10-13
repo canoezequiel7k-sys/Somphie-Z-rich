@@ -18,6 +18,12 @@ data class StationQueueAccess(
     val stationIds: Set<UUID>,
 )
 
+data class StationListEntry(
+    val id: UUID,
+    val code: String,
+    val name: String,
+)
+
 data class StationQueueCursor(val queuedAt: Instant, val itemId: UUID)
 
 data class StationQueueRecord(
@@ -31,10 +37,21 @@ data class StationQueueRecord(
     val status: String,
     val queuedAt: Instant,
     val delayedSlaMinutes: Long,
+    val options: List<QueueOption> = emptyList(),
+)
+
+data class QueueOption(
+    val groupId: UUID,
+    val optionId: UUID,
+    val groupName: String,
+    val optionName: String,
+    val priceDeltaMinor: Long,
 )
 
 interface StationQueueRepository {
     fun stationBelongsToRestaurant(stationId: UUID, restaurantId: UUID): Boolean
+
+    fun findStations(restaurantId: UUID, assignedStationIds: Set<UUID>?): List<StationListEntry>
 
     fun findQueueItems(
         restaurantId: UUID,
@@ -56,12 +73,31 @@ data class StationQueueItemResponse(
     val status: String,
     val queuedAt: Instant,
     val delayed: Boolean,
+    val optionsSummary: String,
+    val options: List<QueueOption>,
 )
 
 data class StationQueueResponse(
     val items: List<StationQueueItemResponse>,
     val nextCursor: String?,
 )
+
+@Service
+class GetAssignedStations(
+    private val repository: StationQueueRepository,
+) {
+    fun execute(access: StationQueueAccess): Map<String, List<StationListEntry>> {
+        if (PREPARE_PERMISSION !in access.permissions) {
+            throw DomainException(ErrorCode.FORBIDDEN, "Staff permission is required")
+        }
+        val assignedIds = if ("OWNER" in access.roles) null else access.stationIds
+        return mapOf("items" to repository.findStations(access.restaurantId, assignedIds))
+    }
+
+    private companion object {
+        const val PREPARE_PERMISSION = "item.prepare"
+    }
+}
 
 @Service
 class GetStationQueue(
@@ -86,7 +122,7 @@ class GetStationQueue(
             throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Station not found")
         }
         if ("OWNER" !in access.roles && stationUuid !in access.stationIds) {
-            throw DomainException(ErrorCode.FORBIDDEN, "Station is not assigned to this account")
+            throw DomainException(ErrorCode.ITEM_STATION_FORBIDDEN, "Station is not assigned to this account")
         }
         val statuses = parseStatuses(requestedStatuses)
         if (statuses.isEmpty()) return StationQueueResponse(emptyList(), null)
@@ -111,6 +147,8 @@ class GetStationQueue(
                 queuedAt = row.queuedAt,
                 delayed = Duration.between(row.queuedAt, clock.instant()) >
                     Duration.ofMinutes(row.delayedSlaMinutes),
+                optionsSummary = row.options.joinToString(" · ") { it.optionName },
+                options = row.options,
             )
         }
         val nextCursor = if (rows.size > limit) {

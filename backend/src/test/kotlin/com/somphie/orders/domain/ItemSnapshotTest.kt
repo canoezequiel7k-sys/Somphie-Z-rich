@@ -10,7 +10,14 @@ import java.util.UUID
 /** Pruebas del snapshot de una línea (RN-ORD-04, RN-OPT-04, RN-BIL-01). */
 class ItemSnapshotTest {
 
-    private fun option(delta: Long) = OptionSnapshot("Leche", "Avena", Money.of(delta))
+    private val fixedOptionGroupId = UUID.fromString("75e4dc1d-f735-444b-9e37-b1cd49dba473")
+    private fun option(delta: Long) = OptionSnapshot(
+        fixedOptionGroupId,
+        UUID.nameUUIDFromBytes("option-$delta".toByteArray()),
+        "Leche",
+        "Avena",
+        Money.of(delta),
+    )
 
     @Test
     fun `without options the unit price is the base price`() {

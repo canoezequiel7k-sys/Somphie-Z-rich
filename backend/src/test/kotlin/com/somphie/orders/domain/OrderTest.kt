@@ -39,6 +39,32 @@ class OrderTest {
         assertNull(order.acceptedAt)
         assertNull(order.decidedAt)
         assertNull(order.rejection)
+        assertEquals(1L, order.version)
+    }
+
+    @Test
+    fun `one aggregate mutation increments the order version exactly once`() {
+        val pending = newOrder(2)
+        val accepted = pending.accept(later)
+        val started = accepted.startItem(accepted.items.first().id, later.plusSeconds(1))
+
+        assertEquals(2L, accepted.version)
+        assertEquals(3L, started.version)
+        assertEquals(1L, pending.version)
+    }
+
+    @Test
+    fun `deliver ready mutates all ready items with one version increment`() {
+        val accepted = newOrder(2).accept(later)
+        val ready = accepted.items.fold(accepted) { current, item ->
+            current.markItemReady(item.id, later.plusSeconds(1))
+        }
+        val delivered = ready.deliverReadyItems(later.plusSeconds(2))
+
+        assertEquals(ready.version + 1, delivered.version)
+        assertTrue(delivered.items.all { it.status == ItemStatus.DELIVERED })
+        assertTrue(delivered.items.all { it.deliveredAt == later.plusSeconds(2) })
+        assertEquals(delivered.version, delivered.deliverReadyItems(later.plusSeconds(3)).version)
     }
 
     @Test

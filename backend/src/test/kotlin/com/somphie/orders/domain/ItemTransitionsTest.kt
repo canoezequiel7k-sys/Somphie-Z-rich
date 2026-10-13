@@ -130,6 +130,18 @@ class ItemTransitionsTest {
     }
 
     @Test
+    fun `undoing a direct queued to ready shortcut does not invent a start time`() {
+        val ready = itemIn(QUEUED).markReady(T0.plusSeconds(30))
+
+        val undone = ready.undo(T0.plusSeconds(40), UNDO_WINDOW)
+
+        assertEquals(IN_PREPARATION, undone.status)
+        assertNull(undone.startedAt)
+        assertNull(undone.readyAt)
+        assertEquals(T0, undone.queuedAt)
+    }
+
+    @Test
     fun `undoing a delivery is allowed exactly at the window limit`() {
         val delivered = itemIn(DELIVERED, now = T0)
         val result = delivered.undo(T0.plus(UNDO_WINDOW), UNDO_WINDOW)

@@ -7,6 +7,14 @@ Reglas (D-150):
 - Versiones `0.x` = borrador. `1.0.0` = contrato congelado al cerrar la Fase 1.
 - Las fechas anteriores al 2026-10-11 no se registraron en su momento (el historial de Git empieza ese día): se marcan "fecha no registrada" en vez de inventarlas.
 
+## [0.2.6] — 2026-10-12 — completar snapshots y respuestas de preparación (WP-BE-50)
+Cambio compatible: agrega los identificadores de opciones históricas y timestamps opcionales de transición.
+- added: `OrderItemOption.groupId` y `optionId`, conservados en cada snapshot.
+- added: timestamps opcionales `queuedAt`, `startedAt`, `readyAt`, `deliveredAt` y `cancelledAt`.
+- changed: `deliver-ready` aclara que procesa los ítems `READY` al comenzar; sin ítems listos no modifica el pedido.
+- changed: `info.version` = `0.2.6` y el ejemplo de `GET /version` (`contractVersion`).
+- Impacto: **Web y Android** (pueden mostrar opciones y tiempos históricos); **Backend** (persistencia y respuestas de preparación).
+
 ## [0.2.5] — 2026-10-12 — alinear revocación del HOST con RN-ACC-10
 Cambio **compatible**: aclara quién puede revocar al HOST y cuándo aplica el error existente.
 - changed: el HOST no puede revocarse a sí mismo; el personal puede revocarlo, en consistencia con RN-ACC-10 y el dominio.

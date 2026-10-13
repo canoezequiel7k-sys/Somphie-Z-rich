@@ -220,7 +220,7 @@ class BackendSmokeTest {
         val token = JsonPath.read<String>(opened, "$.guestToken")
         val sessionId = UUID.fromString(JsonPath.read<String>(opened, "$.session.id"))
         val key = UUID.randomUUID().toString()
-        val request = """{"items":[{"productId":"9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7","quantity":1}],"acknowledgedTotalMinor":485000}"""
+        val request = """{"items":[{"productId":"9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7","quantity":1,"optionIds":["e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7081","f6a7b8c9-d0e1-4f2a-8b3c-4d5e6f708192"]}],"acknowledgedTotalMinor":625000}"""
 
         val created = mockMvc.perform(
             post("/sessions/current/orders")
@@ -229,12 +229,12 @@ class BackendSmokeTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(request),
         ).andExpect(status().isCreated)
-            .andExpect(jsonPath("$.totalMinor").value(485000))
+            .andExpect(jsonPath("$.totalMinor").value(625000))
             .andReturn()
         val orderId = UUID.fromString(JsonPath.read<String>(created.response.contentAsString, "$.id"))
 
         assertEquals(1, jdbcTemplate.queryForObject(
-            "SELECT count(*) FROM customer_order WHERE id = ? AND session_id = ? AND total_minor = 485000",
+            "SELECT count(*) FROM customer_order WHERE id = ? AND session_id = ? AND total_minor = 625000",
             Int::class.java,
             orderId,
             sessionId,
@@ -266,9 +266,9 @@ class BackendSmokeTest {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer $token")
                 .header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(request.replace("485000", "1")),
-        ).andExpect(status().isUnprocessableEntity)
-            .andExpect(jsonPath("$.code").value("PAYMENT_AMOUNT_INVALID"))
+                .content(request.replace("625000", "624999")),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("PRICE_CHANGED"))
 
         mockMvc.perform(
             post("/sessions/current/orders")

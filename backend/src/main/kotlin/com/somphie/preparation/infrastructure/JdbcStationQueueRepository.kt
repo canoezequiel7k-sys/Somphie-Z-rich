@@ -1,16 +1,21 @@
 package com.somphie.preparation.infrastructure
 
 import com.somphie.preparation.application.StationQueueCursor
+import com.somphie.preparation.application.StationListEntry
 import com.somphie.preparation.application.StationQueueRecord
 import com.somphie.preparation.application.StationQueueRepository
+import com.somphie.preparation.application.QueueOption
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository
+import tools.jackson.core.type.TypeReference
+import tools.jackson.databind.ObjectMapper
 import java.sql.Timestamp
 import java.util.UUID
 
 @Repository
 class JdbcStationQueueRepository(
     private val jdbc: NamedParameterJdbcTemplate,
+    private val objectMapper: ObjectMapper,
 ) : StationQueueRepository {
     override fun stationBelongsToRestaurant(stationId: UUID, restaurantId: UUID): Boolean =
         jdbc.query(
@@ -22,6 +27,27 @@ class JdbcStationQueueRepository(
             """.trimIndent(),
             mapOf("stationId" to stationId, "restaurantId" to restaurantId),
         ) { rs, _ -> rs.getBoolean(1) }.first()
+
+    override fun findStations(restaurantId: UUID, assignedStationIds: Set<UUID>?): List<StationListEntry> {
+        if (assignedStationIds != null && assignedStationIds.isEmpty()) return emptyList()
+        val assignmentFilter = if (assignedStationIds == null) "" else "AND id IN (:stationIds)"
+        val params = mutableMapOf<String, Any>("restaurantId" to restaurantId)
+        if (assignedStationIds != null) params["stationIds"] = assignedStationIds
+        return jdbc.query(
+            """
+            SELECT id, code, name FROM station
+            WHERE restaurant_id = :restaurantId $assignmentFilter
+            ORDER BY code
+            """.trimIndent(),
+            params,
+        ) { rs, _ ->
+            StationListEntry(
+                rs.getObject("id", UUID::class.java),
+                rs.getString("code"),
+                rs.getString("name"),
+            )
+        }
+    }
 
     override fun findQueueItems(
         restaurantId: UUID,
@@ -36,16 +62,17 @@ class JdbcStationQueueRepository(
             "statuses" to statuses,
             "limit" to limit,
         )
-        // Accepting an order queues all included items at accepted_at; item ID breaks equal-time ties.
+        // The per-item queue timestamp is stable even when sibling items transition at different times.
         val cursorFilter = if (after == null) "" else {
             params["cursorAt"] = Timestamp.from(after.queuedAt)
             params["cursorItemId"] = after.itemId
-            "AND (o.accepted_at, oi.id) > (:cursorAt, :cursorItemId)"
+            "AND (oi.queued_at, oi.id) > (:cursorAt, :cursorItemId)"
         }
         return jdbc.query(
             """
             SELECT oi.id AS item_id, oi.order_id, o.display_code, dt.label AS table_label,
-                   oi.product_name, oi.quantity, oi.note, oi.status, o.accepted_at,
+                   oi.product_name, oi.quantity, oi.note, oi.status, oi.queued_at,
+                   oi.options_snapshot::text AS options_snapshot,
                    rs.delayed_item_sla_min
             FROM order_item oi
             JOIN customer_order o ON o.id = oi.order_id
@@ -55,14 +82,24 @@ class JdbcStationQueueRepository(
             WHERE o.restaurant_id = :restaurantId
               AND oi.station_id = :stationId
               AND o.status IN ('ACCEPTED', 'IN_PREPARATION', 'READY')
+              AND ts.status = 'OPEN'
               AND oi.status IN (:statuses)
-              AND o.accepted_at IS NOT NULL
+              AND oi.queued_at IS NOT NULL
               $cursorFilter
-            ORDER BY o.accepted_at, oi.id
+            ORDER BY oi.queued_at, oi.id
             LIMIT :limit
             """.trimIndent(),
             params,
         ) { rs, _ ->
+            val options = objectMapper.readValue(rs.getString("options_snapshot") ?: "[]", optionListType).map {
+                QueueOption(
+                    java.util.UUID.fromString(it.getValue("groupId").toString()),
+                    java.util.UUID.fromString(it.getValue("optionId").toString()),
+                    it.getValue("groupName").toString(),
+                    it.getValue("optionName").toString(),
+                    (it.getValue("priceDeltaMinor") as Number).toLong(),
+                )
+            }
             StationQueueRecord(
                 itemId = rs.getObject("item_id", UUID::class.java),
                 orderId = rs.getObject("order_id", UUID::class.java),
@@ -72,9 +109,14 @@ class JdbcStationQueueRepository(
                 quantity = rs.getInt("quantity"),
                 note = rs.getString("note"),
                 status = rs.getString("status"),
-                queuedAt = rs.getTimestamp("accepted_at").toInstant(),
+                queuedAt = rs.getTimestamp("queued_at").toInstant(),
                 delayedSlaMinutes = rs.getLong("delayed_item_sla_min"),
+                options = options,
             )
         }
+    }
+
+    private companion object {
+        val optionListType = object : TypeReference<List<Map<String, Any>>>() {}
     }
 }

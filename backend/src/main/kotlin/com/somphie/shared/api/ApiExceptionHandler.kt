@@ -104,6 +104,8 @@ class ApiExceptionHandler {
         -> HttpStatus.TOO_MANY_REQUESTS
         ErrorCode.ORDER_EMPTY,
         ErrorCode.ORDER_ALL_ITEMS_EXCLUDED,
+        ErrorCode.OPTION_NOT_FOUND,
+        ErrorCode.OPTION_SELECTION_INVALID,
         ErrorCode.PAYMENT_AMOUNT_INVALID,
         ErrorCode.TIP_INVALID,
         ErrorCode.TIP_EXCEEDS_LIMIT,
@@ -119,6 +121,7 @@ class ApiExceptionHandler {
         ErrorCode.IDEMPOTENCY_KEY_REUSED,
         -> HttpStatus.UNPROCESSABLE_CONTENT
         ErrorCode.FORBIDDEN,
+        ErrorCode.ITEM_STATION_FORBIDDEN,
         ErrorCode.ADJUSTMENT_LIMIT_EXCEEDED,
         -> HttpStatus.FORBIDDEN
         ErrorCode.IDEMPOTENCY_KEY_REQUIRED,
@@ -127,6 +130,9 @@ class ApiExceptionHandler {
         ErrorCode.ORDER_ALREADY_DECIDED,
         ErrorCode.ORDER_NOT_CANCELLABLE,
         ErrorCode.ORDER_EXPIRED,
+        ErrorCode.OPTION_UNAVAILABLE,
+        ErrorCode.PRODUCT_UNAVAILABLE,
+        ErrorCode.PRICE_CHANGED,
         ErrorCode.ITEM_INVALID_TRANSITION,
         ErrorCode.ITEM_NOT_CANCELLABLE,
         ErrorCode.ITEM_UNDO_WINDOW_EXPIRED,
