@@ -23,7 +23,7 @@ Común a las fichas: empezar con `AGENTS.md`, [`advances.md`](../../00-gobierno/
 - **Alcance:** DTO/mapeo, consulta eficiente/paginación/cursor, autorización por sesión, tests API+contrato e integración Postgres donde haga falta. Primero cotejar todos los campos obligatorios opcionales y cómo serializa historial.
 - **Fuera:** no cambiar OpenAPI para aceptar el mapa simplificado sin aprobación ARQ; no modificar creación ni cancelación de pedido.
 - **Aceptación:** respuesta de éxito pasa esquema contractual; orden más reciente primero; cursor estable/limit; nunca filtra otras sesiones; pruebas de casos vacío, página siguiente y recurso no propio. Actualizar CHANGELOG solo si contrato aprobado cambia.
-- **Secuencia:** T01 y T02–T04 completadas. T05 queda parcialmente bloqueada por el cambio contractual de Q-24 y las pruebas de cola que dependen de él.
+- **Secuencia:** T01–T05 completadas; cierre y validación de T05 registrados al final de esta ficha.
 
 ## WP-BE-50-T03 — Alinear detalle de pedido cliente
 
@@ -47,12 +47,14 @@ Común a las fichas: empezar con `AGENTS.md`, [`advances.md`](../../00-gobierno/
 
 ## WP-BE-50-T05 — Puerta final del paquete
 
-- **Estado/prioridad/tipo:** Implementación en validación · P1 · cierre/validación.
+- **Estado/prioridad/tipo:** Completada (2026-10-13) · P1 · cierre/validación.
 - **Leer:** tareas T01–T04 cerradas; [`estrategia de pruebas`](../../06-pruebas/estrategia.md); [`backend.md`](../backend.md); [`seguridad`](../../03-arquitectura/seguridad.md); V10/V11.
 - **Ejecutar:** Redocly fijado por CI; pruebas API/contrato; suite `test`, `jacocoTestReport`, `check` con Postgres/Testcontainers; revisión de acciones, lock/version CAS, auditoría atómica, tenant/estación, FIFO/cursor/SLA e idempotencia. `git diff --check`.
 - **Aceptación:** todas las acciones y respuestas del roadmap conformes; Q-24 resuelta/implementada; pruebas de integración ejecutadas satisfactoriamente con Docker; sin regresiones y JaCoCo ≥ umbral vigente (90 % según último registro); docs sincronizados. Reportar errores y resultados reales, sin declarar cerrado si falta una puerta.
 - **Fuera:** no incorporar lógica monetaria paralela. WP-BE-73 debe anular cortesía si la cancelación de ítem lo requiere, mediante puerto compartido de billing/orders.
 - **Habilita:** WP-BE-51 y dependientes declarados en roadmap.
-- **Validación de Q-24 (2026-10-13):** Redocly ✅; Markdownlint ✅ (7 documentos, 0 issues); `GetStationQueueTest` ✅ (8 tests); compilación de producción y tests ✅. `check jacocoTestReport` no completa: 288 tests detectados, 2 inicializaciones de suites fallaron porque Docker no está disponible (Testcontainers); las 286 pruebas ejecutadas pasan, pero no se valida la integración nueva ni JaCoCo. `git diff --check` ✅.
-- **Estado actual:** Q-24 y contrato resueltos; T05 sigue abierta por la integración/Testcontainers y la puerta de JaCoCo. No habilitar WP-BE-51 todavía.
-- **Validación anterior a la resolución de Q-24 (2026-10-13; no valida estos cambios):** `.\backend\gradlew.bat -p backend test --tests "com.somphie.identity.api.IdentityIntegrationTest" --tests "com.somphie.preparation.application.GetStationQueueTest"` ✅ (24/24; 19 + 5); `.\backend\gradlew.bat -p backend check jacocoTestReport` ✅ (311/311; JaCoCo 2786/3007 = 92,65 %); markdownlint-cli2 0.23.3 sobre 5 documentos ✅; `git diff --check` ✅. OpenAPI no cambió en esa corrida; sus resultados no sustituyen la validación actual.
+- **Validación de Q-24 (2026-10-13):** Redocly ✅; Markdownlint ✅ (7 documentos, 0 issues); `GetStationQueueTest` ✅ (8 tests); compilación de producción y tests ✅. El primer intento de suite quedó bloqueado por Docker; fue superado por la validación final completa registrada a continuación.
+- **Validación final (2026-10-13):** `.\backend\gradlew.bat -p backend check jacocoTestReport` ✅ (315 tests, 0 fallos/errores/omitidos; JaCoCo 2801/3018 líneas = 92,81 %); el comando pasó con las suites de integración/Testcontainers. La prueba focalizada `IdentityIntegrationTest.station queue preserves historical null timestamps and follows accepted time FIFO` ✅. Redocly 2.62.1 ✅; Markdownlint 0.23.3 ✅ (7 documentos, 0 issues); `git diff --check` ✅.
+- **Cierre:** Q-24 implementada según OpenAPI 0.3.0; T01–T05 y WP-BE-50 completadas. WP-BE-51 no queda habilitada automáticamente: su ficha aún exige validar WP-BE-40 y confirmar la fuente de `balanceMinor`.
+- **Validación anterior (superada):** una corrida previa no pudo iniciar dos suites por falta de Docker; el resultado final posterior ejecutó correctamente la suite completa y JaCoCo, por lo que ese bloqueo ya no está vigente.
+- **Validación previa a Q-24 (2026-10-13; histórica):** `check jacocoTestReport` pasó con 311 tests y 92,65 %; corresponde a T02–T04 y no reemplaza la validación final de 315 tests registrada arriba.
