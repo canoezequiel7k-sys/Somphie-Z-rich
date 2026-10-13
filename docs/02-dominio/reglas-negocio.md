@@ -76,7 +76,7 @@ Formato: `RN-MÓDULO-nn`. Cada regla indica **dónde se impone** (D = dominio, A
 | RN-PRE-05 | Las transiciones usan actualización condicional por estado esperado (dos personas tocando el mismo ítem: gana una) | DB |
 | RN-PRE-06 | `deliver` lo hace quien tenga `item.deliver`; no requiere ser de la estación | A |
 | RN-PRE-07 | Cancelar un ítem exige motivo; no se cancela `DELIVERED`. Si ya hubo pagos y el saldo queda < 0 → se resuelve con reembolso | A |
-| RN-PRE-08 | Cola por estación en orden FIFO por `acceptedAt`; ítems en cola más de `delayedItemSlaMin` se marcan `delayed=true` | A |
+| RN-PRE-08 | Cola por estación en orden FIFO por `acceptedAt`; ítems cuya espera desde `acceptedAt` supera `delayedItemSlaMin` se marcan `delayed=true`. Si falta el timestamp histórico de aceptación, el SLA es no evaluable y la cola lo representa como `delayed=null`; no se reconstruyen fechas | A |
 | RN-PRE-09 | Deshacer `DELIVERED→READY` solo dentro de `deliveredUndoWindowMin` | A |
 | RN-PRE-10 | Todo cambio guarda actor y timestamp (para métricas de tiempos) | D |
 

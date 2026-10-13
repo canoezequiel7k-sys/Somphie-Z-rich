@@ -23,7 +23,7 @@ management: # Publica solo la comprobación necesaria para liveness y readiness.
         enabled: true # Separa liveness y readiness en rutas de Actuator.
       show-details: never # No publica detalles de infraestructura fuera del perfil dev.
 somphie: # Valores del producto no inferibles desde las librerías.
-  contract-version: 0.2.5 # Debe permanecer alineada con info.version en docs/04-api/openapi.yaml.
+  contract-version: 0.3.0 # Debe permanecer alineada con info.version en docs/04-api/openapi.yaml.
   jwt:
     secret: ${JWT_SECRET:} # La clave real se inyecta por entorno y debe contener al menos 256 bits.
   identity:

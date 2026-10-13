@@ -24,7 +24,7 @@ data class StationListEntry(
     val name: String,
 )
 
-data class StationQueueCursor(val queuedAt: Instant, val itemId: UUID)
+data class StationQueueCursor(val acceptedAt: Instant?, val itemId: UUID)
 
 data class StationQueueRecord(
     val itemId: UUID,
@@ -35,7 +35,8 @@ data class StationQueueRecord(
     val quantity: Int,
     val note: String?,
     val status: String,
-    val queuedAt: Instant,
+    val acceptedAt: Instant?,
+    val queuedAt: Instant?,
     val delayedSlaMinutes: Long,
     val options: List<QueueOption> = emptyList(),
 )
@@ -71,8 +72,8 @@ data class StationQueueItemResponse(
     val quantity: Int,
     val note: String?,
     val status: String,
-    val queuedAt: Instant,
-    val delayed: Boolean,
+    val queuedAt: Instant?,
+    val delayed: Boolean?,
     val optionsSummary: String,
     val options: List<QueueOption>,
 )
@@ -134,7 +135,8 @@ class GetStationQueue(
             after = after,
             limit = limit + 1,
         )
-        val page = rows.take(limit).map { row ->
+        val pageRows = rows.take(limit)
+        val page = pageRows.map { row ->
             StationQueueItemResponse(
                 itemId = row.itemId,
                 orderId = row.orderId,
@@ -145,14 +147,16 @@ class GetStationQueue(
                 note = row.note,
                 status = row.status,
                 queuedAt = row.queuedAt,
-                delayed = Duration.between(row.queuedAt, clock.instant()) >
-                    Duration.ofMinutes(row.delayedSlaMinutes),
+                // Sin acceptedAt no hay base legítima para afirmar que el SLA se cumplió o se excedió.
+                delayed = row.acceptedAt?.let {
+                    Duration.between(it, clock.instant()) > Duration.ofMinutes(row.delayedSlaMinutes)
+                },
                 optionsSummary = row.options.joinToString(" · ") { it.optionName },
                 options = row.options,
             )
         }
         val nextCursor = if (rows.size > limit) {
-            page.lastOrNull()?.let { encodeCursor(StationQueueCursor(it.queuedAt, it.itemId)) }
+            pageRows.lastOrNull()?.let { encodeCursor(StationQueueCursor(it.acceptedAt, it.itemId)) }
         } else {
             null
         }
@@ -179,14 +183,16 @@ class GetStationQueue(
         } catch (_: IllegalArgumentException) {
             throw DomainException(ErrorCode.VALIDATION_FAILED, "Invalid queue cursor")
         }
-        if (parts.size != 2) throw DomainException(ErrorCode.VALIDATION_FAILED, "Invalid queue cursor")
-        val queuedAt = try {
-            Instant.parse(parts[0])
+        if (parts.size != 3 || parts[0] != CURSOR_VERSION) {
+            throw DomainException(ErrorCode.VALIDATION_FAILED, "Invalid queue cursor")
+        }
+        val acceptedAt = if (parts[1] == NULL_CURSOR_TIMESTAMP) null else try {
+            Instant.parse(parts[1])
         } catch (_: DateTimeException) {
             throw DomainException(ErrorCode.VALIDATION_FAILED, "Invalid queue cursor")
         }
-        val itemId = parseUuidForCursor(parts[1])
-        return StationQueueCursor(queuedAt, itemId)
+        val itemId = parseUuidForCursor(parts[2])
+        return StationQueueCursor(acceptedAt, itemId)
     }
 
     private fun parseUuidForCursor(value: String): UUID = try {
@@ -197,11 +203,16 @@ class GetStationQueue(
 
     private fun encodeCursor(cursor: StationQueueCursor): String =
         Base64.getUrlEncoder().withoutPadding()
-            .encodeToString("${cursor.queuedAt}|${cursor.itemId}".toByteArray(StandardCharsets.UTF_8))
+            .encodeToString(
+                "$CURSOR_VERSION|${cursor.acceptedAt ?: NULL_CURSOR_TIMESTAMP}|${cursor.itemId}"
+                    .toByteArray(StandardCharsets.UTF_8),
+            )
 
     private companion object {
         const val PREPARE_PERMISSION = "item.prepare"
         const val MAX_LIMIT = 100
+        const val CURSOR_VERSION = "v2"
+        const val NULL_CURSOR_TIMESTAMP = "null"
         val DEFAULT_STATUSES = listOf("QUEUED", "IN_PREPARATION")
         val ITEM_STATUSES = setOf(
             "PENDING",

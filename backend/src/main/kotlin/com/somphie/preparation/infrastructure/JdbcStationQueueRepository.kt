@@ -62,16 +62,29 @@ class JdbcStationQueueRepository(
             "statuses" to statuses,
             "limit" to limit,
         )
-        // The per-item queue timestamp is stable even when sibling items transition at different times.
-        val cursorFilter = if (after == null) "" else {
-            params["cursorAt"] = Timestamp.from(after.queuedAt)
-            params["cursorItemId"] = after.itemId
-            "AND (oi.queued_at, oi.id) > (:cursorAt, :cursorItemId)"
+        val cursorFilter = when {
+            after == null -> ""
+            after.acceptedAt == null -> {
+                params["cursorItemId"] = after.itemId
+                "AND o.accepted_at IS NULL AND oi.id > :cursorItemId"
+            }
+            else -> {
+                params["cursorAcceptedAt"] = Timestamp.from(after.acceptedAt)
+                params["cursorItemId"] = after.itemId
+                """
+                AND (
+                    o.accepted_at IS NULL
+                    OR o.accepted_at > :cursorAcceptedAt
+                    OR (o.accepted_at = :cursorAcceptedAt AND oi.id > :cursorItemId)
+                )
+                """.trimIndent()
+            }
         }
+        // accepted_at define FIFO; el ID solo desempata y estabiliza históricos sin referencia temporal.
         return jdbc.query(
             """
             SELECT oi.id AS item_id, oi.order_id, o.display_code, dt.label AS table_label,
-                   oi.product_name, oi.quantity, oi.note, oi.status, oi.queued_at,
+                   oi.product_name, oi.quantity, oi.note, oi.status, o.accepted_at, oi.queued_at,
                    oi.options_snapshot::text AS options_snapshot,
                    rs.delayed_item_sla_min
             FROM order_item oi
@@ -84,9 +97,8 @@ class JdbcStationQueueRepository(
               AND o.status IN ('ACCEPTED', 'IN_PREPARATION', 'READY')
               AND ts.status = 'OPEN'
               AND oi.status IN (:statuses)
-              AND oi.queued_at IS NOT NULL
               $cursorFilter
-            ORDER BY oi.queued_at, oi.id
+            ORDER BY o.accepted_at ASC NULLS LAST, oi.id ASC
             LIMIT :limit
             """.trimIndent(),
             params,
@@ -109,7 +121,8 @@ class JdbcStationQueueRepository(
                 quantity = rs.getInt("quantity"),
                 note = rs.getString("note"),
                 status = rs.getString("status"),
-                queuedAt = rs.getTimestamp("queued_at").toInstant(),
+                acceptedAt = rs.getTimestamp("accepted_at")?.toInstant(),
+                queuedAt = rs.getTimestamp("queued_at")?.toInstant(),
                 delayedSlaMinutes = rs.getLong("delayed_item_sla_min"),
                 options = options,
             )

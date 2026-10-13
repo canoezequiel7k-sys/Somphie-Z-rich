@@ -7,6 +7,13 @@ Reglas (D-150):
 - Versiones `0.x` = borrador. `1.0.0` = contrato congelado al cerrar la Fase 1.
 - Las fechas anteriores al 2026-10-11 no se registraron en su momento (el historial de Git empieza ese día): se marcan "fecha no registrada" en vez de inventarlas.
 
+## [0.3.0] — 2026-10-13 — resolver Q-24 para la cola de estación
+Cambio incompatible para consumidores que asumían campos no nulos: `queuedAt` y `delayed` siguen presentes pero ahora admiten `null` en históricos sin timestamp (`delayed=null` solo si falta `acceptedAt`). La cola ordena por `acceptedAt` ascendente y desempata por ID; históricos sin aceptación aparecen al final en orden estable, sin garantía FIFO entre ellos. Cursor keyset de consistencia eventual: no ofrece snapshot frente a inserciones o cambios de estado. Se invalidan cursores de versiones previas; ante `VALIDATION_FAILED`, reiniciar la lectura sin cursor.
+- changed: `GET /staff/stations/{stationId}/queue` incluye activos históricos sin `queued_at`; no inventa timestamps ni `delayed=false`.
+- changed: FIFO/SLA usa `acceptedAt` conforme a RN-PRE-08; las métricas agregadas siguen pospuestas.
+- changed: `info.version` y el ejemplo de `GET /version` (`contractVersion`) = `0.3.0`.
+- Impacto: **Web y Android** deben admitir `null` en `queuedAt`/`delayed` y refrescar para converger durante paginación concurrente; **Backend** ordena/cursoriza por `accepted_at` y preserva datos históricos.
+
 ## [0.2.6] — 2026-10-12 — completar snapshots y respuestas de preparación (WP-BE-50)
 Cambio compatible: agrega los identificadores de opciones históricas y timestamps opcionales de transición.
 - added: `OrderItemOption.groupId` y `optionId`, conservados en cada snapshot.

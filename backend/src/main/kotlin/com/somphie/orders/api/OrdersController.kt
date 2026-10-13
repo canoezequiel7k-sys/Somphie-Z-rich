@@ -25,11 +25,8 @@ import org.springframework.transaction.annotation.Transactional
 import tools.jackson.core.type.TypeReference
 import tools.jackson.databind.ObjectMapper
 import java.security.MessageDigest
-import java.time.DateTimeException
 import java.time.Clock
 import java.time.Instant
-import java.nio.charset.StandardCharsets
-import java.util.Base64
 import java.util.HexFormat
 import java.util.UUID
 
@@ -238,30 +235,6 @@ class OrdersController(
             val response: LinkedHashMap<String, Any>,
         )
 
-        private fun decodeSessionOrdersCursor(value: String): Pair<Instant, UUID> {
-            val parts = try {
-                String(Base64.getUrlDecoder().decode(value), StandardCharsets.UTF_8).split('|')
-            } catch (_: IllegalArgumentException) {
-                throw DomainException(ErrorCode.VALIDATION_FAILED, "Invalid orders cursor")
-            }
-            if (parts.size != 2) throw DomainException(ErrorCode.VALIDATION_FAILED, "Invalid orders cursor")
-            val createdAt = try {
-                Instant.parse(parts[0])
-            } catch (_: DateTimeException) {
-                throw DomainException(ErrorCode.VALIDATION_FAILED, "Invalid orders cursor")
-            }
-            val id = try {
-                UUID.fromString(parts[1])
-            } catch (_: IllegalArgumentException) {
-                throw DomainException(ErrorCode.VALIDATION_FAILED, "Invalid orders cursor")
-            }
-            return createdAt to id
-        }
-
-        private fun encodeSessionOrdersCursor(createdAt: Instant, id: UUID): String =
-            Base64.getUrlEncoder().withoutPadding()
-                .encodeToString("$createdAt|$id".toByteArray(StandardCharsets.UTF_8))
-
         private fun validateAndSnapshotOptions(
             productId: String,
             restaurantId: String,
@@ -351,11 +324,11 @@ class OrdersController(
             throw DomainException(ErrorCode.VALIDATION_FAILED, "Invalid limit")
         }
         val sessionId = UUID.fromString(sessionAndParticipant.getValue("sessionId"))
-        val after = cursor?.let(::decodeSessionOrdersCursor)
+        val after = cursor?.let(OrderCursorCodec::decode)
         val params = mutableMapOf<String, Any>("sessionId" to sessionId, "limit" to limit + 1)
         val cursorFilter = if (after == null) "" else {
-            params["cursorAt"] = java.sql.Timestamp.from(after.first)
-            params["cursorId"] = after.second
+            params["cursorAt"] = java.sql.Timestamp.from(after.createdAt)
+            params["cursorId"] = after.id
             "AND (o.created_at, o.id) < (:cursorAt, :cursorId)"
         }
         val rows = jdbc.query(
@@ -398,50 +371,61 @@ class OrdersController(
         val hasMore = rows.size > limit
         val page = rows.take(limit)
         if (page.isNotEmpty()) {
-            val itemRows = jdbc.query(
-                """
-                SELECT oi.order_id, oi.id, oi.product_id, oi.product_name, oi.product_name_i18n::text AS product_name_i18n,
-                       oi.station_id, s.code AS station_code, oi.quantity, oi.note, oi.base_price_minor,
-                       oi.options_delta_minor, oi.unit_price_minor, oi.line_total_minor, oi.status,
-                       oi.queued_at, oi.started_at, oi.ready_at, oi.delivered_at, oi.cancelled_at,
-                       oi.options_snapshot::text AS options_snapshot
-                FROM order_item oi
-                JOIN station s ON s.id = oi.station_id
-                WHERE oi.order_id IN (:orderIds)
-                ORDER BY oi.order_id, oi.id
-                """.trimIndent(),
-                mapOf("orderIds" to page.map { it.id }),
-            ) { rs, _ ->
-                val item = linkedMapOf<String, Any>(
-                    "id" to rs.getString("id"),
-                    "productId" to rs.getString("product_id"),
-                    "productName" to rs.getString("product_name"),
-                    "productNameI18n" to objectMapper.readValue(rs.getString("product_name_i18n") ?: "{}", MAP_TYPE),
-                    "basePriceMinor" to rs.getLong("base_price_minor"),
-                    "optionsDeltaMinor" to rs.getLong("options_delta_minor"),
-                    "unitPriceMinor" to rs.getLong("unit_price_minor"),
-                    "quantity" to rs.getInt("quantity"),
-                    "lineTotalMinor" to rs.getLong("line_total_minor"),
-                    "station" to rs.getString("station_code"),
-                    "status" to rs.getString("status"),
-                    "options" to objectMapper.readValue(
-                        rs.getString("options_snapshot") ?: "[]",
-                        OPTIONS_TYPE,
-                    ),
-                ).apply {
-                    rs.getString("note")?.let { put("note", it) }
-                    listOf("queued_at" to "queuedAt", "started_at" to "startedAt", "ready_at" to "readyAt",
-                        "delivered_at" to "deliveredAt", "cancelled_at" to "cancelledAt").forEach { (column, field) ->
-                        rs.getTimestamp(column)?.toInstant()?.toString()?.let { put(field, it) }
-                    }
-                }
-                rs.getObject("order_id", UUID::class.java) to item
-            }
-            val itemsByOrder = itemRows.groupBy({ it.first }, { it.second })
+            val itemsByOrder = loadOrderItems(page.map { it.id })
             page.forEach { it.response["items"] = itemsByOrder[it.id].orEmpty() }
         }
-        val nextCursor = if (hasMore) page.lastOrNull()?.let { encodeSessionOrdersCursor(it.createdAt, it.id) } else null
+        val nextCursor = if (hasMore) page.lastOrNull()?.let { OrderCursorCodec.encode(it.createdAt, it.id) } else null
         return ResponseEntity.ok(mapOf("items" to page.map { it.response }, "nextCursor" to nextCursor))
+    }
+
+    private fun loadOrderItems(orderIds: List<UUID>): Map<UUID, List<Map<String, Any>>> {
+        if (orderIds.isEmpty()) return emptyMap()
+        val itemRows = jdbc.query(
+            """
+            SELECT oi.order_id, oi.id, oi.product_id, oi.product_name, oi.product_name_i18n::text AS product_name_i18n,
+                   oi.station_id, s.code AS station_code, oi.quantity, oi.note, oi.base_price_minor,
+                   oi.options_delta_minor, oi.unit_price_minor, oi.line_total_minor, oi.status,
+                   oi.queued_at, oi.started_at, oi.ready_at, oi.delivered_at, oi.cancelled_at,
+                   oi.options_snapshot::text AS options_snapshot
+            FROM order_item oi
+            JOIN station s ON s.id = oi.station_id
+            WHERE oi.order_id IN (:orderIds)
+            ORDER BY oi.order_id, oi.id
+            """.trimIndent(),
+            mapOf("orderIds" to orderIds),
+        ) { rs, _ ->
+            val item = linkedMapOf<String, Any>(
+                "id" to rs.getString("id"),
+                "productId" to rs.getString("product_id"),
+                "productName" to rs.getString("product_name"),
+                "productNameI18n" to objectMapper.readValue(rs.getString("product_name_i18n") ?: "{}", MAP_TYPE),
+                "basePriceMinor" to rs.getLong("base_price_minor"),
+                "optionsDeltaMinor" to rs.getLong("options_delta_minor"),
+                "unitPriceMinor" to rs.getLong("unit_price_minor"),
+                "quantity" to rs.getInt("quantity"),
+                "lineTotalMinor" to rs.getLong("line_total_minor"),
+                "station" to rs.getString("station_code"),
+                "status" to rs.getString("status"),
+                "options" to objectMapper.readValue(
+                    rs.getString("options_snapshot") ?: "[]",
+                    OPTIONS_TYPE,
+                ),
+            ).apply {
+                rs.getString("note")?.let { put("note", it) }
+                // Los NULL históricos se omiten: la lectura no reconstruye horas que nunca se guardaron.
+                listOf(
+                    "queued_at" to "queuedAt",
+                    "started_at" to "startedAt",
+                    "ready_at" to "readyAt",
+                    "delivered_at" to "deliveredAt",
+                    "cancelled_at" to "cancelledAt",
+                ).forEach { (column, field) ->
+                    rs.getTimestamp(column)?.toInstant()?.toString()?.let { put(field, it) }
+                }
+            }
+            rs.getObject("order_id", UUID::class.java) to item
+        }
+        return itemRows.groupBy({ it.first }, { it.second })
     }
 
     @GetMapping("/orders/{orderId}")
@@ -453,22 +437,42 @@ class OrdersController(
         val uuid = try {
             UUID.fromString(orderId)
         } catch (e: Exception) {
-            throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found")
+            throw DomainException(ErrorCode.ORDER_NOT_FOUND, "Order not found")
         }
 
-        val sql = "SELECT id, status, display_code, total_minor, note, created_at FROM customer_order WHERE id = CAST(:id AS UUID) AND session_id = CAST(:sessionId AS UUID)"
-        val orders = jdbc.query(sql, mapOf("id" to uuid.toString(), "sessionId" to sessionAndParticipant["sessionId"])) { rs, _ ->
-            mapOf(
+        // Filtrar por sesión también en SQL evita revelar si el UUID existe en otra sesión.
+        val order = jdbc.query(
+            """
+            SELECT o.id, o.status, o.display_code, o.version, o.total_minor, o.note, o.created_at,
+                   o.participant_id, p.display_name AS participant_name, o.rejection_reason, o.rejection_text
+            FROM customer_order o
+            JOIN session_participant p ON p.id = o.participant_id
+            WHERE o.id = :id AND o.session_id = :sessionId
+            """.trimIndent(),
+            mapOf("id" to uuid, "sessionId" to UUID.fromString(sessionAndParticipant.getValue("sessionId"))),
+        ) { rs, _ ->
+            linkedMapOf<String, Any>(
                 "id" to rs.getString("id"),
                 "status" to rs.getString("status"),
                 "displayCode" to rs.getString("display_code"),
+                "version" to rs.getLong("version"),
+                "createdBy" to mapOf(
+                    "participantId" to rs.getString("participant_id"),
+                    "displayName" to rs.getString("participant_name"),
+                ),
+                "createdAt" to rs.getTimestamp("created_at").toInstant().toString(),
+                "items" to emptyList<Any>(),
                 "totalMinor" to rs.getLong("total_minor"),
-                "note" to rs.getString("note"),
-                "createdAt" to rs.getTimestamp("created_at").toInstant().toString()
-            )
-        }
-
-        val order = orders.firstOrNull() ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found")
+            ).apply {
+                rs.getString("note")?.let { put("note", it) }
+                rs.getString("rejection_reason")?.let {
+                    put("rejection", linkedMapOf("reasonCode" to it).apply {
+                        rs.getString("rejection_text")?.let { text -> put("reasonText", text) }
+                    })
+                }
+            }
+        }.firstOrNull() ?: throw DomainException(ErrorCode.ORDER_NOT_FOUND, "Order not found")
+        order["items"] = loadOrderItems(listOf(uuid))[uuid].orEmpty()
         return ResponseEntity.ok(order)
     }
 

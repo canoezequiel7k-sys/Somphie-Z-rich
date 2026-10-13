@@ -24,6 +24,7 @@ enum class ErrorCode {
     ORDER_NOT_CANCELLABLE,
     ORDER_EXPIRED,
     ORDER_ALL_ITEMS_EXCLUDED,
+    ORDER_NOT_FOUND,
     ITEM_NOT_FOUND,
 
     // --- Ítems de pedido (catálogo §4) ---

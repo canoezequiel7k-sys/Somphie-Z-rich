@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Somphie Zúrich API
-  version: 0.2.6
+  version: 0.3.0
   summary: Contrato REST del backend de Somphie Zúrich (pedidos por QR, operación del personal, cuenta y pagos simulados).
   description: |
     Fuente de verdad del contrato (ADR-0008). Todo cambio se hace **primero aquí** y en `CHANGELOG.md`.
@@ -962,7 +962,10 @@ paths:
       tags: [Preparation]
       operationId: getStationQueue
       summary: Cola FIFO de una estación
-      description: Ítems `QUEUED` e `IN_PREPARATION` de pedidos aceptados, por `queuedAt`. `delayed` marca los que superan el SLA.
+      description: |
+        Ítems `QUEUED` e `IN_PREPARATION` de pedidos aceptados, ordenados por `acceptedAt` ascendente y `itemId` como desempate estable. Los históricos sin `acceptedAt` aparecen al final ordenados por ID; ese grupo no tiene orden FIFO reconstruible.
+        `delayed` se calcula desde `acceptedAt` y el SLA configurado; vale `null` si falta ese dato. `queuedAt` conserva el timestamp del ítem y vale `null` si no fue persistido.
+        La paginación keyset es de consistencia eventual: inserciones y cambios de estado entre páginas pueden causar omisiones o alterar páginas posteriores; refrescar la cola obtiene el estado actual. No se garantiza un snapshot entre requests. Los cursores previos a 0.3.0 quedan invalidados; ante `VALIDATION_FAILED`, iniciar una lectura sin cursor.
       security: [{staffJwt: []}]
       x-permission: item.prepare
       parameters:
@@ -985,6 +988,7 @@ paths:
               example:
                 items:
                   - {itemId: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d, orderId: e91a7b3c-5d2f-4e8a-9b1c-3d5f7a9b1c2e, orderCode: '#042', tableLabel: Mesa 7, productName: Flat white, quantity: 2, optionsSummary: Grande · Avena, options: [{groupId: 3f9e1d2c-4b5a-4687-9a0b-c1d2e3f4a5b6, optionId: e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7081, groupName: Tamaño, optionName: Grande, priceDeltaMinor: 80000}, {groupId: 4a0f2e3d-5c6b-4798-8b1c-d2e3f4a5b6c7, optionId: f6a7b8c9-d0e1-4f2a-8b3c-4d5e6f708192, groupName: Leche, optionName: Avena, priceDeltaMinor: 60000}], note: Sin azúcar, status: QUEUED, queuedAt: '2026-10-11T15:04:01Z', delayed: false}
+                  - {itemId: 2a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d, orderId: e91a7b3c-5d2f-4e8a-9b1c-3d5f7a9b1c2e, orderCode: '#031', tableLabel: Mesa 3, productName: Café histórico, quantity: 1, status: QUEUED, queuedAt: null, delayed: null, options: []}
                 nextCursor: null
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
@@ -1694,7 +1698,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/VersionInfo'}
-              example: {build: 0.1.0, contractVersion: 0.2.6}
+              example: {build: 0.1.0, contractVersion: 0.3.0}
         '500': {$ref: '#/components/responses/InternalError'}
   /media/{path}:
     get:
@@ -2474,8 +2478,8 @@ components:
           items: {$ref: '#/components/schemas/OrderItemOption'}
         note: {type: string}
         status: {$ref: '#/components/schemas/ItemStatus'}
-        queuedAt: {$ref: '#/components/schemas/Timestamp'}
-        delayed: {type: boolean}
+        queuedAt: {type: [string, 'null'], format: date-time, description: Timestamp persistido en el ítem; null si falta en registros históricos.}
+        delayed: {type: [boolean, 'null'], description: null si falta acceptedAt y el SLA no puede evaluarse.}
     StationQueue:
       type: object
       required: [items, nextCursor]

@@ -166,6 +166,71 @@ class IdentityIntegrationTest {
     }
 
     @Test
+    fun `station queue preserves historical null timestamps and follows accepted time FIFO`() {
+        val recentAccepted = createGuestSession()
+        val oldAccepted = createGuestSession()
+        val historical = createGuestSession()
+        val recentOrderId = createOrder(recentAccepted)
+        val oldOrderId = createOrder(oldAccepted)
+        val historicalOrderId = createOrder(historical)
+        val stationId = addOrderItem(recentOrderId, recentAccepted)
+        addOrderItem(oldOrderId, oldAccepted)
+        addOrderItem(historicalOrderId, historical)
+
+        jdbc.update(
+            "UPDATE customer_order SET status = 'ACCEPTED', accepted_at = CURRENT_TIMESTAMP - INTERVAL '5 minutes' WHERE id = ?",
+            UUID.fromString(recentOrderId),
+        )
+        jdbc.update(
+            "UPDATE customer_order SET status = 'ACCEPTED', accepted_at = CURRENT_TIMESTAMP - INTERVAL '20 minutes' WHERE id = ?",
+            UUID.fromString(oldOrderId),
+        )
+        jdbc.update(
+            """
+            UPDATE order_item SET status = 'QUEUED', queued_at = CURRENT_TIMESTAMP - INTERVAL '30 minutes'
+            WHERE order_id = ?
+            """.trimIndent(),
+            UUID.fromString(recentOrderId),
+        )
+        jdbc.update(
+            """
+            UPDATE order_item SET status = 'QUEUED', queued_at = CURRENT_TIMESTAMP - INTERVAL '1 minute'
+            WHERE order_id = ?
+            """.trimIndent(),
+            UUID.fromString(oldOrderId),
+        )
+        jdbc.update(
+            "UPDATE customer_order SET status = 'ACCEPTED', accepted_at = NULL WHERE id = ?",
+            UUID.fromString(historicalOrderId),
+        )
+        jdbc.update(
+            "UPDATE order_item SET status = 'QUEUED', queued_at = NULL WHERE order_id = ?",
+            UUID.fromString(historicalOrderId),
+        )
+        jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
+        jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'KITCHEN')", USER_ID)
+        jdbc.update("INSERT INTO user_station (user_id, station_id) VALUES (?, ?)", USER_ID, stationId)
+        val kitchenToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+
+        val response = mockMvc.perform(
+        get("/staff/stations/$stationId/queue")
+            .param("limit", "10")
+            .header("Authorization", "Bearer $kitchenToken"),
+    ).andExpect(status().isOk)
+        .andReturn().response.contentAsString
+        val expectedOrderIds = listOf(oldOrderId, recentOrderId, historicalOrderId)
+        val matchingItems = JsonPath.read<List<Map<String, Any?>>>(response, "$.items")
+            .filter { it["orderId"] in expectedOrderIds }
+
+        assertEquals(3, matchingItems.size)
+        assertEquals(expectedOrderIds, matchingItems.map { it["orderId"] })
+        assertEquals(true, matchingItems[0]["delayed"])
+        assertEquals(false, matchingItems[1]["delayed"])
+        assertEquals(null, matchingItems[2]["queuedAt"])
+        assertEquals(null, matchingItems[2]["delayed"])
+    }
+
+    @Test
     fun `staff order authorization checks permission and restaurant scope`() {
         val fixture = createGuestSession()
         val orderId = createOrder(fixture)
@@ -211,7 +276,8 @@ class IdentityIntegrationTest {
                 .param("sessionId", fixture.sessionId)
                 .header("Authorization", "Bearer $otherToken"),
         ).andExpect(status().isOk)
-            .andExpect(jsonPath("$").isEmpty)
+            .andExpect(jsonPath("$.items").isEmpty)
+            .andExpect(jsonPath("$.nextCursor").value(null as String?))
 
         jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
         jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'KITCHEN')", USER_ID)
@@ -236,7 +302,8 @@ class IdentityIntegrationTest {
                 .param("sessionId", fixture.sessionId)
                 .header("Authorization", "Bearer $kitchenToken"),
         ).andExpect(status().isOk)
-            .andExpect(jsonPath("$").isEmpty)
+            .andExpect(jsonPath("$.items").isEmpty)
+            .andExpect(jsonPath("$.nextCursor").value(null as String?))
 
         jdbc.update("INSERT INTO user_station (user_id, station_id) VALUES (?, ?)", USER_ID, stationId)
         mockMvc.perform(
@@ -244,7 +311,8 @@ class IdentityIntegrationTest {
                 .param("sessionId", fixture.sessionId)
                 .header("Authorization", "Bearer $kitchenToken"),
         ).andExpect(status().isOk)
-            .andExpect(jsonPath("$").isEmpty)
+            .andExpect(jsonPath("$.items").isEmpty)
+            .andExpect(jsonPath("$.nextCursor").value(null as String?))
 
         jdbc.update("UPDATE customer_order SET status = 'ACCEPTED' WHERE id = ?", UUID.fromString(orderId))
         jdbc.update("UPDATE order_item SET status = 'IN_PREPARATION' WHERE order_id = ?", UUID.fromString(orderId))
@@ -253,7 +321,15 @@ class IdentityIntegrationTest {
                 .param("sessionId", fixture.sessionId)
                 .header("Authorization", "Bearer $kitchenToken"),
         ).andExpect(status().isOk)
-            .andExpect(jsonPath("$[0].id").value(orderId))
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(orderId))
+            .andExpect(jsonPath("$.items[0].sessionId").value(fixture.sessionId))
+            .andExpect(jsonPath("$.items[0].tableLabel").isNotEmpty)
+            .andExpect(jsonPath("$.items[0].createdBy").doesNotExist())
+            .andExpect(jsonPath("$.items[0].items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].items[0].id").value(assignedItemId.toString()))
+            .andExpect(jsonPath("$.items[0].items[0].productCurrentlyAvailable").isBoolean)
+            .andExpect(jsonPath("$.nextCursor").value(null as String?))
 
         mockMvc.perform(
             get("/staff/orders/$orderId").header("Authorization", "Bearer $kitchenToken"),
@@ -266,6 +342,111 @@ class IdentityIntegrationTest {
                 .header("Authorization", "Bearer $kitchenToken")
                 .header("Idempotency-Key", UUID.randomUUID().toString()),
         ).andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun `staff order page applies status session filters and stable ascending cursor`() {
+        val session = createGuestSession()
+        val otherSession = createGuestSession()
+        val pendingOrderId = createOrder(session)
+        val acceptedOrderId = createOrder(session)
+        val rejectedOrderId = createOrder(session)
+        val otherOrderId = createOrder(otherSession)
+        val tiedAt = java.sql.Timestamp.from(Instant.parse("2026-10-13T10:00:00Z"))
+        jdbc.update(
+            "UPDATE customer_order SET created_at = ?, status = 'PENDING_REVIEW' WHERE id = ?",
+            tiedAt,
+            UUID.fromString(pendingOrderId),
+        )
+        jdbc.update(
+            "UPDATE customer_order SET created_at = ?, status = 'ACCEPTED' WHERE id = ?",
+            tiedAt,
+            UUID.fromString(acceptedOrderId),
+        )
+        jdbc.update(
+            "UPDATE customer_order SET created_at = ?, status = 'REJECTED' WHERE id = ?",
+            java.sql.Timestamp.from(Instant.parse("2026-10-13T11:00:00Z")),
+            UUID.fromString(rejectedOrderId),
+        )
+        jdbc.update(
+            "UPDATE customer_order SET created_at = ?, status = 'REJECTED' WHERE id = ?",
+            java.sql.Timestamp.from(Instant.parse("2026-10-13T09:00:00Z")),
+            UUID.fromString(otherOrderId),
+        )
+        val tiedIds = jdbc.queryForList(
+            "SELECT id FROM customer_order WHERE session_id = ? AND created_at = ? ORDER BY id",
+            String::class.java,
+            UUID.fromString(session.sessionId),
+            tiedAt,
+        )
+        val tiedStatuses = tiedIds.map {
+            jdbc.queryForObject(
+                "SELECT status FROM customer_order WHERE id = ?",
+                String::class.java,
+                UUID.fromString(it),
+            )
+        }
+        val accessToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+
+        val firstPage = mockMvc.perform(
+            get("/staff/orders")
+                .param("status", "PENDING_REVIEW,ACCEPTED")
+                .param("sessionId", session.sessionId)
+                .param("limit", "1")
+                .header("Authorization", "Bearer $accessToken"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(tiedIds[0]))
+            .andExpect(jsonPath("$.items[0].status").value(tiedStatuses[0]))
+            .andExpect(jsonPath("$.items[0].sessionId").value(session.sessionId))
+            .andExpect(jsonPath("$.items[0].tableLabel").isNotEmpty)
+            .andExpect(jsonPath("$.items[0].createdBy.participantId").value(session.participantId))
+            .andExpect(jsonPath("$.items[0].items").isArray)
+            .andExpect(jsonPath("$.nextCursor").isNotEmpty)
+            .andReturn().response.contentAsString
+
+        mockMvc.perform(
+            get("/staff/orders")
+                .param("status", "PENDING_REVIEW,ACCEPTED")
+                .param("sessionId", session.sessionId)
+                .param("limit", "1")
+                .param("cursor", json(firstPage, "$.nextCursor"))
+                .header("Authorization", "Bearer $accessToken"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(tiedIds[1]))
+            .andExpect(jsonPath("$.items[0].status").value(tiedStatuses[1]))
+            .andExpect(jsonPath("$.nextCursor").value(null as String?))
+
+        mockMvc.perform(
+            get("/staff/orders")
+                .param("status", "REJECTED")
+                .param("sessionId", session.sessionId)
+                .header("Authorization", "Bearer $accessToken"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(rejectedOrderId))
+
+        mockMvc.perform(
+            get("/staff/orders")
+                .param("status", "UNKNOWN")
+                .header("Authorization", "Bearer $accessToken"),
+        ).andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+
+        mockMvc.perform(
+            get("/staff/orders")
+                .param("limit", "0")
+                .header("Authorization", "Bearer $accessToken"),
+        ).andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+
+        mockMvc.perform(
+            get("/staff/orders")
+                .param("cursor", "malformed")
+                .header("Authorization", "Bearer $accessToken"),
+        ).andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
     }
 
     @Test
@@ -571,7 +752,12 @@ class IdentityIntegrationTest {
         mockMvc.perform(
             get("/orders/$orderId").header("Authorization", "Bearer ${otherParticipant.token}"),
         ).andExpect(status().isNotFound)
-            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"))
+
+        mockMvc.perform(
+            get("/orders/not-a-uuid").header("Authorization", "Bearer ${owner.token}"),
+        ).andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"))
 
         val memberToken = createMember(owner)
         mockMvc.perform(
@@ -649,6 +835,128 @@ class IdentityIntegrationTest {
         ).andExpect(status().isOk)
             .andExpect(jsonPath("$.items.length()").value(0))
             .andExpect(jsonPath("$.nextCursor").value(null as String?))
+    }
+
+    @Test
+    fun `session order page matches contract and paginates tied timestamps without leaking sessions`() {
+        val owner = createGuestSession()
+        val other = createGuestSession()
+        val orderA = createOrder(owner)
+        val orderB = createOrder(owner)
+        val isolatedOrder = createOrder(other)
+        val tiedAt = java.sql.Timestamp.from(Instant.parse("2026-10-13T11:00:00Z"))
+        listOf(orderA, orderB).forEach { id ->
+            jdbc.update("UPDATE customer_order SET created_at = ? WHERE id = ?", tiedAt, UUID.fromString(id))
+        }
+        jdbc.update(
+            "UPDATE customer_order SET created_at = ? WHERE id = ?",
+            java.sql.Timestamp.from(Instant.parse("2026-10-13T12:00:00Z")),
+            UUID.fromString(isolatedOrder),
+        )
+        val orderedIds = jdbc.queryForList(
+            """
+            SELECT id FROM customer_order
+            WHERE session_id = ? AND created_at = ?
+            ORDER BY id DESC
+            """.trimIndent(),
+            String::class.java,
+            UUID.fromString(owner.sessionId),
+            tiedAt,
+        )
+        addOrderItem(requireNotNull(orderedIds.first()), owner)
+
+        val firstPage = mockMvc.perform(
+            get("/sessions/current/orders")
+                .param("limit", "1")
+                .header("Authorization", "Bearer ${owner.token}"),
+        ).andExpect(status().isOk)
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(orderedIds[0]))
+            .andExpect(jsonPath("$.items[0].displayCode").value("#SEC"))
+            .andExpect(jsonPath("$.items[0].status").value("PENDING_REVIEW"))
+            .andExpect(jsonPath("$.items[0].version").value(1))
+            .andExpect(jsonPath("$.items[0].createdAt").isNotEmpty)
+            .andExpect(jsonPath("$.items[0].createdBy.participantId").value(owner.participantId))
+            .andExpect(jsonPath("$.items[0].createdBy.displayName").value("Test guest"))
+            .andExpect(jsonPath("$.items[0].totalMinor").isNumber)
+            .andExpect(jsonPath("$.items[0].items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].items[0].id").isNotEmpty)
+            .andExpect(jsonPath("$.items[0].items[0].productId").isNotEmpty)
+            .andExpect(jsonPath("$.items[0].items[0].productName").value("Security test item"))
+            .andExpect(jsonPath("$.items[0].items[0].productNameI18n").isMap)
+            .andExpect(jsonPath("$.items[0].items[0].basePriceMinor").isNumber)
+            .andExpect(jsonPath("$.items[0].items[0].optionsDeltaMinor").isNumber)
+            .andExpect(jsonPath("$.items[0].items[0].unitPriceMinor").isNumber)
+            .andExpect(jsonPath("$.items[0].items[0].quantity").value(1))
+            .andExpect(jsonPath("$.items[0].items[0].lineTotalMinor").isNumber)
+            .andExpect(jsonPath("$.items[0].items[0].station").isNotEmpty)
+            .andExpect(jsonPath("$.items[0].items[0].status").value("PENDING"))
+            .andExpect(jsonPath("$.items[0].items[0].options").isArray)
+            .andExpect(jsonPath("$.nextCursor").isNotEmpty)
+            .andReturn().response.contentAsString
+
+        mockMvc.perform(
+            get("/sessions/current/orders")
+                .param("limit", "1")
+                .param("cursor", json(firstPage, "$.nextCursor"))
+                .header("Authorization", "Bearer ${owner.token}"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(orderedIds[1]))
+            .andExpect(jsonPath("$.nextCursor").value(null as String?))
+    }
+
+    @Test
+    fun `order detail returns persisted snapshot fields and timestamps from its session`() {
+        val owner = createGuestSession()
+        val orderId = createOrder(owner)
+        addOrderItem(orderId, owner)
+        val queuedAt = Instant.parse("2026-10-13T11:20:00Z")
+        val startedAt = Instant.parse("2026-10-13T11:22:00Z")
+        jdbc.update(
+            "UPDATE customer_order SET status = 'ACCEPTED', note = 'No sugar' WHERE id = ?",
+            UUID.fromString(orderId),
+        )
+        jdbc.update(
+            """
+            UPDATE order_item SET status = 'IN_PREPARATION', note = 'Oat milk', queued_at = ?, started_at = ?
+            WHERE order_id = ?
+            """.trimIndent(),
+            java.sql.Timestamp.from(queuedAt),
+            java.sql.Timestamp.from(startedAt),
+            UUID.fromString(orderId),
+        )
+
+        mockMvc.perform(
+            get("/orders/$orderId").header("Authorization", "Bearer ${owner.token}"),
+        ).andExpect(status().isOk)
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$.id").value(orderId))
+            .andExpect(jsonPath("$.displayCode").value("#SEC"))
+            .andExpect(jsonPath("$.status").value("ACCEPTED"))
+            .andExpect(jsonPath("$.version").value(1))
+            .andExpect(jsonPath("$.createdAt").isNotEmpty)
+            .andExpect(jsonPath("$.createdBy.participantId").value(owner.participantId))
+            .andExpect(jsonPath("$.createdBy.displayName").value("Test guest"))
+            .andExpect(jsonPath("$.note").value("No sugar"))
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").isNotEmpty)
+            .andExpect(jsonPath("$.items[0].productId").isNotEmpty)
+            .andExpect(jsonPath("$.items[0].productName").value("Security test item"))
+            .andExpect(jsonPath("$.items[0].productNameI18n").isMap)
+            .andExpect(jsonPath("$.items[0].basePriceMinor").isNumber)
+            .andExpect(jsonPath("$.items[0].optionsDeltaMinor").isNumber)
+            .andExpect(jsonPath("$.items[0].unitPriceMinor").isNumber)
+            .andExpect(jsonPath("$.items[0].quantity").value(1))
+            .andExpect(jsonPath("$.items[0].lineTotalMinor").isNumber)
+            .andExpect(jsonPath("$.items[0].station").isNotEmpty)
+            .andExpect(jsonPath("$.items[0].status").value("IN_PREPARATION"))
+            .andExpect(jsonPath("$.items[0].note").value("Oat milk"))
+            .andExpect(jsonPath("$.items[0].queuedAt").value(queuedAt.toString()))
+            .andExpect(jsonPath("$.items[0].startedAt").value(startedAt.toString()))
+            .andExpect(jsonPath("$.items[0].options").isArray)
+            .andExpect(jsonPath("$.totalMinor").value(100))
     }
 
     @Test
