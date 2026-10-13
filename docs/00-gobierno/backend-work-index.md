@@ -13,7 +13,7 @@
 
 | Orden | Paquete / estado observado | Evidencia y bloqueo | Tareas / dependencia oficial | Frontend y cierre |
 |---|---|---|---|---|
-| 1 | **WP-BE-50 — Parcial** | Persistencia/acciones existen; Q-24 y formas de respuesta pendientes. Suite registrada: 307 tests, 92,17 %. | [T01–T05](../08-agentes/backend-work/wp-be-50.md); WP-BE-44. | Prism/mock ahora; integrar solo al pasar contrato y seguridad. No habilita WP-BE-51 hasta cerrar. |
+| 1 | **WP-BE-50 — Parcial** | Persistencia/acciones existen; Q-24 aprueba incluir históricos NULL, pero faltan detalles contractuales de cola y formas de respuesta. Suite registrada: 307 tests, 92,17 %. | [T01–T05](../08-agentes/backend-work/wp-be-50.md); WP-BE-44. T01 cerrada; T02 en curso. Los detalles Q-24 bloquean cambios de cola, no T02. | Prism/mock ahora; integrar solo al pasar contrato y seguridad. No habilita WP-BE-51 hasta cerrar. |
 | 2 | **WP-BE-51 — No iniciado** | No hay handlers actuales para tablero, detalle staff, apertura manual ni rotación de join code. | [T01–T02](../08-agentes/backend-work/wp-be-51-52.md); WP-BE-50, WP-BE-40; `balanceMinor` requiere fuente de billing WP-BE-70-T01 (dependencia técnica inferida del schema). | Integración luego de tests contrato/aislamiento; cierra AC-CU-29/30. |
 | 3 | **WP-BE-52 — No iniciado** | No hay handlers `PATCH` de disponibilidad; catálogo existente ya separa `active` y `available`. | [T03](../08-agentes/backend-work/wp-be-51-52.md); WP-BE-30. | Puede ir en paralelo con WP-BE-50 tras revisar el contrato; frontend de disponibilidad integra con prueba contractual. |
 | 4 | **WP-BE-60 — No iniciado / decisión previa** | No se encontraron módulo `notifications`, `event_log` ni endpoint SSE. ADR-0006 sigue en propuesta. | [T01](../08-agentes/backend-work/wp-be-60.md); WP-ARQ-60 y WP-BE-50. | Los clientes pueden simular eventos; integración real después de SSE y reconexión probados. |
@@ -32,7 +32,7 @@ Los estados reflejan la presencia y brechas observadas, no una aprobación de Do
 
 | Trabajo | Dependencias/bloqueos | Paralelo seguro | Conflicto y límite |
 |---|---|---|---|
-| WP-BE-50 T01 → T02 → T03 → T04 → T05 | Q-24 aprobada antes de ajustar cola; discrepancias comprobadas y suites/contrato para cierre. | **No** entre T02–T04: comparten controladores/modelos/respuestas. | Un agente por vez sobre `OrdersController`, `StaffOrdersController` y OpenAPI. |
+| WP-BE-50 T01 → T02 → T03 → T04 → T05 | T01 cerrada: dirección Q-24 aprobada. Sus detalles pendientes bloquean cambios de cola, no la alineación de lecturas de pedidos. Luego, discrepancias comprobadas y suites/contrato para cierre. | **No** entre T02–T04: comparten controladores/modelos/respuestas. | Un agente por vez sobre `OrdersController`, `StaffOrdersController` y OpenAPI. |
 | WP-BE-51, WP-BE-52 | 51: BE-50 + BE-40. 52: BE-30. | 52 puede avanzar aparte de BE-50; 51 solo después de BE-50. | 51 no cambia hasta liberarse su dependencia; 52 limita cambios a catálogo/availability. |
 | WP-BE-60 | WP-ARQ-60 acepta o reemplaza ADR-0006; BE-50 como define roadmap. | El spike/decisión ARQ precede; no implementar SSE en paralelo con decisión. | Una sola persona dueña de eventos y persistencia `event_log`. |
 | WP-BE-70 → 71 → 72; BE-73 | BE-70 depende de BE-50 y definición ARQ-70; BE-71 depende 70; 72 depende 71 + UX-70 + decisión de PDF; 73 depende 70. | 73 solo puede avanzar separada después de fijar puertos/modelos de 70; hasta entonces, **secuencial**. | Locks, tablas y migraciones de billing son compartidos. No paralelizar migraciones sin coordinación. |
@@ -59,7 +59,7 @@ Dependencias de fase y entregables se citan en [`roadmap-fases.md`](../08-agente
 
 ## Primera tarea habilitada
 
-Asignar **WP-BE-50-T01 — decisión de Arquitectura para Q-24**. No tocar código ni modificar el contrato antes de su aprobación. Luego ejecutar secuencialmente T02, T03 y T04; recién entonces T05 cierra el paquete.
+**WP-BE-50-T01 tiene propuesta documentada y espera respuesta formal de Arquitectura/dueño** en `decisiones.md` Q-24. No tocar código ni contrato antes de aprobarla. Luego ejecutar secuencialmente T02, T03 y T04; recién entonces T05 cierra el paquete.
 
 ## Documentos fuente
 

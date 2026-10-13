@@ -26,6 +26,7 @@ import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.security.MessageDigest
+import java.time.Instant
 import java.util.HexFormat
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -592,6 +593,62 @@ class IdentityIntegrationTest {
             get("/orders/$orderId").header("Authorization", "Bearer ${owner.token}"),
         ).andExpect(status().isForbidden)
             .andExpect(jsonPath("$.code").value("SESSION_ACCESS_REVOKED"))
+    }
+
+    @Test
+    fun `session order list returns contract page with full snapshots and stable cursor`() {
+        val owner = createGuestSession()
+        val other = createGuestSession()
+        val olderOrderId = createOrder(owner)
+        val newerOrderId = createOrder(owner)
+        val otherOrderId = createOrder(other)
+        jdbc.update(
+            "UPDATE customer_order SET created_at = ? WHERE id = ?",
+            java.sql.Timestamp.from(Instant.parse("2026-10-13T10:00:00Z")),
+            UUID.fromString(olderOrderId),
+        )
+        jdbc.update(
+            "UPDATE customer_order SET created_at = ? WHERE id = ?",
+            java.sql.Timestamp.from(Instant.parse("2026-10-13T11:00:00Z")),
+            UUID.fromString(newerOrderId),
+        )
+        jdbc.update(
+            "UPDATE customer_order SET created_at = ? WHERE id = ?",
+            java.sql.Timestamp.from(Instant.parse("2026-10-13T12:00:00Z")),
+            UUID.fromString(otherOrderId),
+        )
+        addOrderItem(newerOrderId, owner)
+
+        val firstPage = mockMvc.perform(
+            get("/sessions/current/orders").param("limit", "1").header("Authorization", "Bearer ${owner.token}"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(newerOrderId))
+            .andExpect(jsonPath("$.items[0].version").value(1))
+            .andExpect(jsonPath("$.items[0].createdBy.participantId").value(owner.participantId))
+            .andExpect(jsonPath("$.items[0].items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].items[0].options").isArray)
+            .andExpect(jsonPath("$.items[0].items[0].status").value("PENDING"))
+            .andExpect(jsonPath("$.nextCursor").isNotEmpty)
+            .andReturn().response.contentAsString
+        val cursor = json(firstPage, "$.nextCursor")
+
+        mockMvc.perform(
+            get("/sessions/current/orders")
+                .param("limit", "1")
+                .param("cursor", cursor)
+                .header("Authorization", "Bearer ${owner.token}"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(olderOrderId))
+            .andExpect(jsonPath("$.nextCursor").value(null as String?))
+
+        val emptySession = createGuestSession()
+        mockMvc.perform(
+            get("/sessions/current/orders").header("Authorization", "Bearer ${emptySession.token}"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(0))
+            .andExpect(jsonPath("$.nextCursor").value(null as String?))
     }
 
     @Test

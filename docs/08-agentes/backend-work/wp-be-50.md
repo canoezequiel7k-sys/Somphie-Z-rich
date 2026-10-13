@@ -6,25 +6,24 @@ Común a las fichas: empezar con `AGENTS.md`, [`advances.md`](../../00-gobierno/
 
 ## WP-BE-50-T01 — Aprobación contractual Q-24
 
-- **Estado/prioridad/tipo:** Bloqueada hasta resolución ARQ/dueño · P0 · decisión/contrato.
+- **Estado/prioridad/tipo:** Dirección principal aprobada por el propietario (2026-10-13); formalización contractual pendiente · P0 · decisión/contrato.
 - **Objetivo/evidencia:** determinar exposición y orden de ítems activos cuyo `queued_at` histórico es NULL. Contrato actual exige `queuedAt` no nulo (`StationQueueItem`); SQL omite nulos y el cursor usa `(queuedAt,itemId)`. Impacta visibilidad, FIFO, cursores, `delayed`/SLA y métricas.
 - **Leer:** [`Q-24`](../../00-gobierno/decisiones.md), OpenAPI `GET /staff/stations/{stationId}/queue` y `StationQueueItem`/`StationQueue`; `V10__preparation_order_snapshots.sql`; `JdbcStationQueueRepository.kt`, `StationQueue.kt`, `GetStationQueueTest.kt`; reglas §4 de [`estados-y-transiciones.md`](../../02-dominio/estados-y-transiciones.md).
-- **Opciones para decisión:** (A) permitir `queuedAt: null`; definir bucket y orden estable sin afirmar FIFO cronológico del bucket, cursor que incluya desconocidos y representación de `delayed` (hoy Boolean obligatorio) que no finja un SLA conocido. Aumenta complejidad de esquema/cliente y expone actividad antes omitida. (B) seguir omitiendo con ventana de transición finita y criterio aprobado de expiración/atención manual; menor cambio de cliente, pero hasta su cierre oculta trabajo activo y no sirve de solución permanente. No usar `accepted_at` como sustituto ni estimación como hora real.
-- **Recomendación, no decisión:** preferir representar desconocido explícitamente y ordenar ese grupo determinísticamente con clave estable, separado de la cronología conocida; no calcular SLA histórico. Arquitectura + dueño deben aprobar campo, orden, cursor y representación de SLA.
-- **Alcance/plan:** documentar alternativas e impactos; obtener aprobación registrada; identificar necesidad de versión OpenAPI/changelog, pruebas históricas/mixtas/paginación y migración (si corresponde). No tocar cola/contrato hasta la aprobación.
-- **Aceptación/entrega:** Q-24 resuelta en `decisiones.md` con semántica completa y autorizante; artefactos afectados listados; entregar decisión, no código. Después habilita T02–T04.
-- La resolución debe adjuntar matriz de pruebas para ítems nuevos, históricos y mezcla, incluyendo cursor/paginación, orden y SLA.
-- **No paralelo:** todas las tareas del endpoint/cola esperan esta decisión si alteran la representación de cola.
+- **Dirección aprobada:** incluir los históricos activos con `queued_at = NULL`, sin inventar timestamps ni sustituirlos por `accepted_at`.
+- **Propuesta de orden, no formalizada:** históricos primero por `item_id`; conocidos después por `queued_at ASC, item_id`. FIFO cronológico solo aplica a conocidos. `queuedAt` nullable, semántica de `delayed`/SLA, garantías del cursor/paginación concurrente y métricas agregadas siguen pendientes; no asumir `delayed: null`.
+- **Trabajo restante:** formalizar esos detalles con Arquitectura/dueño y actualizar contrato/CHANGELOG según la decisión antes de tocar código. Luego probar históricos, nuevos, desempates, paginación mixta, SLA y estados terminales. No iniciar T02 mientras siga abierta esta formalización.
+- **Estado T01:** Cerrada (2026-10-13): propietario aprobó la dirección principal y se registraron los límites. La formalización contractual restante bloquea solo cambios de cola que dependan de esos detalles; no bloquea T02, que no modifica la cola.
+- **No paralelo:** tareas que alteren la representación del endpoint/cola esperan su formalización contractual.
 
 ## WP-BE-50-T02 — Alinear lista de pedidos de sesión
 
-- **Estado/prioridad/tipo:** Bloqueada por análisis secuencial del contrato · P1 · implementación + contrato.
+- **Estado/prioridad/tipo:** En curso (2026-10-13) · P1 · implementación + pruebas contractuales.
 - **Objetivo/evidencia:** `OrdersController.listSessionOrders` hoy devuelve `List<Map<...>>` con seis campos; OpenAPI exige `OrderPage` (`items`, `nextCursor`) de `Order` completos. Faltan versionado/ítems y cursor contractual.
 - **Leer:** método mencionado; `OrderPage`/`Order` en OpenAPI y criterios AC-CU-07/08; `Order`, `OrderItem`, pruebas de Orders existentes (`IdentityIntegrationTest`/`BackendSmokeTest` solo como referencias, confirmar cobertura).
 - **Alcance:** DTO/mapeo, consulta eficiente/paginación/cursor, autorización por sesión, tests API+contrato e integración Postgres donde haga falta. Primero cotejar todos los campos obligatorios opcionales y cómo serializa historial.
 - **Fuera:** no cambiar OpenAPI para aceptar el mapa simplificado sin aprobación ARQ; no modificar creación ni cancelación de pedido.
 - **Aceptación:** respuesta de éxito pasa esquema contractual; orden más reciente primero; cursor estable/limit; nunca filtra otras sesiones; pruebas de casos vacío, página siguiente y recurso no propio. Actualizar CHANGELOG solo si contrato aprobado cambia.
-- **Secuencia:** después de T01; antes de T03/T04 (comparten controlador/modelos). Entregar pruebas y brechas restantes.
+- **Secuencia:** T01 cerrada; ejecutar T02 ahora. Antes de T03/T04 (comparten controlador/modelos). Entregar pruebas y brechas restantes.
 
 ## WP-BE-50-T03 — Alinear detalle de pedido cliente
 
