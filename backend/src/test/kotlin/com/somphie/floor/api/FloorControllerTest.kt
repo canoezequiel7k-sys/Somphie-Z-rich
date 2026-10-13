@@ -2,6 +2,8 @@ package com.somphie.floor.api
 
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
+import com.somphie.floor.application.ParticipantRevocationService
+import com.somphie.floor.infrastructure.JoinCodeGenerator
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -16,7 +18,13 @@ import java.time.Clock
 class FloorControllerTest {
 
     private val jdbc = mock(NamedParameterJdbcTemplate::class.java)
-    private val controller = FloorController(jdbc, mock(JoinSessionService::class.java), Clock.systemUTC())
+    private val controller = FloorController(
+        jdbc,
+        mock(JoinSessionService::class.java),
+        JoinCodeGenerator(),
+        mock(ParticipantRevocationService::class.java),
+        Clock.systemUTC(),
+    )
 
     @Test
     fun `getPublicTable throws DomainException when table not found`() {

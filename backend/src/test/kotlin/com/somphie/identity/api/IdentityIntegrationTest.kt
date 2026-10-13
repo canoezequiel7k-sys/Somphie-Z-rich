@@ -18,6 +18,7 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
@@ -87,6 +88,458 @@ class IdentityIntegrationTest {
         mockMvc.perform(get("/staff/stations/$BAR_STATION_ID/queue"))
             .andExpect(status().isUnauthorized)
             .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+    }
+
+    @Test
+    fun `staff opens a session without host and idempotent replay returns same code`() {
+        val tableId = UUID.randomUUID()
+        val tableCode = "STAFF-${UUID.randomUUID()}"
+        val tableLabel = "Staff $tableCode"
+        jdbc.update(
+            "INSERT INTO dining_table (id, restaurant_id, label, table_code) VALUES (?, ?, ?, ?)",
+            tableId,
+            RESTAURANT_ID,
+            tableLabel,
+            tableCode,
+        )
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val key = UUID.randomUUID().toString()
+
+        val first = mockMvc.perform(
+            post("/staff/tables/$tableId/sessions")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", key),
+        ).andExpect(status().isCreated)
+            .andExpect(header().doesNotExist("Idempotent-Replayed"))
+            .andExpect(jsonPath("$.session.status").value("OPEN"))
+            .andExpect(jsonPath("$.session.tableLabel").value(tableLabel))
+            .andExpect(jsonPath("$.session.readOnly").value(false))
+            .andExpect(jsonPath("$.joinCode").isNotEmpty)
+            .andReturn().response.contentAsString
+        val sessionId = json(first, "$.session.id")
+        val joinCode = json(first, "$.joinCode")
+
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM session_participant WHERE session_id = ?",
+                Int::class.java,
+                UUID.fromString(sessionId),
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM audit_event WHERE action = 'SESSION_OPENED' AND target_id = ?",
+                Int::class.java,
+                UUID.fromString(sessionId),
+            ),
+        )
+        assertEquals(
+            USER_ID.toString(),
+            jdbc.queryForObject(
+                "SELECT opened_by_user_id::text FROM table_session WHERE id = ?",
+                String::class.java,
+                UUID.fromString(sessionId),
+            ),
+        )
+
+        mockMvc.perform(
+            post("/staff/tables/$tableId/sessions")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", key),
+        ).andExpect(status().isCreated)
+            .andExpect(header().string("Idempotent-Replayed", "true"))
+            .andExpect(jsonPath("$.session.id").value(sessionId))
+            .andExpect(jsonPath("$.joinCode").value(joinCode))
+    }
+
+    @Test
+    fun `manual session opening requires the explicit permission`() {
+        jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
+        jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'KITCHEN')", USER_ID)
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val tableId = createStaffTable(RESTAURANT_ID)
+
+        mockMvc.perform(
+            post("/staff/tables/$tableId/sessions")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", UUID.randomUUID().toString()),
+        ).andExpect(status().isForbidden)
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM table_session WHERE table_id = ?",
+                Int::class.java,
+                tableId,
+            ),
+        )
+    }
+
+    @Test
+    fun `manual session opening validates its idempotency key`() {
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val tableId = createStaffTable(RESTAURANT_ID)
+
+        mockMvc.perform(
+            post("/staff/tables/$tableId/sessions")
+                .header("Authorization", "Bearer $token"),
+        ).andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REQUIRED"))
+
+        mockMvc.perform(
+            post("/staff/tables/$tableId/sessions")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", "not-a-uuid"),
+        ).andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+    }
+
+    @Test
+    fun `staff rotates join code and replays the same result`() {
+        val tableId = createStaffTable(RESTAURANT_ID)
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val opened = mockMvc.perform(
+            post("/staff/tables/$tableId/sessions")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", UUID.randomUUID().toString()),
+        ).andExpect(status().isCreated)
+            .andReturn().response.contentAsString
+        val sessionId = json(opened, "$.session.id")
+        val oldCode = json(opened, "$.joinCode")
+        val key = UUID.randomUUID().toString()
+
+        val rotated = mockMvc.perform(
+            post("/staff/sessions/$sessionId/join-code/rotate")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", key),
+        ).andExpect(status().isOk)
+            .andExpect(header().doesNotExist("Idempotent-Replayed"))
+            .andReturn().response.contentAsString
+        val newCode = json(rotated, "$.joinCode")
+        assertFalse(oldCode == newCode)
+        assertEquals(
+            newCode,
+            jdbc.queryForObject(
+                "SELECT join_code FROM table_session WHERE id = ?",
+                String::class.java,
+                UUID.fromString(sessionId),
+            ),
+        )
+
+        mockMvc.perform(
+            post("/staff/sessions/$sessionId/join-code/rotate")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", key),
+        ).andExpect(status().isOk)
+            .andExpect(header().string("Idempotent-Replayed", "true"))
+            .andExpect(jsonPath("$.joinCode").value(newCode))
+
+        jdbc.update(
+            """
+            UPDATE table_session
+            SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, close_reason = 'EMPTY', join_code = NULL
+            WHERE id = ?
+            """.trimIndent(),
+            UUID.fromString(sessionId),
+        )
+        mockMvc.perform(
+            post("/staff/sessions/$sessionId/join-code/rotate")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", UUID.randomUUID().toString()),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("SESSION_CLOSED"))
+
+        jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
+        jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'KITCHEN')", USER_ID)
+        val kitchenToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        mockMvc.perform(
+            post("/staff/sessions/$sessionId/join-code/rotate")
+                .header("Authorization", "Bearer $kitchenToken")
+                .header("Idempotency-Key", UUID.randomUUID().toString()),
+        ).andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun `staff revokes a participant once and records activity and mapped audit actor`() {
+        val fixture = createGuestSession()
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val route = "/staff/sessions/${fixture.sessionId}/participants/${fixture.participantId}/revoke"
+
+        repeat(2) {
+            mockMvc.perform(
+                post(route).header("Authorization", "Bearer $token"),
+            ).andExpect(status().isOk)
+                .andExpect(jsonPath("$.id").value(fixture.participantId))
+                .andExpect(jsonPath("$.revoked").value(true))
+        }
+
+        val revokedAt = jdbc.queryForObject(
+            "SELECT revoked_at FROM session_participant WHERE id = ?",
+            java.sql.Timestamp::class.java,
+            UUID.fromString(fixture.participantId),
+        )
+        assertEquals(
+            revokedAt,
+            jdbc.queryForObject(
+                "SELECT last_activity_at FROM table_session WHERE id = ?",
+                java.sql.Timestamp::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM audit_event WHERE action = 'PARTICIPANT_REVOKED' AND target_id = ? AND actor_type = 'STAFF' AND actor_id = ?",
+                Int::class.java,
+                UUID.fromString(fixture.participantId),
+                USER_ID,
+            ),
+        )
+    }
+
+    @Test
+    fun `host can revoke members but not themselves and only the host is authorized`() {
+        val fixture = createGuestSession()
+        val member = createMemberFixture(fixture)
+        val memberToRevoke = createMemberFixture(fixture)
+
+        mockMvc.perform(
+            delete("/sessions/current/participants/${memberToRevoke.first}")
+                .header("Authorization", "Bearer ${fixture.token}"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.id").value(memberToRevoke.first.toString()))
+            .andExpect(jsonPath("$.revoked").value(true))
+        mockMvc.perform(
+            get("/sessions/current/orders").header("Authorization", "Bearer ${memberToRevoke.second}"),
+        ).andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value("SESSION_ACCESS_REVOKED"))
+
+        mockMvc.perform(
+            delete("/sessions/current/participants/${fixture.participantId}")
+                .header("Authorization", "Bearer ${fixture.token}"),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("HOST_CANNOT_BE_REVOKED"))
+
+        mockMvc.perform(
+            delete("/sessions/current/participants/${memberToRevoke.first}")
+                .header("Authorization", "Bearer ${member.second}"),
+        ).andExpect(status().isForbidden)
+
+        mockMvc.perform(delete("/sessions/current/participants/${member.first}"))
+            .andExpect(status().isUnauthorized)
+
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM audit_event WHERE action = 'PARTICIPANT_REVOKED' AND target_id = ? AND actor_type = 'CUSTOMER' AND actor_id = ?",
+                Int::class.java,
+                memberToRevoke.first,
+                UUID.fromString(fixture.participantId),
+            ),
+        )
+    }
+
+    @Test
+    fun `staff revocation enforces tenant permission and open session state`() {
+        val foreign = createGuestSession(OTHER_RESTAURANT_ID)
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        mockMvc.perform(
+            post("/staff/sessions/${foreign.sessionId}/participants/${foreign.participantId}/revoke")
+                .header("Authorization", "Bearer $token"),
+        ).andExpect(status().isNotFound)
+        assertEquals(
+            null,
+            jdbc.queryForObject(
+                "SELECT revoked_at FROM session_participant WHERE id = ?",
+                java.sql.Timestamp::class.java,
+                UUID.fromString(foreign.participantId),
+            ),
+        )
+
+        val fixture = createGuestSession()
+        jdbc.update(
+            "UPDATE table_session SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, close_reason = 'EMPTY', join_code = NULL WHERE id = ?",
+            UUID.fromString(fixture.sessionId),
+        )
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/participants/${fixture.participantId}/revoke")
+                .header("Authorization", "Bearer $token"),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("SESSION_CLOSED"))
+    }
+
+    @Test
+    fun `staff revocation requires its explicit permission`() {
+        val fixture = createGuestSession()
+        jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
+        jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'KITCHEN')", USER_ID)
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/participants/${fixture.participantId}/revoke")
+                .header("Authorization", "Bearer $token"),
+        ).andExpect(status().isForbidden)
+        assertEquals(
+            null,
+            jdbc.queryForObject(
+                "SELECT revoked_at FROM session_participant WHERE id = ?",
+                java.sql.Timestamp::class.java,
+                UUID.fromString(fixture.participantId),
+            ),
+        )
+    }
+
+    @Test
+    fun `concurrent staff revocations serialize and audit the transition once`() {
+        val fixture = createGuestSession()
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val requests = (1..2).map {
+                executor.submit(Callable {
+                    start.await()
+                    mockMvc.perform(
+                        post("/staff/sessions/${fixture.sessionId}/participants/${fixture.participantId}/revoke")
+                            .header("Authorization", "Bearer $token"),
+                    ).andReturn().response
+                })
+            }
+            start.countDown()
+            assertEquals(listOf(200, 200), requests.map { it.get(20, TimeUnit.SECONDS).status }.sorted())
+            assertEquals(
+                1,
+                jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM audit_event WHERE action = 'PARTICIPANT_REVOKED' AND target_id = ?",
+                    Int::class.java,
+                    UUID.fromString(fixture.participantId),
+                ),
+            )
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `manual session opening enforces tenant availability and open-session uniqueness`() {
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val inactiveTableId = createStaffTable(RESTAURANT_ID, active = false)
+        mockMvc.perform(
+            post("/staff/tables/$inactiveTableId/sessions")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", UUID.randomUUID().toString()),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("TABLE_UNAVAILABLE"))
+
+        val foreignTableId = createStaffTable(OTHER_RESTAURANT_ID)
+        mockMvc.perform(
+            post("/staff/tables/$foreignTableId/sessions")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", UUID.randomUUID().toString()),
+        ).andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+
+        val tableId = createStaffTable(RESTAURANT_ID)
+        mockMvc.perform(
+            post("/staff/tables/$tableId/sessions")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", UUID.randomUUID().toString()),
+        ).andExpect(status().isCreated)
+        mockMvc.perform(
+            post("/staff/tables/$tableId/sessions")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", UUID.randomUUID().toString()),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("SESSION_ALREADY_OPEN"))
+    }
+
+    @Test
+    fun `concurrent staff and qr openings create only one session for a table`() {
+        val tableId = UUID.randomUUID()
+        val tableCode = "RACE-${UUID.randomUUID()}"
+        jdbc.update(
+            "INSERT INTO dining_table (id, restaurant_id, label, table_code) VALUES (?, ?, ?, ?)",
+            tableId,
+            RESTAURANT_ID,
+            "Race $tableCode",
+            tableCode,
+        )
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val staff = executor.submit(Callable {
+                start.await()
+                mockMvc.perform(
+                    post("/staff/tables/$tableId/sessions")
+                        .header("Authorization", "Bearer $token")
+                        .header("Idempotency-Key", UUID.randomUUID().toString()),
+                ).andReturn().response
+            })
+            val guest = executor.submit(Callable {
+                start.await()
+                mockMvc.perform(
+                    post("/public/tables/$tableCode/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""{"displayName":"Race guest"}"""),
+                ).andReturn().response
+            })
+            start.countDown()
+            val responses = listOf(staff.get(20, TimeUnit.SECONDS), guest.get(20, TimeUnit.SECONDS))
+            assertEquals(listOf(201, 409), responses.map { it.status }.sorted())
+            val conflict = responses.single { it.status == 409 }
+            assertEquals("SESSION_ALREADY_OPEN", json(conflict.contentAsString, "$.code"))
+            assertEquals(
+                1,
+                jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM table_session WHERE table_id = ? AND status = 'OPEN'",
+                    Int::class.java,
+                    tableId,
+                ),
+            )
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `concurrent replay of the same manual opening returns one persisted response`() {
+        val tableId = createStaffTable(RESTAURANT_ID)
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val key = UUID.randomUUID().toString()
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val requests = (1..2).map {
+                executor.submit(Callable {
+                    start.await()
+                    mockMvc.perform(
+                        post("/staff/tables/$tableId/sessions")
+                            .header("Authorization", "Bearer $token")
+                            .header("Idempotency-Key", key),
+                    ).andReturn().response
+                })
+            }
+            start.countDown()
+            val responses = requests.map { it.get(20, TimeUnit.SECONDS) }
+            assertEquals(listOf(201, 201), responses.map { it.status }.sorted())
+            assertEquals(1, responses.count { it.getHeader("Idempotent-Replayed") == "true" })
+            assertEquals(
+                json(responses[0].contentAsString, "$.session.id"),
+                json(responses[1].contentAsString, "$.session.id"),
+            )
+            assertEquals(
+                1,
+                jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM table_session WHERE table_id = ? AND status = 'OPEN'",
+                    Int::class.java,
+                    tableId,
+                ),
+            )
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     @Test
@@ -1249,13 +1702,13 @@ class IdentityIntegrationTest {
 
     private fun loginRequest(password: String) = loginRequest(EMAIL, password)
 
-    private fun createGuestSession(): GuestFixture {
+    private fun createGuestSession(restaurantId: UUID = RESTAURANT_ID): GuestFixture {
         val tableId = UUID.randomUUID()
         val tableCode = "SEC-${UUID.randomUUID()}"
         jdbc.update(
             "INSERT INTO dining_table (id, restaurant_id, label, table_code) VALUES (?, ?, ?, ?)",
             tableId,
-            RESTAURANT_ID,
+            restaurantId,
             "Security $tableCode",
             tableCode,
         )
@@ -1271,6 +1724,23 @@ class IdentityIntegrationTest {
             token = json(result, "$.guestToken"),
             tableCode = tableCode,
         )
+    }
+
+    private fun createStaffTable(restaurantId: UUID, active: Boolean = true): UUID {
+        val tableId = UUID.randomUUID()
+        val tableCode = "STAFF-${UUID.randomUUID()}"
+        jdbc.update(
+            """
+            INSERT INTO dining_table (id, restaurant_id, label, table_code, active)
+            VALUES (?, ?, ?, ?, ?)
+            """.trimIndent(),
+            tableId,
+            restaurantId,
+            "Staff $tableCode",
+            tableCode,
+            active,
+        )
+        return tableId
     }
 
     private fun createOrder(fixture: GuestFixture): String {
@@ -1290,7 +1760,12 @@ class IdentityIntegrationTest {
     }
 
     private fun createMember(fixture: GuestFixture): String {
+        return createMemberFixture(fixture).second
+    }
+
+    private fun createMemberFixture(fixture: GuestFixture): Pair<UUID, String> {
         val token = "gt_${UUID.randomUUID()}"
+        val participantId = UUID.randomUUID()
         val tokenHash = HexFormat.of().formatHex(
             MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8)),
         )
@@ -1299,11 +1774,11 @@ class IdentityIntegrationTest {
             INSERT INTO session_participant (id, session_id, display_name, role, token_hash)
             VALUES (?, ?, 'Test member', 'MEMBER', ?)
             """.trimIndent(),
-            UUID.randomUUID(),
+            participantId,
             UUID.fromString(fixture.sessionId),
             tokenHash,
         )
-        return token
+        return participantId to token
     }
 
     private fun addOrderItem(orderId: String, fixture: GuestFixture): UUID {

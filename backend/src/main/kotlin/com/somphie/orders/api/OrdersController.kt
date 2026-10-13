@@ -167,7 +167,7 @@ class OrdersController(
             // Record audit event in the same transaction
             auditService.record(
                 restaurantId = restaurantId,
-                actorType = "CUSTOMER",
+                actorType = "PARTICIPANT",
                 actorId = participantId,
                 action = "ORDER_CREATED",
                 targetType = "ORDER",
@@ -527,7 +527,7 @@ class OrdersController(
         )
         auditService.record(
             restaurantId = sessionAndParticipant.getValue("restaurantId"),
-            actorType = "CUSTOMER",
+            actorType = "PARTICIPANT",
             actorId = participantId,
             action = "ORDER_CANCELLED",
             targetType = "ORDER",

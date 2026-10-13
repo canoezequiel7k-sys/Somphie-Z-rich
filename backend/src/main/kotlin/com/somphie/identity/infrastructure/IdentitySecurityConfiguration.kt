@@ -88,7 +88,7 @@ class IdentitySecurityConfiguration {
         val bearerTokenResolver = BearerTokenResolver { request ->
             val token = defaultBearerTokenResolver.resolve(request)
             val path = request.requestURI.removePrefix(request.contextPath)
-            if (token?.startsWith(GUEST_TOKEN_PREFIX) == true || isGuestOrderEndpoint(request.method, path)) {
+            if (token?.startsWith(GUEST_TOKEN_PREFIX) == true || isGuestEndpoint(request.method, path)) {
                 null
             } else {
                 token
@@ -118,12 +118,20 @@ class IdentitySecurityConfiguration {
                     .hasAuthority("order.cancel")
                 it.requestMatchers(HttpMethod.POST, "/staff/order-items/*/undo")
                     .hasAuthority("item.undo")
+                it.requestMatchers(HttpMethod.POST, "/staff/tables/*/sessions")
+                    .hasAuthority("session.open_manual")
+                it.requestMatchers(HttpMethod.POST, "/staff/sessions/*/join-code/rotate")
+                    .hasAuthority("participant.revoke")
+                it.requestMatchers(HttpMethod.POST, "/staff/sessions/*/participants/*/revoke")
+                    .hasAuthority("participant.revoke")
                 it.requestMatchers("/staff/**").denyAll()
                 it.requestMatchers(HttpMethod.GET, "/menu", "/products/*", "/public/tables/*", "/media/**", "/version", "/actuator/health")
                     .permitAll()
                 it.requestMatchers(HttpMethod.POST, "/public/tables/*/sessions", "/public/tables/*/join")
                     .permitAll()
                 it.requestMatchers(HttpMethod.POST, "/sessions/current/orders", "/orders/*/cancel")
+                    .permitAll()
+                it.requestMatchers(HttpMethod.DELETE, "/sessions/current/participants/*")
                     .permitAll()
                 it.requestMatchers(HttpMethod.GET, "/sessions/current/orders", "/orders/*")
                     .permitAll()
@@ -145,8 +153,9 @@ class IdentitySecurityConfiguration {
         return http.build()
     }
 
-    private fun isGuestOrderEndpoint(method: String, path: String): Boolean =
+    private fun isGuestEndpoint(method: String, path: String): Boolean =
         (path == "/sessions/current/orders" && method in setOf("GET", "POST")) ||
+            (path.matches(Regex("^/sessions/current/participants/[^/]+$")) && method == "DELETE") ||
             (path.matches(Regex("^/orders/[^/]+$")) && method == "GET") ||
             (path.matches(Regex("^/orders/[^/]+/cancel$")) && method == "POST")
 

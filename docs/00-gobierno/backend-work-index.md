@@ -1,6 +1,6 @@
 # Índice de trabajo del backend
 
-**Estado:** plan de ejecución; el estado de cada paquete figura en la tabla. **Última revisión:** rama `feat/backend-preparation`, HEAD `92cf176`; WP-BE-40 se implementó y validó localmente, sin commit ni push. El código de WP-BE-50 está respaldado por `1ed84fd`.
+**Estado:** plan de ejecución; el estado de cada paquete figura en la tabla. **Última revisión:** rama `feat/backend-preparation`, HEAD `4341895`; WP-BE-51 tiene cambios locales sin commit; WP-BE-40 está publicada y WP-BE-50 está respaldada por `1ed84fd`.
 
 ## Cómo usar este plan
 
@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | 1 | **WP-BE-40 — Implementada y validada (2026-10-13)** | `check jacocoTestReport`: 322 tests, 0 fallos; JaCoCo 93,02 %. Integración PostgreSQL cubre TTL, pedidos con actividad, rate limit y carreras entre join/expiración/limpieza y decisiones/preparación. | [Ficha WP-BE-40](../08-agentes/backend-work/wp-be-40.md); WP-BE-21, WP-BE-10; RN-SES-08, RN-ACC-07. | WP-BE-51 aún requiere fuente de `balanceMinor`. |
 | 2 | **WP-BE-50 — Completado (2026-10-13)** | Q-24 resuelta; OpenAPI 0.3.0 define FIFO/SLA por `acceptedAt`, históricos nullable y keyset eventual. `check jacocoTestReport`: 315 tests, 0 fallos; JaCoCo 92,81 %. | [T01–T05](../08-agentes/backend-work/wp-be-50.md); WP-BE-44. Cierre respaldado por validación backend y documental. | WP-BE-51 requiere fuente de `balanceMinor`. |
-| 3 | **WP-BE-51 — No iniciado / dependencia pendiente** | WP-BE-40 validada; falta confirmar la fuente de `balanceMinor` en billing WP-BE-70-T01 (inferencia técnica del schema). | [T01–T02](../08-agentes/backend-work/wp-be-51-52.md); WP-BE-50 + WP-BE-40 + fuente de `balanceMinor`. | No iniciar hasta confirmar el dato de billing. |
+| 3 | **WP-BE-51 — Parcial local; T02 completada** | T02: apertura, rotación y revocación validadas en PostgreSQL; 334 pruebas backend y 93,23 % de cobertura. T01 no tiene fuente persistente para `balanceMinor`. Q-29/Q-30 resueltas. | [T01–T02](../08-agentes/backend-work/wp-be-51-52.md); T01 depende de WP-BE-70-T01; T02 completada independientemente. | Implementar billing antes de T01. |
 | 4 | **WP-BE-52 — Bloqueado por Q-27** | No hay handlers `PATCH`; `catalogVersion` es constante y no existe `event_log`/publisher para el evento contractual. | [T01](../08-agentes/backend-work/wp-be-51-52.md); WP-BE-30 + respuesta Q-27. | No tocar disponibilidad parcialmente; implementar versión, auditoría y evento de manera coherente. |
 | 5 | **WP-BE-60 — No iniciado / decisión previa** | No se encontraron módulo `notifications`, `event_log` ni endpoint SSE. ADR-0006 sigue en propuesta. | [T01](../08-agentes/backend-work/wp-be-60.md); WP-ARQ-60 y WP-BE-50. | Los clientes pueden simular eventos; integración real después de SSE y reconexión probados. |
 | 6 | **WP-BE-70 — Parcial (dominio)** | Existen reglas/modelos y tests de `billing`; no API, aplicación ni persistencia de billing. | [T01–T03](../08-agentes/backend-work/wp-be-70-73.md); WP-BE-50 y WP-ARQ-70/ADR de pagos. | Mock de cuenta/pago; integrar tras probar balance, idempotencia, lock y proveedor simulado. |
@@ -60,7 +60,7 @@ Dependencias de fase y entregables se citan en [`roadmap-fases.md`](../08-agente
 
 ## Primera tarea habilitada
 
-**Siguiente: confirmar la fuente de `balanceMinor`** antes de iniciar WP-BE-51. WP-BE-40 está implementada y validada; WP-BE-50-T01–T05 está completada y Q-24 resuelta; WP-BE-52 permanece bloqueada por Q-27.
+**Siguiente:** WP-BE-51-T01 requiere WP-BE-70-T01 como fuente persistente de `balanceMinor`; WP-BE-52 sigue bloqueada por Q-27.
 
 ## Documentos fuente
 

@@ -30,11 +30,18 @@ class AuditService(
             VALUES (CAST(:id AS UUID), CAST(:restaurantId AS UUID), :occurredAt, :actorType, CAST(:actorId AS UUID), :action, :targetType, CAST(:targetId AS UUID), :reason, CAST(:beforeSummary AS JSONB), CAST(:afterSummary AS JSONB), :traceId)
         """
 
+        // RN-AUD usa nombres de dominio; V7 conserva sus valores de almacenamiento históricos.
+        val persistedActorType = when (actorType) {
+            "USER", "STAFF" -> "STAFF"
+            "PARTICIPANT", "CUSTOMER" -> "CUSTOMER"
+            "SYSTEM" -> "SYSTEM"
+            else -> throw IllegalArgumentException("Unsupported audit actor type: $actorType")
+        }
         jdbc.update(sql, mapOf(
             "id" to eventId,
             "restaurantId" to restaurantId,
             "occurredAt" to java.sql.Timestamp.from(Instant.now()),
-            "actorType" to actorType,
+            "actorType" to persistedActorType,
             "actorId" to actorId,
             "action" to action,
             "targetType" to targetType,

@@ -72,7 +72,7 @@ class JdbcIdentityRepository(
             if (failures == MAX_LOGIN_FAILURES && knownProfile != null) {
                 auditService.record(
                     restaurantId = knownProfile.account.restaurantId.toString(),
-                    actorType = "STAFF",
+                    actorType = "USER",
                     actorId = knownProfile.account.id.toString(),
                     action = "identity.login_failed_locked",
                     targetType = "APP_USER",
@@ -204,7 +204,7 @@ class JdbcIdentityRepository(
         val profile = loadProfile(userId) ?: return
         auditService.record(
             restaurantId = profile.account.restaurantId.toString(),
-            actorType = "STAFF",
+            actorType = "USER",
             actorId = userId.toString(),
             action = "identity.password_changed",
             targetType = "APP_USER",

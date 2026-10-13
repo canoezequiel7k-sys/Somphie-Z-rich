@@ -231,7 +231,16 @@ class BackendSmokeTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"displayName":"Second host"}"""),
         ).andExpect(status().isConflict)
-            .andExpect(jsonPath("$.code").value("SESSION_FULL"))
+            .andExpect(jsonPath("$.code").value("SESSION_ALREADY_OPEN"))
+
+        val inactiveTableCode = createTable()
+        jdbcTemplate.update("UPDATE dining_table SET active = FALSE WHERE table_code = ?", inactiveTableCode)
+        mockMvc.perform(
+            post("/public/tables/$inactiveTableCode/sessions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"displayName":"Unavailable host"}"""),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("TABLE_UNAVAILABLE"))
     }
 
     @Test

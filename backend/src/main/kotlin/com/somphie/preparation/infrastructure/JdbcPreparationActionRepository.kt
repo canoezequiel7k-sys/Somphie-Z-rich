@@ -342,7 +342,7 @@ class JdbcPreparationActionRepository(
         }
         auditService.record(
             restaurantId = access.restaurantId.toString(),
-            actorType = "STAFF",
+            actorType = "USER",
             actorId = access.userId.toString(),
             action = auditAction,
             targetType = "ORDER_ITEM",

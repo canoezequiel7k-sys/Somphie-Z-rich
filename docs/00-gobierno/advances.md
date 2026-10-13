@@ -15,11 +15,11 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Plan maestro original | ✅ | `Plan_Maestro_Sistema_Cafeteria.md/.pdf` |
 | Documentación v0.1 (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes) | ✅ | `docs/` |
 | Documentación v0.2 (opciones de producto, propina, ajustes, i18n, llamados al mozo, imágenes en carpeta, multi-sucursal simulada) | ✅ | secciones "v0.2" dentro de cada doc |
-| Decisiones D-101…D-159; Q-01…Q-20 y Q-22/23/24/25 resueltas; Q-21/26 abiertas | ✅ | `docs/00-gobierno/decisiones.md` |
+| Decisiones D-101…D-159; Q-01…Q-20 y Q-22/23/24/25/28/29/30 resueltas; Q-21/26/27 abiertas | ✅ | `docs/00-gobierno/decisiones.md` |
 | ADRs 0001–0009 (propuestas) | ✅ | `docs/00-gobierno/adr/` |
-| Contrato `openapi.yaml` **0.3.0** | ✅ Redocly 2.62.1 pasó; cambio nullable documentado en CHANGELOG | `docs/04-api/openapi.yaml` |
+| Contrato `openapi.yaml` **0.4.0** | ✅ Redocly 2.62.1; la rotación exige key idempotente por Q-28 | `docs/04-api/openapi.yaml` |
 | Config de lint `redocly.yaml` | ✅ (clave corregida, H-09) | raíz |
-| `CHANGELOG.md` del contrato hasta 0.3.0 | ✅ | `docs/04-api/CHANGELOG.md` |
+| `CHANGELOG.md` del contrato hasta 0.4.0 | ✅ Validado junto con OpenAPI por Redocly 2.62.1 | `docs/04-api/CHANGELOG.md` |
 | Estructura de carpetas y `AGENTS.md` por carpeta | ✅ | `backend/`, `web/`, `android/` |
 | Entorno local WP-OPS-20: Compose, variables de ejemplo y plantillas PR/issue | ✅ validado desde un clon temporal limpio en Windows | `infra/`, `.github/` |
 | CI WP-OPS-21: backend, docs y escaneo de secretos; estados explícitos para Web/Android sin proyectos | 🔄 ejecución compartida: Backend CI, Documentation CI y Secret scanning verdes; Web/Android fallan explícitamente porque aún no existen sus proyectos | `.github/workflows/`, `.markdownlint-cli2.yaml`, `.gitleaksignore` |
@@ -33,8 +33,9 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Horario del restaurante | ✅ Recibido; zona horaria pendiente de confirmar antes de persistirlo | Apertura y cierre semanal |
 
 ### 1.2 Qué falta o requiere seguimiento
+- WP-BE-51 🔄 (2026-10-13): T02 completada localmente; apertura manual, rotación idempotente y revocación del HOST/personal. `check jacocoTestReport`: 334 tests, 0 fallos, 93,23 % cobertura; Q-29/Q-30 resueltas. T01 sigue bloqueada hasta persistir `balanceMinor` en WP-BE-70-T01.
 - WP-BE-40 ✅ (2026-10-13): job transaccional de expiración por TTL de restaurante, rate limit persistente por mesa/IP, error contractual y actividad registrada al unirse, crear pedido y ejecutar acciones de staff; ver sección 6 y ficha [`wp-be-40.md`](../08-agentes/backend-work/wp-be-40.md).
-- Auditoría actual (2026-10-13): Q-24 resuelta; T01–T05 y WP-BE-50 completadas. `check jacocoTestReport` pasó con 315 tests, 0 fallos y 92,81 % de cobertura; integración/Testcontainers ejecutados. FIFO/SLA usa `acceptedAt`; timestamps históricos se preservan nullable; paginación keyset es eventual, sin backfill ni métricas agregadas. WP-BE-40 está validada; WP-BE-51 aún depende de confirmar la fuente de `balanceMinor`; WP-BE-52 sigue bloqueada por Q-27.
+- Auditoría actual (2026-10-13): Q-24 resuelta; T01–T05 y WP-BE-50 completadas. `check jacocoTestReport` pasó con 315 tests, 0 fallos y 92,81 % de cobertura; integración/Testcontainers ejecutados. FIFO/SLA usa `acceptedAt`; timestamps históricos se preservan nullable; paginación keyset es eventual, sin backfill ni métricas agregadas. WP-BE-40 está validada; WP-BE-51 avanzó con apertura manual y rotación idempotente; T01 espera billing y la revocación T02 está en curso con Q-29/Q-30 resueltas. WP-BE-52 sigue bloqueada por Q-27.
 - El backend ya incluye API de negocio y persistencia para los paquetes registrados arriba, pero aún no cubre todas las fases del roadmap. No dar por terminado el backend hasta cerrar y validar todos los WP-BE pendientes.
 - La lista de trabajo que compartió el dueño marca WP-BE-32/33 como pendientes, mientras que las entradas de esta bitácora las registran como ✅. Revisar el estado real del código y reconciliar ambas listas antes de planificar esos paquetes.
 - Confirmar el estado actual de los proyectos Web y Android antes de afirmar que no existen o que sus checks no aplican.
@@ -180,7 +181,7 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | H-17 | **Operaciones del invitado sin `x-permission`:** `getCurrentSession`, `listParticipants` y `listSessionWaiterCalls` (verificado leyendo el YAML). `info.description` dice que cada operación lo indica | A decidir (dueño) |
 | H-18 | **Reembolso automático del cierre forzado (D-159):** `Payment` no tiene un campo que lo distinga (la marca "automático por cierre forzado" vive solo en la auditoría). El contrato documenta que queda como `REFUND` | A decidir antes de la Fase 7 |
 | H-19 | **`limitMinor` de `ADJUSTMENT_LIMIT_EXCEEDED`:** `catalogo-errores.md` lo lista como extra pero no define qué representa. En el ejemplo se asumió "15 % de los cargos brutos" (ver Paso 4) | A decidir (dueño) |
-| H-20 | **Acciones de auditoría propuestas 🟡:** `RN-AUD-01` exige auditar revocación de participantes, catálogo, usuarios/roles/estaciones, QR, ajustes y logins fallidos, pero ningún documento nombraba esos códigos. Propuestos en `catalogo-auditoria.md` §3 (`PARTICIPANT_REVOKED`, `CATALOG_CHANGED`, `USER_CHANGED`, `TABLE_QR_REGENERATED`, `SETTINGS_CHANGED`, `LOGIN_FAILED_REPEATED`). Tampoco se audita hoy: llamados al mozo ni rotación del `joinCode` | A confirmar (dueño) |
+| H-20 | **Registro histórico:** `RN-AUD-01` exige auditar revocación de participantes, catálogo, usuarios/roles/estaciones, QR, ajustes y logins fallidos, pero inicialmente ningún documento nombraba esos códigos. Q-29 confirmó `PARTICIPANT_REVOKED`; los demás códigos siguen propuestos en `catalogo-auditoria.md` §3. Tampoco se audita hoy: llamados al mozo ni rotación del `joinCode` | Actualizado por Q-29; resto a confirmar |
 | H-21 | **Pedido tomado por el personal (RN-ORD-18):** nace `ACCEPTED` y se audita con `ORDER_CREATED` (`after.status = ACCEPTED`); no se emite `ORDER_ACCEPTED` aparte. Es una interpretación mía: ningún documento lo dice | A confirmar (dueño) |
 | H-22 | **Deshacer tras el atajo `QUEUED → READY`:** al deshacer vuelve a `IN_PREPARATION` con `startedAt` vacío; `estados-y-transiciones.md` §3 no dice qué hacer | A confirmar (dueño) |
 | H-23 | **Prioridad de errores en un pago:** si fallan a la vez el monto principal y la propina (o hay pago vacío), el catálogo no dice cuál se informa. Se eligió: vacío (`TIP_INVALID`) → monto → propina | A confirmar (dueño) |
@@ -622,7 +623,31 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Actividad:** se actualiza en una unión válida, alta de pedido y decisiones/acciones de preparación de staff; polling y lecturas no cuentan, de acuerdo con RN-SES-08. Los cambios participan de la transacción de la operación.
 - **Pruebas:** además de las seis integraciones listadas arriba, `IdentityIntegrationTest` cubre aceptación/rechazo concurrentes con preparación y actividad persistida; `BackendSmokeTest` cubre join concurrente con expiración y limpieza. `.\backend\gradlew.bat -p backend check jacocoTestReport` ✅ (322 tests, 0 fallos/errores/omitidos; JaCoCo 2933/3153 = 93,02 %). La primera suite completa encontró que el test de carrera compartía un pool de solo dos threads; se corrigió a tres para que join, expiración y titular del lock puedan solaparse de verdad.
 - **Alcance y riesgos:** no se cambia OpenAPI porque los dos errores ya están definidos. El intervalo del scheduler es 60 s por defecto; por lo tanto el cierre puede ocurrir hasta un intervalo después del TTL. Si la app se despliega detrás de proxy, configurar explícitamente la extracción confiable de IP antes de usar cabeceras forwarded.
-- **Estado siguiente:** WP-BE-40 satisface su DoD funcional y de integración. WP-BE-51 sigue sin iniciar hasta definir la fuente de `balanceMinor` de WP-BE-70-T01; WP-BE-52 permanece bloqueada por Q-27. No se inició ninguna de las dos.
+- **Estado siguiente:** WP-BE-40 satisface su DoD funcional y de integración. WP-BE-51-T02 avanzó con apertura manual y rotación; Q-29 confirmó la acción y auditoría transaccional y Q-30 confirmó el mapeo en persistencia. La revocación está en curso y T01 espera persistencia billing. WP-BE-52 permanece bloqueada por Q-27.
+
+### 2026-10-13 — WP-BE-51-T02 (registro histórico del avance inicial)
+- **Qué:** `POST /staff/tables/{tableId}/sessions` crea una sesión sin HOST, con `Idempotency-Key`, permiso `session.open_manual`, aislamiento tenant, bloqueo de mesa y `SESSION_OPENED` en la misma transacción. `POST /staff/sessions/{sessionId}/join-code/rotate` usa la key requerida por Q-28, permiso `participant.revoke`, lock de sesión y replay de respuesta. La apertura QR toma el lock de mesa compartido; `JoinCodeGenerator` centraliza la generación.
+- **Por qué:** el índice parcial V4 evita duplicados al final, pero el lock de la fila de mesa permite respuestas contractuales ante aperturas concurrentes. Se reutiliza `TableSession.openManually`.
+- **Pruebas en ese corte:** la corrida final estaba pendiente; luego se completó junto con revocación, registrada abajo.
+- **Contrato/bloqueos en ese corte:** Q-28 resuelta; OpenAPI 0.4.0 exige `Idempotency-Key` UUID v4 en rotación (Redocly quedó pendiente en ese momento y luego pasó). En ese momento revocación esperaba Q-29/Q-30; ambas se resolvieron más adelante. T01 sigue sin fuente persistente para `balanceMinor`; WP-BE-52 continúa bloqueada por Q-27.
+- **Qué estudiar:** bloqueo de fila junto al índice único parcial, replay idempotente transaccional y vocabulario de actores de auditoría frente a sus valores persistidos.
+
+### 2026-10-13 — WP-BE-51-T02: decisión Q-29
+- **Qué:** el dueño confirmó `PARTICIPANT_REVOKED` y su escritura en la misma transacción que la revocación. Se actualizó el catálogo y el estado de Q-29.
+- **Por qué:** RN-AUD-01 exige auditar la revocación y RN-AUD-05 exige atomicidad; queda Q-30 para mapear `USER`/`PARTICIPANT` a los valores persistidos por V7 antes de implementar la ruta.
+- **Qué estudiar:** separar el vocabulario de dominio de los valores aceptados por el esquema de persistencia.
+
+### 2026-10-13 — WP-BE-51-T02: decisión Q-30 y revocación en curso
+- **Qué:** el dueño confirmó el mapeo `USER` → `STAFF` y `PARTICIPANT` → `CUSTOMER` en persistencia; se mantiene V7. Se implementaron las rutas contractuales del personal y del HOST.
+- **Por qué:** ambos caminos comparten la transición del agregado y la auditoría, pero tienen identidad y autorización distintas.
+- **Archivos previstos:** `AuditService.kt`, `StaffFloorController.kt`, `FloorController.kt`, `IdentitySecurityConfiguration.kt`, controladores/repositorios que registran auditoría y `IdentityIntegrationTest.kt`.
+- **Qué estudiar:** autorización del HOST basada en token de participante y cómo se serializan ambos actores con el lock de sesión.
+
+### 2026-10-13 — WP-BE-51-T02 completada y validada
+- **Qué:** ambas rutas de revocación escriben `PARTICIPANT_REVOKED` en la misma transacción, conservan el primer `revoked_at` al reintentar, actualizan la actividad solo ante transición real y traducen actores en `AuditService`. No se modificó OpenAPI ni V7.
+- **Pruebas/validaciones:** `IdentityIntegrationTest` focalizada pasó; `.\backend\gradlew.bat -p backend check jacocoTestReport` pasó con 334 tests, 0 fallos/errores/omitidos; cobertura de líneas 3220/3454 (93,23 %). Redocly 2.62.1 validó OpenAPI; Markdownlint pasó en seis documentos (0 issues); `git diff --check` pasó.
+- **Contrato y alcance:** HOST usa `DELETE /sessions/current/participants/{participantId}`; personal usa `POST /staff/sessions/{sessionId}/participants/{participantId}/revoke` y `participant.revoke`. WP-BE-51-T01 sigue bloqueada por fuente persistente de `balanceMinor`; WP-BE-52 sigue bloqueada por Q-27.
+- **Qué estudiar:** serialización sesión→participantes, revocación idempotente del agregado y mapeo `USER`/`PARTICIPANT` a V7.
 
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)

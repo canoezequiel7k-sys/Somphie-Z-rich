@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Somphie Zúrich API
-  version: 0.3.0
+  version: 0.4.0
   summary: Contrato REST del backend de Somphie Zúrich (pedidos por QR, operación del personal, cuenta y pagos simulados).
   description: |
     Fuente de verdad del contrato (ADR-0008). Todo cambio se hace **primero aquí** y en `CHANGELOG.md`.
@@ -1414,17 +1414,22 @@ paths:
       x-permission: participant.revoke
       parameters:
         - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
           description: Código nuevo
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/JoinCodeResponse'}
               example: {joinCode: R4T8WN}
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
         '500': {$ref: '#/components/responses/InternalError'}
   /staff/sessions/{sessionId}/adjustments:
     post:
@@ -1698,7 +1703,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/VersionInfo'}
-              example: {build: 0.1.0, contractVersion: 0.3.0}
+              example: {build: 0.1.0, contractVersion: 0.4.0}
         '500': {$ref: '#/components/responses/InternalError'}
   /media/{path}:
     get:

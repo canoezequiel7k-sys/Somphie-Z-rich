@@ -1,28 +1,31 @@
 package com.somphie.floor.api
 
-import com.somphie.floor.domain.JoinCode
-import com.somphie.floor.domain.OpenSessionRequest
+import com.somphie.floor.application.ParticipantRevocationService
 import com.somphie.floor.domain.JoinSessionRequest
+import com.somphie.floor.domain.OpenSessionRequest
 import com.somphie.floor.domain.ParticipantInfoDto
 import com.somphie.floor.domain.PublicTable
 import com.somphie.floor.domain.SessionAccessResponse
 import com.somphie.floor.domain.SessionInfoDto
+import com.somphie.floor.infrastructure.JoinCodeGenerator
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
-import jakarta.validation.Valid
 import jakarta.servlet.http.HttpServletRequest
+import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RestController
-import java.time.Clock
-import java.security.SecureRandom
 import java.security.MessageDigest
+import java.security.SecureRandom
+import java.time.Clock
 import java.time.Instant
 import java.util.Base64
 import java.util.HexFormat
@@ -32,11 +35,12 @@ import java.util.UUID
 class FloorController(
     private val jdbc: NamedParameterJdbcTemplate,
     private val joinSessionService: JoinSessionService,
+    private val joinCodeGenerator: JoinCodeGenerator,
+    private val participantRevocationService: ParticipantRevocationService,
     private val clock: Clock,
 ) {
 
     private val secureRandom = SecureRandom()
-    private val allowedJoinChars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
     @GetMapping("/public/tables/{tableCode}")
     fun getPublicTable(@PathVariable tableCode: String): ResponseEntity<PublicTable> {
@@ -68,7 +72,7 @@ class FloorController(
         @PathVariable tableCode: String,
         @Valid @RequestBody request: OpenSessionRequest
     ): ResponseEntity<SessionAccessResponse> {
-        val tableSql = "SELECT id, restaurant_id, label, active FROM dining_table WHERE table_code = :tableCode"
+        val tableSql = "SELECT id, restaurant_id, label, active FROM dining_table WHERE table_code = :tableCode FOR UPDATE"
         val tables = jdbc.query(tableSql, mapOf("tableCode" to tableCode)) { rs, _ ->
             mapOf(
                 "id" to rs.getString("id"),
@@ -79,7 +83,7 @@ class FloorController(
         }
         val table = tables.firstOrNull() ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Table not found")
         if (table["active"] != true) {
-            throw DomainException(ErrorCode.SESSION_CLOSED, "Table is not available")
+            throw DomainException(ErrorCode.TABLE_UNAVAILABLE, "Table is not available")
         }
 
         val tableId = table["id"] as String
@@ -93,12 +97,12 @@ class FloorController(
         ) ?: 0
 
         if (existingSession > 0) {
-            throw DomainException(ErrorCode.SESSION_FULL, "Session already open for this table")
+            throw DomainException(ErrorCode.SESSION_ALREADY_OPEN, "Session already open for this table")
         }
 
         val sessionId = UUID.randomUUID().toString()
         val participantId = UUID.randomUUID().toString()
-        val joinCode = generateJoinCode()
+        val joinCode = joinCodeGenerator.generate().value
         val guestToken = generateGuestToken()
         val tokenHash = hashToken(guestToken)
         val now = Instant.now(clock)
@@ -169,12 +173,17 @@ class FloorController(
         }
     }
 
-    private fun generateJoinCode(): String {
-        val sb = StringBuilder(6)
-        for (i in 0 until 6) {
-            sb.append(allowedJoinChars[secureRandom.nextInt(allowedJoinChars.length)])
+    @DeleteMapping("/sessions/current/participants/{participantId}")
+    fun revokeParticipant(
+        @PathVariable participantId: String,
+        @RequestHeader(name = "Authorization", required = false) authorization: String?,
+    ): ResponseEntity<Map<String, Any>> {
+        val participantUuid = try {
+            UUID.fromString(participantId)
+        } catch (_: IllegalArgumentException) {
+            throw DomainException(ErrorCode.VALIDATION_FAILED, "Invalid participantId")
         }
-        return JoinCode.of(sb.toString()).value
+        return ResponseEntity.ok(participantRevocationService.revokeForHost(authorization, participantUuid))
     }
 
     private fun generateGuestToken(): String {

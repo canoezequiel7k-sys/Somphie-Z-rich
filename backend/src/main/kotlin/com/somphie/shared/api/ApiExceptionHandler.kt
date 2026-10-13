@@ -143,6 +143,8 @@ class ApiExceptionHandler {
         ErrorCode.ITEM_UNDO_WINDOW_EXPIRED,
         ErrorCode.SESSION_FULL,
         ErrorCode.SESSION_CLOSED,
+        ErrorCode.SESSION_ALREADY_OPEN,
+        ErrorCode.TABLE_UNAVAILABLE,
         ErrorCode.SESSION_HAS_PENDING_ORDERS,
         ErrorCode.SESSION_HAS_ACTIVE_ITEMS,
         ErrorCode.SESSION_BALANCE_PENDING,

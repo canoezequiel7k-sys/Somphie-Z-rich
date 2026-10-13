@@ -1,6 +1,6 @@
 # Catálogo de acciones de auditoría
 
-> Vocabulario **cerrado** de `audit_event.action` (D-151). Los códigos de la sección 2 salen **textualmente** de `estados-y-transiciones.md` y `reglas-negocio.md`. Los de la sección 3 los exige `RN-AUD-01` pero ningún documento los nombraba: son **propuestos (🟡)** hasta que el dueño los confirme.
+> Vocabulario **cerrado** de `audit_event.action` (D-151). Los códigos de la sección 2 salen de `estados-y-transiciones.md`, `reglas-negocio.md` o de una confirmación explícita del dueño. Los de la sección 3 los exige `RN-AUD-01` pero siguen **propuestos (🟡)** hasta su confirmación.
 > Para agregar una acción: primero se agrega aquí (con su origen), después se usa en el código. Una acción que no está en este catálogo no se puede escribir.
 
 ## 1. Reglas generales (vienen de RN-AUD)
@@ -8,6 +8,7 @@
 - **Append-only** (RN-AUD-02): la app no tiene `UPDATE/DELETE` sobre la tabla.
 - **Misma transacción** que la acción auditada (RN-AUD-05): si la acción se revierte, el registro también.
 - **Campos** (RN-AUD-03): `occurredAt`, `actorType` (`USER` / `PARTICIPANT` / `SYSTEM`), `actorId`, `action`, `targetType`, `targetId`, `reason?`, `beforeSummary?`, `afterSummary?`, `traceId`.
+- **Codificación (Q-30):** el dominio usa `USER`/`PARTICIPANT`/`SYSTEM`; al persistir, se traducen respectivamente a `STAFF`/`CUSTOMER`/`SYSTEM`, como exige V7. La migración no se modifica.
 - **Nunca** se guardan contraseñas, tokens ni datos personales innecesarios (RN-AUD-04). Los `*Summary` son resúmenes mínimos (estado, importes, códigos), no copias de entidades.
 - `reason` es obligatorio donde la fila lo indica (el motivo ya es obligatorio en la regla de negocio).
 
@@ -34,6 +35,7 @@
 | `REFUND_CREATED` | `USER` | Reembolso manual, **o automático del cierre forzado** (actor = quien forzó el cierre) | `PAYMENT` | **`reason` obligatorio**; en el automático, marcado "automático por cierre forzado" | estados §1 y §5, RN-BIL-07, RN-SES-06 |
 | `ADJUSTMENT_APPLIED` | `USER` | Se aplica un ajuste | `ADJUSTMENT` | **`reason`**: `reasonCode`; `after`: `kind`, importe | estados §8.2, RN-ADJ-02 |
 | `ADJUSTMENT_VOIDED` | `USER` | Se anula un ajuste (incluida una cortesía al cancelar su ítem, RN-ADJ-08) | `ADJUSTMENT` | **`reason` obligatorio** | estados §8.2, RN-ADJ-07 |
+| `PARTICIPANT_REVOKED` | `PARTICIPANT` (HOST) / `USER` (personal) | Se revoca a un participante | `PARTICIPANT` | `reason` si se informa | RN-AUD-01, Q-29 |
 
 ## 3. Acciones propuestas 🟡 (las exige `RN-AUD-01`, falta confirmarlas)
 
@@ -41,7 +43,6 @@ Código mínimo por categoría; si más adelante hace falta más detalle se pued
 
 | Código | Actor | Cuándo | `targetType` | Datos | `RN-AUD-01` dice |
 |---|---|---|---|---|---|
-| `PARTICIPANT_REVOKED` | `PARTICIPANT` (HOST) / `USER` | Se revoca a un participante | `PARTICIPANT` | `reason` si se informa | "revocación de participantes" |
 | `CATALOG_CHANGED` | `USER` | Alta, edición, archivo o disponibilidad de categoría, producto, grupo u opción | `CATEGORY` / `PRODUCT` / `OPTION_GROUP` / `OPTION` | `before` / `after` de los campos cambiados | "cambios de catálogo" |
 | `USER_CHANGED` | `USER` | Alta o cambio de usuario, roles, estaciones o habilitación | `USER` | `before` / `after` (sin credenciales) | "cambios de usuarios/roles/estaciones" |
 | `TABLE_QR_REGENERATED` | `USER` | Se regenera el `tableCode` (RN-ACC-03) | `TABLE` | — | "regeneración de QR" |

@@ -43,6 +43,8 @@ enum class ErrorCode {
     // --- Sesiones y participantes (catálogo §3) ---
     SESSION_FULL, // La sesión alcanzó el máximo de participantes permitido.
     SESSION_CLOSED, // La acción requiere que la sesión siga abierta.
+    SESSION_ALREADY_OPEN,
+    TABLE_UNAVAILABLE,
     JOIN_CODE_INVALID,
     JOIN_CODE_RATE_LIMITED,
     SESSION_ACCESS_REVOKED,

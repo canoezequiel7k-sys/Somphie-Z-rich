@@ -7,6 +7,12 @@ Reglas (D-150):
 - Versiones `0.x` = borrador. `1.0.0` = contrato congelado al cerrar la Fase 1.
 - Las fechas anteriores al 2026-10-11 no se registraron en su momento (el historial de Git empieza ese día): se marcan "fecha no registrada" en vez de inventarlas.
 
+## [0.4.0] — 2026-10-13 — exigir idempotencia al rotar el código de sesión (Q-28)
+Cambio incompatible para clientes de `POST /staff/sessions/{sessionId}/join-code/rotate`: ahora deben enviar `Idempotency-Key` (UUID v4) y reutilizarlo en reintentos.
+- changed: la respuesta de rotación incluye `Idempotent-Replayed: true` cuando se devuelve una respuesta persistida.
+- changed: `info.version` y el ejemplo de `GET /version` (`contractVersion`) = `0.4.0`.
+- Impacto: **Web y Android** deben generar/conservar la key del intento lógico; **Backend** debe devolver la misma respuesta sin volver a rotar en replays.
+
 ## [0.3.0] — 2026-10-13 — resolver Q-24 para la cola de estación
 Cambio incompatible para consumidores que asumían campos no nulos: `queuedAt` y `delayed` siguen presentes pero ahora admiten `null` en históricos sin timestamp (`delayed=null` solo si falta `acceptedAt`). La cola ordena por `acceptedAt` ascendente y desempata por ID; históricos sin aceptación aparecen al final en orden estable, sin garantía FIFO entre ellos. Cursor keyset de consistencia eventual: no ofrece snapshot frente a inserciones o cambios de estado. Se invalidan cursores de versiones previas; ante `VALIDATION_FAILED`, reiniciar la lectura sin cursor.
 - changed: `GET /staff/stations/{stationId}/queue` incluye activos históricos sin `queued_at`; no inventa timestamps ni `delayed=false`.
