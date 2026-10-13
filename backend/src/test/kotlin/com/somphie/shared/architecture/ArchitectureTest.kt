@@ -16,4 +16,19 @@ class ArchitectureTest {
             .resideInAnyPackage("org.springframework..", "jakarta.persistence..", "com.somphie..api..", "com.somphie..application..", "com.somphie..infrastructure..")
             .check(classes)
     }
+
+    @Test
+    fun `preparation layers use the application boundary`() {
+        val classes = ClassFileImporter().importPackages("com.somphie.preparation")
+        noClasses()
+            .that().resideInAPackage("com.somphie.preparation.api..")
+            .should().dependOnClassesThat()
+            .resideInAnyPackage("com.somphie.preparation.domain..", "com.somphie.preparation.infrastructure..")
+            .check(classes)
+        noClasses()
+            .that().resideInAPackage("com.somphie.preparation.application..")
+            .should().dependOnClassesThat()
+            .resideInAPackage("com.somphie.preparation.infrastructure..")
+            .check(classes)
+    }
 }
