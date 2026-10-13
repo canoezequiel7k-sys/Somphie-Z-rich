@@ -153,7 +153,8 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 
 | # | Fecha | Agente | Consulta | Estado | Respuesta |
 |---|---|---|---|---|---|
-| — | — | — | (vacío) | — | — |
+| Q-22 | 2026-10-12 | BE | `Order.version` es obligatorio en OpenAPI y sirve para descartar respuestas/eventos viejos, pero `customer_order` y el dominio no lo guardan. ¿Valor inicial y cuándo incrementa? Bloquea respuestas completas de preparación. | Abierta | — |
+| Q-23 | 2026-10-12 | BE | OpenAPI acepta `optionIds` al crear ítems y exige snapshots de opciones en el pedido/cola; `CreateOrderRequest` y `order_item` actualmente no los conservan. ¿Confirmar alcance de snapshot y migración compatible? Bloquea mostrar opciones históricas de forma correcta. | Abierta | — |
 
 ## 6. Protocolo de cambios
 

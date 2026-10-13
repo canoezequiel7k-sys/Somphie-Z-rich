@@ -122,6 +122,7 @@ class ApiExceptionHandler {
         ErrorCode.ADJUSTMENT_LIMIT_EXCEEDED,
         -> HttpStatus.FORBIDDEN
         ErrorCode.IDEMPOTENCY_KEY_REQUIRED,
+        ErrorCode.VALIDATION_FAILED,
         -> HttpStatus.BAD_REQUEST
         ErrorCode.ORDER_ALREADY_DECIDED,
         ErrorCode.ORDER_NOT_CANCELLABLE,

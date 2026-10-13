@@ -106,6 +106,8 @@ class IdentitySecurityConfiguration {
                     .hasAuthority("order.accept")
                 it.requestMatchers(HttpMethod.POST, "/staff/orders/*/reject")
                     .hasAuthority("order.reject")
+                it.requestMatchers(HttpMethod.GET, "/staff/stations/*/queue")
+                    .hasAuthority("item.prepare")
                 it.requestMatchers("/staff/**").denyAll()
                 it.requestMatchers(HttpMethod.GET, "/menu", "/products/*", "/public/tables/*", "/media/**", "/version", "/actuator/health")
                     .permitAll()

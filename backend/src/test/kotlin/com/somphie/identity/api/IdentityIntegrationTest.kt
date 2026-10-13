@@ -80,6 +80,72 @@ class IdentityIntegrationTest {
         mockMvc.perform(get("/staff/orders"))
             .andExpect(status().isUnauthorized)
             .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+        mockMvc.perform(get("/staff/stations/$BAR_STATION_ID/queue"))
+            .andExpect(status().isUnauthorized)
+            .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+    }
+
+    @Test
+    fun `station queue enforces permission station scope and cursor pagination`() {
+        val fixture = createGuestSession()
+        val orderId = createOrder(fixture)
+        val stationId = addOrderItem(orderId, fixture)
+        addOrderItem(orderId, fixture)
+        jdbc.update(
+            "UPDATE customer_order SET status = 'ACCEPTED', accepted_at = CURRENT_TIMESTAMP - INTERVAL '20 minutes' WHERE id = ?",
+            UUID.fromString(orderId),
+        )
+        jdbc.update("UPDATE order_item SET status = 'QUEUED' WHERE order_id = ?", UUID.fromString(orderId))
+        jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
+        jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'KITCHEN')", USER_ID)
+        val kitchenToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+
+        mockMvc.perform(
+            get("/staff/stations/$stationId/queue").header("Authorization", "******"),
+        ).andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+
+        jdbc.update("INSERT INTO user_station (user_id, station_id) VALUES (?, ?)", USER_ID, stationId)
+        val firstPage = mockMvc.perform(
+            get("/staff/stations/$stationId/queue")
+                .param("limit", "1")
+                .header("Authorization", "******"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].status").value("QUEUED"))
+            .andExpect(jsonPath("$.items[0].delayed").value(true))
+            .andReturn().response.contentAsString
+        val cursor = json(firstPage, "$.nextCursor")
+        val secondPage = mockMvc.perform(
+            get("/staff/stations/$stationId/queue")
+                .param("limit", "1")
+                .param("cursor", cursor)
+                .header("Authorization", "******"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].status").value("QUEUED"))
+            .andReturn().response.contentAsString
+        assertEquals(
+            2,
+            setOf(json(firstPage, "$.items[0].itemId"), json(secondPage, "$.items[0].itemId")).size,
+        )
+
+        jdbc.update(
+            "INSERT INTO restaurant (id, name, timezone, currency) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+            OTHER_RESTAURANT_ID,
+            "Other restaurant",
+            "America/Argentina/Buenos_Aires",
+            "ARS",
+        )
+        jdbc.update(
+            "INSERT INTO station (id, restaurant_id, code, name) VALUES (?, ?, 'BAR', 'Other bar')",
+            BAR_STATION_ID,
+            OTHER_RESTAURANT_ID,
+        )
+        mockMvc.perform(
+            get("/staff/stations/$BAR_STATION_ID/queue").header("Authorization", "******"),
+        ).andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
     }
 
     @Test
@@ -565,6 +631,7 @@ class IdentityIntegrationTest {
         val USER_ID = UUID.fromString("e6b8be16-51c5-4835-99f1-10d2259ee099")
         val OTHER_USER_ID = UUID.fromString("99bdfa60-0c8d-4e4a-b5d2-d605098b7277")
         val OTHER_RESTAURANT_ID = UUID.fromString("808a73aa-2d94-42a7-8662-5b874f29cc7e")
+        val BAR_STATION_ID = UUID.fromString("aa2a73aa-2d94-42a7-8662-5b874f29cc7e")
         val RESTAURANT_ID = UUID.fromString("6f2d8a41-3b9c-4e75-a1d0-5c7e9b3f2a68")
 
         @Container
