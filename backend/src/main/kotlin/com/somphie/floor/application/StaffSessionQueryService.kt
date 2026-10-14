@@ -148,13 +148,20 @@ class StaffSessionQueryService(
             "status" to order.status,
             "version" to order.version,
             "createdAt" to order.createdAt.toString(),
-            "createdBy" to mapOf(
-                "participantId" to order.participantId.toString(),
-                "displayName" to order.participantName,
-            ),
+            "createdBy" to if (order.creatorUserId != null) {
+                mapOf("userId" to order.creatorUserId.toString(), "displayName" to order.creatorName.orEmpty())
+            } else {
+                mapOf("participantId" to order.participantId.toString(), "displayName" to order.participantName.orEmpty())
+            },
             "items" to order.items.map(::itemResponse),
             "totalMinor" to order.totalMinor,
         ).apply {
+            if (order.participantId != null && order.creatorUserId != null) {
+                put(
+                    "participant",
+                    mapOf("participantId" to order.participantId.toString(), "displayName" to order.participantName.orEmpty()),
+                )
+            }
             order.decidedAt?.let { put("decidedAt", it.toString()) }
             if (order.deciderId != null) {
                 put("decidedBy", mapOf("userId" to order.deciderId.toString(), "displayName" to order.deciderName.orEmpty()))

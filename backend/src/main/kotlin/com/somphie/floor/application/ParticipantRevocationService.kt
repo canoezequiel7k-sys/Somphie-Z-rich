@@ -1,6 +1,11 @@
 package com.somphie.floor.application
 
 import com.somphie.audit.AuditService
+import com.somphie.events.DomainEvent
+import com.somphie.events.DomainEventType
+import com.somphie.events.EventAggregateType
+import com.somphie.events.EventOutboxService
+import com.somphie.events.EventVersion
 import com.somphie.floor.domain.JoinCode
 import com.somphie.floor.domain.SessionCloseReason
 import com.somphie.floor.domain.SessionParticipant
@@ -23,6 +28,7 @@ class ParticipantRevocationService(
     private val jdbc: NamedParameterJdbcTemplate,
     private val auditService: AuditService,
     private val clock: Clock,
+    private val eventOutbox: EventOutboxService,
 ) {
     private data class SessionState(
         val id: UUID,
@@ -186,6 +192,16 @@ class ParticipantRevocationService(
                 action = "PARTICIPANT_REVOKED",
                 targetType = "PARTICIPANT",
                 targetId = targetParticipantId.toString(),
+            )
+            eventOutbox.append(
+                DomainEvent(
+                    restaurantId = restaurantId,
+                    type = DomainEventType.SESSION_UPDATED,
+                    aggregateType = EventAggregateType.SESSION,
+                    aggregateId = sessionId,
+                    version = EventVersion.Increment,
+                    sessionId = sessionId,
+                ),
             )
         }
         return mapOf(

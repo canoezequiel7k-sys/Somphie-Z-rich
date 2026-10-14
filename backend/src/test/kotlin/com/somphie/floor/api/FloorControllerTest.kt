@@ -4,6 +4,7 @@ import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
 import com.somphie.floor.application.ParticipantRevocationService
 import com.somphie.floor.infrastructure.JoinCodeGenerator
+import com.somphie.events.EventOutboxService
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -24,6 +25,7 @@ class FloorControllerTest {
         JoinCodeGenerator(),
         mock(ParticipantRevocationService::class.java),
         Clock.systemUTC(),
+        mock(EventOutboxService::class.java),
     )
 
     @Test

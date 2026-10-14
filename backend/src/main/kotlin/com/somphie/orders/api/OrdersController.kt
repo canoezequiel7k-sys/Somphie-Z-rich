@@ -6,7 +6,9 @@ import com.somphie.events.DomainEventType
 import com.somphie.events.EventAggregateType
 import com.somphie.events.EventOutboxService
 import com.somphie.events.EventVersion
+import com.somphie.identity.application.IdentityService
 import com.somphie.orders.domain.CreateOrderRequest
+import com.somphie.orders.domain.CreateStaffOrderRequest
 import com.somphie.orders.domain.ItemSnapshot
 import com.somphie.orders.domain.Order
 import com.somphie.orders.domain.OrderItem
@@ -19,6 +21,8 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -43,6 +47,7 @@ class OrdersController(
     private val eventOutbox: EventOutboxService,
     private val clock: Clock,
     private val objectMapper: ObjectMapper,
+    private val identityService: IdentityService,
 ) {
     private data class ProductRecord(
         val id: String,
@@ -233,6 +238,252 @@ class OrdersController(
 
     }
 
+    @PostMapping("/staff/sessions/{sessionId}/orders")
+    @Transactional
+    fun createOrderOnBehalf(
+        @PathVariable sessionId: String,
+        @RequestHeader(name = "Idempotency-Key", required = false) key: String?,
+        @RequestBody request: CreateStaffOrderRequest,
+        @AuthenticationPrincipal jwt: Jwt,
+    ): ResponseEntity<Map<String, Any>> {
+        val profile = identityService.me(jwt.subject, jwt.getClaim("rid"), jwt.getClaim("tv"))
+        if ("order.create_on_behalf" !in profile.permissions) {
+            throw DomainException(ErrorCode.FORBIDDEN, "Staff permission is required")
+        }
+        val sessionUuid = try {
+            UUID.fromString(sessionId)
+        } catch (_: IllegalArgumentException) {
+            throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Session not found")
+        }
+        if (key.isNullOrBlank()) {
+            throw DomainException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED, "Idempotency-Key header is required")
+        }
+        val parsedKey = try {
+            UUID.fromString(key)
+        } catch (_: IllegalArgumentException) {
+            throw DomainException(ErrorCode.VALIDATION_FAILED, "Idempotency-Key must be a UUID v4")
+        }
+        if (parsedKey.version() != 4) {
+            throw DomainException(ErrorCode.VALIDATION_FAILED, "Idempotency-Key must be a UUID v4")
+        }
+        val idempotencyKey = parsedKey.toString()
+        if (request.items.isEmpty()) {
+            throw DomainException(ErrorCode.ORDER_EMPTY, "Order must contain at least one item")
+        }
+
+        val actorId = profile.account.id
+        val restaurantId = profile.account.restaurantId
+        val scope = "order:create-on-behalf:$restaurantId:$sessionUuid:$actorId"
+        return idempotencyService.executeIdempotent(
+            scope,
+            idempotencyKey,
+            "order:create-on-behalf:$sessionUuid|$request",
+        ) {
+            // El lock de sesión serializa el alta contra el cierre; tenant y actor salen del JWT validado.
+            val session = jdbc.query(
+                """
+                SELECT ts.status, ts.restaurant_id, dt.label AS table_label
+                FROM table_session ts
+                JOIN dining_table dt ON dt.id = ts.table_id
+                WHERE ts.id = :sessionId AND ts.restaurant_id = :restaurantId
+                FOR UPDATE OF ts
+                """.trimIndent(),
+                mapOf("sessionId" to sessionUuid, "restaurantId" to restaurantId),
+            ) { rs, _ -> rs.getString("status") to rs.getString("table_label") }
+                .firstOrNull() ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Session not found")
+            if (session.first != "OPEN") {
+                throw DomainException(ErrorCode.SESSION_CLOSED, "Session is closed")
+            }
+
+            val participant = request.participantId?.let { participantId ->
+                val participantUuid = try {
+                    UUID.fromString(participantId)
+                } catch (_: IllegalArgumentException) {
+                    throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Participant not found")
+                }
+                jdbc.query(
+                    """
+                    SELECT id, display_name FROM session_participant
+                    WHERE id = :participantId AND session_id = :sessionId
+                    """.trimIndent(),
+                    mapOf("participantId" to participantUuid, "sessionId" to sessionUuid),
+                ) { rs, _ -> rs.getObject("id", UUID::class.java) to rs.getString("display_name") }
+                    .firstOrNull() ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Participant not found")
+            }
+            val now = Instant.now(clock)
+            val stationCodes = mutableMapOf<UUID, String>()
+            val items = request.items.map { itemRequest ->
+                val product = fetchProduct(itemRequest.productId, restaurantId.toString())
+                stationCodes[UUID.fromString(product.stationId)] = product.stationCode
+                if (!product.available) {
+                    throw DomainException(ErrorCode.PRODUCT_UNAVAILABLE, "Product is unavailable")
+                }
+                val snapshot = ItemSnapshot(
+                    productId = UUID.fromString(product.id),
+                    productName = product.name,
+                    productNameI18n = product.nameI18n,
+                    stationId = UUID.fromString(product.stationId),
+                    quantity = itemRequest.quantity,
+                    note = itemRequest.note,
+                    basePrice = Money.of(product.priceMinor),
+                    options = validateAndSnapshotOptions(
+                        product.id,
+                        restaurantId.toString(),
+                        itemRequest.optionIds.orEmpty(),
+                    ),
+                )
+                OrderItem.pending(UUID.randomUUID(), snapshot)
+            }
+            val order = Order.createAccepted(UUID.randomUUID(), items, now)
+            val totalMinor = order.items.sumOf { it.lineTotal.minor }
+            if (request.acknowledgedTotalMinor != null && totalMinor != request.acknowledgedTotalMinor) {
+                throw DomainException(
+                    ErrorCode.PRICE_CHANGED,
+                    "Price changed",
+                    mapOf("currentTotalMinor" to totalMinor),
+                )
+            }
+            jdbc.update(
+                "UPDATE table_session SET last_activity_at = :now WHERE id = :sessionId AND status = 'OPEN'",
+                mapOf("sessionId" to sessionUuid, "now" to java.sql.Timestamp.from(now)),
+            )
+            jdbc.update(
+                """
+                INSERT INTO customer_order (
+                    id, restaurant_id, session_id, participant_id, created_by_user_id, status,
+                    display_code, summary, total_minor, note, created_at, accepted_at, decided_at,
+                    decided_by, version
+                ) VALUES (
+                    :id, :restaurantId, :sessionId, :participantId, :actorId, :status,
+                    :displayCode, :summary, :totalMinor, :note, :createdAt, :acceptedAt, :decidedAt,
+                    :actorId, :version
+                )
+                """.trimIndent(),
+                mapOf(
+                    "id" to order.id,
+                    "restaurantId" to restaurantId,
+                    "sessionId" to sessionUuid,
+                    "participantId" to participant?.first,
+                    "actorId" to actorId,
+                    "status" to order.status.name,
+                    "displayCode" to "#001",
+                    "summary" to "Pedido de mesa",
+                    "totalMinor" to totalMinor,
+                    "note" to request.note,
+                    "createdAt" to java.sql.Timestamp.from(now),
+                    "acceptedAt" to java.sql.Timestamp.from(now),
+                    "decidedAt" to java.sql.Timestamp.from(now),
+                    "version" to order.version,
+                ),
+            )
+            order.items.forEach { item ->
+                jdbc.update(
+                    """
+                    INSERT INTO order_item (
+                        id, order_id, session_id, product_id, product_name, product_name_i18n,
+                        station_id, quantity, base_price_minor, options_delta_minor, unit_price_minor,
+                        line_total_minor, note, status, options_snapshot, queued_at
+                    ) VALUES (
+                        :id, :orderId, :sessionId, :productId, :productName, CAST(:productNameI18n AS JSONB),
+                        :stationId, :quantity, :basePrice, :optionsDelta, :unitPrice,
+                        :lineTotal, :note, :status, CAST(:optionsSnapshot AS JSONB), :queuedAt
+                    )
+                    """.trimIndent(),
+                    mapOf(
+                        "id" to item.id,
+                        "orderId" to order.id,
+                        "sessionId" to sessionUuid,
+                        "productId" to item.snapshot.productId,
+                        "productName" to item.snapshot.productName,
+                        "productNameI18n" to objectMapper.writeValueAsString(item.snapshot.productNameI18n),
+                        "stationId" to item.snapshot.stationId,
+                        "quantity" to item.snapshot.quantity,
+                        "basePrice" to item.snapshot.basePrice.minor,
+                        "optionsDelta" to item.snapshot.optionsDelta.minor,
+                        "unitPrice" to item.snapshot.unitPrice.minor,
+                        "lineTotal" to item.snapshot.lineTotal.minor,
+                        "note" to item.snapshot.note,
+                        "status" to item.status.name,
+                        "optionsSnapshot" to objectMapper.writeValueAsString(item.snapshot.options.map {
+                            mapOf(
+                                "groupId" to it.groupId.toString(),
+                                "optionId" to it.optionId.toString(),
+                                "groupName" to it.groupName,
+                                "optionName" to it.optionName,
+                                "priceDeltaMinor" to it.priceDelta.minor,
+                            )
+                        }),
+                        "queuedAt" to java.sql.Timestamp.from(now),
+                    ),
+                )
+            }
+            auditService.record(
+                restaurantId = restaurantId.toString(),
+                actorType = "STAFF",
+                actorId = actorId.toString(),
+                action = "ORDER_CREATED_ON_BEHALF",
+                targetType = "ORDER",
+                targetId = order.id.toString(),
+                afterSummary = "{\"status\":\"${order.status.name}\",\"totalMinor\":$totalMinor}",
+            )
+            eventOutbox.append(
+                DomainEvent(
+                    restaurantId = restaurantId,
+                    type = DomainEventType.ORDER_CREATED,
+                    aggregateType = EventAggregateType.ORDER,
+                    aggregateId = order.id,
+                    version = EventVersion.Persisted(order.version),
+                    sessionId = sessionUuid,
+                ),
+            )
+            val response = linkedMapOf<String, Any>(
+                "id" to order.id.toString(),
+                "sessionId" to sessionUuid.toString(),
+                "tableLabel" to session.second,
+                "displayCode" to "#001",
+                "status" to order.status.name,
+                "version" to order.version,
+                "createdBy" to mapOf("userId" to actorId.toString(), "displayName" to profile.account.displayName),
+                "decidedBy" to mapOf("userId" to actorId.toString(), "displayName" to profile.account.displayName),
+                "decidedAt" to now.toString(),
+                "createdAt" to now.toString(),
+                "items" to order.items.map { item ->
+                    linkedMapOf<String, Any>(
+                        "id" to item.id.toString(),
+                        "productId" to item.snapshot.productId.toString(),
+                        "productName" to item.snapshot.productName,
+                        "productNameI18n" to item.snapshot.productNameI18n,
+                        "basePriceMinor" to item.snapshot.basePrice.minor,
+                        "optionsDeltaMinor" to item.snapshot.optionsDelta.minor,
+                        "unitPriceMinor" to item.snapshot.unitPrice.minor,
+                        "quantity" to item.snapshot.quantity,
+                        "lineTotalMinor" to item.snapshot.lineTotal.minor,
+                        "station" to stationCodes.getValue(item.snapshot.stationId),
+                        "status" to item.status.name,
+                        "options" to item.snapshot.options.map {
+                            mapOf(
+                                "groupId" to it.groupId.toString(),
+                                "optionId" to it.optionId.toString(),
+                                "groupName" to it.groupName,
+                                "optionName" to it.optionName,
+                                "priceDeltaMinor" to it.priceDelta.minor,
+                            )
+                        },
+                        "productCurrentlyAvailable" to true,
+                        "queuedAt" to now.toString(),
+                    ).apply { item.snapshot.note?.let { put("note", it) } }
+                },
+                "totalMinor" to totalMinor,
+            ).apply {
+                request.note?.let { put("note", it) }
+                participant?.let {
+                    put("participant", mapOf("participantId" to it.first.toString(), "displayName" to it.second))
+                }
+            }
+            ResponseEntity.status(HttpStatus.CREATED).body(response)
+        }
+    }
+
         private data class OptionGroupRule(
             val id: String,
             val name: String,
@@ -358,9 +609,11 @@ class OrdersController(
         val rows = jdbc.query(
             """
             SELECT o.id, o.status, o.display_code, o.version, o.total_minor, o.note, o.created_at,
-                   o.participant_id, p.display_name AS participant_name, o.rejection_reason, o.rejection_text
+                   o.participant_id, p.display_name AS participant_name, o.created_by_user_id,
+                   creator.display_name AS creator_name, o.rejection_reason, o.rejection_text
             FROM customer_order o
-            JOIN session_participant p ON p.id = o.participant_id
+            LEFT JOIN session_participant p ON p.id = o.participant_id
+            LEFT JOIN app_user creator ON creator.id = o.created_by_user_id
             WHERE o.session_id = :sessionId $cursorFilter
             ORDER BY o.created_at DESC, o.id DESC
             LIMIT :limit
@@ -374,14 +627,20 @@ class OrdersController(
                 "status" to rs.getString("status"),
                 "displayCode" to rs.getString("display_code"),
                 "version" to rs.getLong("version"),
-                "createdBy" to mapOf(
-                    "participantId" to rs.getString("participant_id"),
-                    "displayName" to rs.getString("participant_name"),
-                ),
+                "createdBy" to if (rs.getObject("created_by_user_id", UUID::class.java) != null) {
+                    mapOf("userId" to rs.getString("created_by_user_id"), "displayName" to rs.getString("creator_name"))
+                } else {
+                    mapOf("participantId" to rs.getString("participant_id"), "displayName" to rs.getString("participant_name"))
+                },
                 "createdAt" to createdAt.toString(),
                 "items" to emptyList<Any>(),
                 "totalMinor" to rs.getLong("total_minor"),
             ).apply {
+                if (rs.getObject("created_by_user_id", UUID::class.java) != null) {
+                    rs.getString("participant_id")?.let {
+                        put("participant", mapOf("participantId" to it, "displayName" to rs.getString("participant_name")))
+                    }
+                }
                 rs.getString("note")?.let { put("note", it) }
                 rs.getString("rejection_reason")?.let {
                     put("rejection", linkedMapOf("reasonCode" to it).apply {
@@ -468,9 +727,11 @@ class OrdersController(
         val order = jdbc.query(
             """
             SELECT o.id, o.status, o.display_code, o.version, o.total_minor, o.note, o.created_at,
-                   o.participant_id, p.display_name AS participant_name, o.rejection_reason, o.rejection_text
+                   o.participant_id, p.display_name AS participant_name, o.created_by_user_id,
+                   creator.display_name AS creator_name, o.rejection_reason, o.rejection_text
             FROM customer_order o
-            JOIN session_participant p ON p.id = o.participant_id
+            LEFT JOIN session_participant p ON p.id = o.participant_id
+            LEFT JOIN app_user creator ON creator.id = o.created_by_user_id
             WHERE o.id = :id AND o.session_id = :sessionId
             """.trimIndent(),
             mapOf("id" to uuid, "sessionId" to UUID.fromString(sessionAndParticipant.getValue("sessionId"))),
@@ -480,14 +741,20 @@ class OrdersController(
                 "status" to rs.getString("status"),
                 "displayCode" to rs.getString("display_code"),
                 "version" to rs.getLong("version"),
-                "createdBy" to mapOf(
-                    "participantId" to rs.getString("participant_id"),
-                    "displayName" to rs.getString("participant_name"),
-                ),
+                "createdBy" to if (rs.getObject("created_by_user_id", UUID::class.java) != null) {
+                    mapOf("userId" to rs.getString("created_by_user_id"), "displayName" to rs.getString("creator_name"))
+                } else {
+                    mapOf("participantId" to rs.getString("participant_id"), "displayName" to rs.getString("participant_name"))
+                },
                 "createdAt" to rs.getTimestamp("created_at").toInstant().toString(),
                 "items" to emptyList<Any>(),
                 "totalMinor" to rs.getLong("total_minor"),
             ).apply {
+                if (rs.getObject("created_by_user_id", UUID::class.java) != null) {
+                    rs.getString("participant_id")?.let {
+                        put("participant", mapOf("participantId" to it, "displayName" to rs.getString("participant_name")))
+                    }
+                }
                 rs.getString("note")?.let { put("note", it) }
                 rs.getString("rejection_reason")?.let {
                     put("rejection", linkedMapOf("reasonCode" to it).apply {
@@ -548,6 +815,16 @@ class OrdersController(
             action = "ORDER_CANCELLED",
             targetType = "ORDER",
             targetId = uuid.toString(),
+        )
+        eventOutbox.append(
+            DomainEvent(
+                restaurantId = UUID.fromString(sessionAndParticipant.getValue("restaurantId")),
+                type = DomainEventType.ORDER_UPDATED,
+                aggregateType = EventAggregateType.ORDER,
+                aggregateId = uuid,
+                version = EventVersion.Increment,
+                sessionId = UUID.fromString(sessionId),
+            ),
         )
 
         return ResponseEntity.ok(mapOf("id" to uuid.toString(), "status"  to "CANCELLED"))

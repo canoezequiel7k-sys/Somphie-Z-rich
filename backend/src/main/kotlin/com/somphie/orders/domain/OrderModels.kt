@@ -12,3 +12,10 @@ data class CreateOrderRequest(
     val note: String? = null,
     val acknowledgedTotalMinor: Long
 )
+
+data class CreateStaffOrderRequest(
+    val items: List<CreateOrderItemDto>,
+    val participantId: String? = null,
+    val note: String? = null,
+    val acknowledgedTotalMinor: Long? = null,
+)

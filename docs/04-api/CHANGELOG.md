@@ -7,6 +7,13 @@ Reglas (D-150):
 - Versiones `0.x` = borrador. `1.0.0` = contrato congelado al cerrar la Fase 1.
 - Las fechas anteriores al 2026-10-11 no se registraron en su momento (el historial de Git empieza ese día): se marcan "fecha no registrada" en vez de inventarlas.
 
+## [0.4.1] — 2026-10-13 — atribuir pedidos creados por el personal (Q-34)
+Cambio compatible: el endpoint de pedidos en nombre del cliente acepta un participante asociado opcional y deriva el empleado creador del JWT autenticado.
+- added: `CreateStaffOrderRequest.participantId` es opcional; el servidor valida que el participante pertenezca a la sesión.
+- changed: `Order.createdBy` identifica al participante o al empleado; `Order.participant` expone la asociación cuando un empleado crea el pedido para un participante.
+- changed: `info.version` y el ejemplo de `GET /version` (`contractVersion`) = `0.4.1`.
+- Impacto: **Web y Android** pueden enviar `participantId` si existe y deben admitir la atribución por empleado; **Backend** persiste ambas atribuciones sin aceptar identidad de usuario desde el request.
+
 ## [0.4.0] — 2026-10-13 — exigir idempotencia al rotar el código de sesión (Q-28)
 Cambio incompatible para clientes de `POST /staff/sessions/{sessionId}/join-code/rotate`: ahora deben enviar `Idempotency-Key` (UUID v4) y reutilizarlo en reintentos.
 - changed: la respuesta de rotación incluye `Idempotent-Replayed: true` cuando se devuelve una respuesta persistida.

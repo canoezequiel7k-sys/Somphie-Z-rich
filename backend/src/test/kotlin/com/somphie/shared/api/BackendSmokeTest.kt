@@ -76,7 +76,7 @@ class BackendSmokeTest {
             .andExpect(status().isOk)
             .andExpect(content().contentTypeCompatibleWith("application/json"))
             .andExpect(jsonPath("$.build").value("0.0.1-SNAPSHOT"))
-            .andExpect(jsonPath("$.contractVersion").value("0.3.0"))
+            .andExpect(jsonPath("$.contractVersion").value("0.4.1"))
     }
 
     /** Confirma que Actuator exponga salud sin detalles internos en el perfil de pruebas. */

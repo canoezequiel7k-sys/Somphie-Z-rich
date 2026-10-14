@@ -1,5 +1,10 @@
 package com.somphie.preparation.application
 
+import com.somphie.events.DomainEvent
+import com.somphie.events.DomainEventType
+import com.somphie.events.EventAggregateType
+import com.somphie.events.EventOutboxService
+import com.somphie.events.EventVersion
 import com.somphie.orders.domain.Order
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
@@ -24,6 +29,7 @@ data class PreparationAccess(
 data class LockedPreparationOrder(
     val order: Order,
     val sessionOpen: Boolean,
+    val sessionId: UUID,
     val itemStationIds: Set<UUID>,
 )
 
@@ -77,6 +83,7 @@ class ApplyItemAction(
     private val repository: PreparationActionRepository,
     private val courtesyCancellation: CourtesyCancellationPort,
     private val clock: Clock,
+    private val eventOutbox: EventOutboxService,
 ) {
     @Transactional
     fun execute(
@@ -171,6 +178,32 @@ class ApplyItemAction(
             repository.recordAudit(
                 access, item.id, action, beforeById.getValue(item.id).status.name, item.status.name,
                 if (action == ItemAction.CANCEL) reason else null,
+            )
+        }
+        if (changed) {
+            // Eventos y transición persisten juntos; el replay idempotente no duplica publicaciones.
+            updated.items.filter { beforeById[it.id]?.status != it.status }.forEach { item ->
+                eventOutbox.append(
+                    DomainEvent(
+                        restaurantId = access.restaurantId,
+                        type = DomainEventType.ITEM_UPDATED,
+                        aggregateType = EventAggregateType.ITEM,
+                        aggregateId = item.id,
+                        version = EventVersion.Increment,
+                        sessionId = locked.sessionId,
+                        stationId = item.snapshot.stationId,
+                    ),
+                )
+            }
+            eventOutbox.append(
+                DomainEvent(
+                    restaurantId = access.restaurantId,
+                    type = DomainEventType.ORDER_UPDATED,
+                    aggregateType = EventAggregateType.ORDER,
+                    aggregateId = updated.id,
+                    version = EventVersion.Persisted(updated.version),
+                    sessionId = locked.sessionId,
+                ),
             )
         }
         return repository.staffOrder(access, updated.id)

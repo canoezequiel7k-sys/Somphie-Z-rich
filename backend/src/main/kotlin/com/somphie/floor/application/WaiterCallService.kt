@@ -1,5 +1,10 @@
 package com.somphie.floor.application
 
+import com.somphie.events.DomainEvent
+import com.somphie.events.DomainEventType
+import com.somphie.events.EventAggregateType
+import com.somphie.events.EventOutboxService
+import com.somphie.events.EventVersion
 import com.somphie.floor.domain.CreateWaiterCallRequest
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
@@ -21,6 +26,7 @@ import java.util.UUID
 class WaiterCallService(
     private val jdbc: NamedParameterJdbcTemplate,
     private val idempotency: IdempotencyService,
+    private val eventOutbox: EventOutboxService,
     private val clock: Clock,
 ) {
     private data class GuestAccess(
@@ -127,6 +133,7 @@ class WaiterCallService(
                     "expiresAt" to java.sql.Timestamp.from(now.plus(CALL_TTL)),
                 ),
             )
+            appendWaiterEvent(guest.restaurantId, guest.sessionId, DomainEventType.WAITER_CALLED)
             ResponseEntity.status(HttpStatus.CREATED).body(
                 waiterCallMap(
                     CallRecord(
@@ -202,14 +209,21 @@ class WaiterCallService(
     }
 
     @Transactional
-    fun expireCallsAt(now: Instant): Int = jdbc.update(
-        """
-        UPDATE waiter_call
-        SET status = 'EXPIRED'
-        WHERE status IN ('OPEN', 'ACKNOWLEDGED') AND expires_at <= :now
-        """.trimIndent(),
-        mapOf("now" to java.sql.Timestamp.from(now)),
-    )
+    fun expireCallsAt(now: Instant): Int {
+        val expiredSessions = jdbc.query(
+            """
+            UPDATE waiter_call
+            SET status = 'EXPIRED'
+            WHERE status IN ('OPEN', 'ACKNOWLEDGED') AND expires_at <= :now
+            RETURNING session_id
+            """.trimIndent(),
+            mapOf("now" to java.sql.Timestamp.from(now)),
+        ) { rs, _ -> rs.getObject("session_id", UUID::class.java) }
+        expiredSessions.forEach { sessionId ->
+            appendWaiterEvent(restaurantId(sessionId), sessionId, DomainEventType.WAITER_UPDATED)
+        }
+        return expiredSessions.size
+    }
 
     private fun transition(id: UUID, restaurantId: UUID, expected: String, target: String): Map<String, Any> {
         val now = clock.instant()
@@ -258,6 +272,7 @@ class WaiterCallService(
         if (changed == 0) {
             throw DomainException(ErrorCode.STATE_CONFLICT, "Waiter call state changed concurrently")
         }
+        appendWaiterEvent(restaurantId(call.sessionId), call.sessionId, DomainEventType.WAITER_UPDATED)
         return staffWaiterCallMap(call.copy(
             status = target,
             acknowledgedAt = if (target == "ACKNOWLEDGED") now else call.acknowledgedAt,
@@ -318,39 +333,68 @@ class WaiterCallService(
     ) { rs, _ -> rs.toCallRecord() }
 
     private fun expireSessionCalls(sessionId: UUID, now: Instant) {
-        jdbc.update(
+        val expiredSessions = jdbc.query(
             """
             UPDATE waiter_call
             SET status = 'EXPIRED'
             WHERE session_id = :sessionId AND status IN ('OPEN', 'ACKNOWLEDGED')
               AND expires_at <= :now
+            RETURNING session_id
             """.trimIndent(),
             mapOf("sessionId" to sessionId, "now" to java.sql.Timestamp.from(now)),
-        )
+        ) { rs, _ -> rs.getObject("session_id", UUID::class.java) }
+        expiredSessions.forEach { appendWaiterEvent(restaurantId(it), it, DomainEventType.WAITER_UPDATED) }
     }
 
     private fun expireSessions(sessionIds: List<UUID>, now: Instant) {
-        jdbc.update(
+        val expiredSessions = jdbc.query(
             """
             UPDATE waiter_call
             SET status = 'EXPIRED'
             WHERE session_id IN (:sessionIds) AND status IN ('OPEN', 'ACKNOWLEDGED')
               AND expires_at <= :now
+            RETURNING session_id
             """.trimIndent(),
             mapOf("sessionIds" to sessionIds, "now" to java.sql.Timestamp.from(now)),
-        )
+        ) { rs, _ -> rs.getObject("session_id", UUID::class.java) }
+        expiredSessions.forEach { appendWaiterEvent(restaurantId(it), it, DomainEventType.WAITER_UPDATED) }
     }
 
     private fun expireRestaurantCalls(restaurantId: UUID, now: Instant) {
-        jdbc.update(
+        val expiredSessions = jdbc.query(
             """
             UPDATE waiter_call wc
             SET status = 'EXPIRED'
             FROM table_session ts
             WHERE ts.id = wc.session_id AND ts.restaurant_id = :restaurantId
               AND wc.status IN ('OPEN', 'ACKNOWLEDGED') AND wc.expires_at <= :now
+            RETURNING wc.session_id
             """.trimIndent(),
             mapOf("restaurantId" to restaurantId, "now" to java.sql.Timestamp.from(now)),
+        ) { rs, _ -> rs.getObject("session_id", UUID::class.java) }
+        expiredSessions.forEach { appendWaiterEvent(restaurantId, it, DomainEventType.WAITER_UPDATED) }
+    }
+
+    private fun restaurantId(sessionId: UUID): UUID =
+        requireNotNull(
+            jdbc.queryForObject(
+                "SELECT restaurant_id FROM table_session WHERE id = :sessionId",
+                mapOf("sessionId" to sessionId),
+                UUID::class.java,
+            ),
+        )
+
+    // Publica el cambio en la misma transacción para que un replay SSE no dependa de una notificación efímera.
+    private fun appendWaiterEvent(restaurantId: UUID, sessionId: UUID, type: DomainEventType) {
+        eventOutbox.append(
+            DomainEvent(
+                restaurantId = restaurantId,
+                type = type,
+                aggregateType = EventAggregateType.SESSION,
+                aggregateId = sessionId,
+                version = EventVersion.Increment,
+                sessionId = sessionId,
+            ),
         )
     }
 

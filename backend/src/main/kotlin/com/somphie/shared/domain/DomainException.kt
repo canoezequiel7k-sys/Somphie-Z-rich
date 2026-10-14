@@ -81,6 +81,8 @@ enum class ErrorCode {
 
     // --- Genérico (catálogo §1): falta de permiso o de alcance sobre el recurso ---
     FORBIDDEN,
+    STREAM_SCOPE_FORBIDDEN,
+    EVENT_ID_TOO_OLD,
     VALIDATION_FAILED,
 
     // --- Recursos y Catálogo (catálogo §1, §4) ---

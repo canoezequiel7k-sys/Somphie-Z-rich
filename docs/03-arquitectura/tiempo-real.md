@@ -1,8 +1,8 @@
 # Tiempo real (Fase 6)
 
-> Decisión base: **SSE** con eventos "pista" (ADR-0006), aprobada por D-160. Mientras WP-BE-60 no esté implementada, los consumidores siguen con polling.
+> Decisión base: **SSE** con eventos "pista" (ADR-0006), aprobada por D-160. WP-BE-60 está parcialmente implementada; los consumidores mantienen polling como fallback.
 >
-> Estado al 2026-10-14: WP-ARQ-60 está aprobada; `event_log`, productores transaccionales y endpoint SSE todavía están pendientes de implementación y validación. El flujo siguiente es diseño objetivo, no infraestructura desplegada.
+> Estado al 2026-10-14: V15/V17, endpoint SSE, cursor/reanudación, filtro tenant/sesión/estación y retención están implementados y probados en PostgreSQL. Faltan productores de varios flujos, pruebas de heartbeat/revocación durante una conexión y medición de 50 streams; no declarar WP-BE-60 cerrada.
 
 Se usa PostgreSQL como log durable/outbox transaccional y fuente de replay SSE; un aviso post-commit en memoria solo optimiza el despertar de lectores. El cursor se asigna con contador bloqueado por restaurante hasta commit para ordenar los eventos visibles. Ver costos, pruebas y límites en [ADR-0006](../00-gobierno/adr/ADR-0006-tiempo-real-sse.md).
 
@@ -34,12 +34,14 @@ Se usa PostgreSQL como log durable/outbox transaccional y fuente de replay SSE; 
 ```mermaid
 flowchart LR
   UC[Caso de uso en transacción] --> EVL[(event_log en la misma tx)]
-  EVL -->|commit| PUB[Publisher AFTER_COMMIT]
-  PUB --> SSE[Conexiones SSE<br/>filtradas por alcance]
+  EVL -->|commit visible| POLL[Consulta durable por cursor]
+  POLL --> SSE[Conexiones SSE<br/>filtradas por alcance]
   SSE --> CL[Clientes]
   CL -->|reconsulta| API[REST]
 ```
-El evento se inserta en `event_log` **en la misma transacción** (garantía de no perder eventos si el servidor cae justo después del commit) y se difunde tras el commit.
+El evento se inserta en `event_log` **en la misma transacción**; el lector solo consulta filas confirmadas. No hay publisher en memoria como fuente de entrega: al desconectarse o reiniciarse, el cliente reanuda desde `Last-Event-ID`.
+
+La retención borra en lotes los eventos de más de 48 horas y avanza un watermark por restaurante. Un cursor anterior al watermark recibe `410 EVENT_ID_TOO_OLD` al abrir o continuar el stream. Se revalida el acceso en cada consulta; el heartbeat sigue siendo comentario SSE cada 25 segundos.
 
 ## 5. Catálogo de eventos
 Ver `04-api/eventos.md`.

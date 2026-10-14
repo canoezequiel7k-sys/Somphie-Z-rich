@@ -100,9 +100,12 @@ class IdentitySecurityConfiguration {
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
                 it.requestMatchers(HttpMethod.POST, "/auth/login", "/auth/refresh").permitAll()
+                it.requestMatchers(HttpMethod.GET, "/events/stream").permitAll()
                 it.requestMatchers("/auth/logout", "/auth/change-password", "/me").authenticated()
                 it.requestMatchers(HttpMethod.GET, "/staff/orders", "/staff/orders/*")
                     .hasAuthority("order.read")
+                it.requestMatchers(HttpMethod.POST, "/staff/sessions/*/orders")
+                    .hasAuthority("order.create_on_behalf")
                 it.requestMatchers(HttpMethod.POST, "/staff/orders/*/accept")
                     .hasAuthority("order.accept")
                 it.requestMatchers(HttpMethod.POST, "/staff/orders/*/reject")

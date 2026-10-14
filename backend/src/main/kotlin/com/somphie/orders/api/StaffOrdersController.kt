@@ -1,5 +1,10 @@
 package com.somphie.orders.api
 
+import com.somphie.events.DomainEvent
+import com.somphie.events.DomainEventType
+import com.somphie.events.EventAggregateType
+import com.somphie.events.EventOutboxService
+import com.somphie.events.EventVersion
 import com.somphie.identity.application.IdentityService
 import com.somphie.identity.domain.StaffProfile
 import com.somphie.orders.domain.AcceptOrderRequest
@@ -45,6 +50,7 @@ class StaffOrdersController(
     private val identityService: IdentityService,
     private val objectMapper: ObjectMapper,
     private val getStaffPreparationOrder: GetStaffPreparationOrder,
+    private val eventOutbox: EventOutboxService,
 ) {
 
     @GetMapping("/staff/orders")
@@ -119,11 +125,13 @@ class StaffOrdersController(
             SELECT o.id, o.session_id, o.status, o.display_code, o.version, o.total_minor, o.note,
                    o.created_at, o.decided_at, o.decided_by, o.rejection_reason, o.rejection_text,
                    p.id AS participant_id, p.display_name AS participant_name,
+                   creator.id AS creator_user_id, creator.display_name AS creator_name,
                    dt.label AS table_label, u.display_name AS decider_name
             FROM customer_order o
             JOIN table_session ts ON ts.id = o.session_id
             JOIN dining_table dt ON dt.id = ts.table_id
-            JOIN session_participant p ON p.id = o.participant_id
+            LEFT JOIN session_participant p ON p.id = o.participant_id
+            LEFT JOIN app_user creator ON creator.id = o.created_by_user_id
             LEFT JOIN app_user u ON u.id = o.decided_by
             WHERE ${filters.joinToString(" AND ")}
             ORDER BY o.created_at ASC, o.id ASC
@@ -145,10 +153,23 @@ class StaffOrdersController(
                 "totalMinor" to rs.getLong("total_minor"),
             ).apply {
                 if (!isKitchen) {
-                    put("createdBy", mapOf(
-                        "participantId" to rs.getString("participant_id"),
-                        "displayName" to rs.getString("participant_name"),
-                    ))
+                    if (rs.getObject("creator_user_id", UUID::class.java) != null) {
+                        put("createdBy", mapOf(
+                            "userId" to rs.getString("creator_user_id"),
+                            "displayName" to rs.getString("creator_name"),
+                        ))
+                        rs.getString("participant_id")?.let {
+                            put("participant", mapOf(
+                                "participantId" to it,
+                                "displayName" to rs.getString("participant_name"),
+                            ))
+                        }
+                    } else {
+                        put("createdBy", mapOf(
+                            "participantId" to rs.getString("participant_id"),
+                            "displayName" to rs.getString("participant_name"),
+                        ))
+                    }
                 }
                 rs.getTimestamp("decided_at")?.toInstant()?.toString()?.let { put("decidedAt", it) }
                 rs.getObject("decided_by", UUID::class.java)?.let {
@@ -472,6 +493,40 @@ class StaffOrdersController(
                     "id" to item.id.toString(),
                     "restaurantId" to restaurantId,
                 )
+            )
+        }
+
+        val sessionId = requireNotNull(
+            jdbc.queryForObject(
+                """
+                SELECT session_id FROM customer_order
+                WHERE id = :orderId AND restaurant_id = CAST(:restaurantId AS UUID)
+                """.trimIndent(),
+                mapOf("orderId" to order.id, "restaurantId" to restaurantId),
+                UUID::class.java,
+            ),
+        )
+        eventOutbox.append(
+            DomainEvent(
+                restaurantId = UUID.fromString(restaurantId),
+                type = DomainEventType.ORDER_UPDATED,
+                aggregateType = EventAggregateType.ORDER,
+                aggregateId = order.id,
+                version = EventVersion.Persisted(order.version),
+                sessionId = sessionId,
+            ),
+        )
+        order.items.forEach { item ->
+            eventOutbox.append(
+                DomainEvent(
+                    restaurantId = UUID.fromString(restaurantId),
+                    type = DomainEventType.ITEM_UPDATED,
+                    aggregateType = EventAggregateType.ITEM,
+                    aggregateId = item.id,
+                    version = EventVersion.Increment,
+                    sessionId = sessionId,
+                    stationId = item.snapshot.stationId,
+                ),
             )
         }
     }

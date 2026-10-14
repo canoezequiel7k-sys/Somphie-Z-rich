@@ -1,6 +1,11 @@
 package com.somphie.floor.api
 
 import com.somphie.audit.AuditService
+import com.somphie.events.DomainEvent
+import com.somphie.events.DomainEventType
+import com.somphie.events.EventAggregateType
+import com.somphie.events.EventOutboxService
+import com.somphie.events.EventVersion
 import com.somphie.floor.application.ParticipantRevocationService
 import com.somphie.floor.application.StaffSessionClosureService
 import com.somphie.floor.application.StaffSessionQueryService
@@ -49,6 +54,7 @@ class StaffFloorController(
     private val staffSessionQueryService: StaffSessionQueryService,
     private val waiterCallService: WaiterCallService,
     private val clock: Clock,
+    private val eventOutbox: EventOutboxService,
 ) {
     private data class StoredSessionState(
         val id: UUID,
@@ -226,6 +232,7 @@ class StaffFloorController(
                 targetId = session.id.toString(),
                 afterSummary = """{"openedBy":"STAFF","tableId":"$tableUuid"}""",
             )
+            appendSessionAndTableUpdates(profile.account.restaurantId, session.id, tableUuid)
 
             ResponseEntity.status(HttpStatus.CREATED).body(
                 mapOf(
@@ -322,6 +329,16 @@ class StaffFloorController(
                     "restaurantId" to restaurantId,
                 ),
             )
+            eventOutbox.append(
+                DomainEvent(
+                    restaurantId = profile.account.restaurantId,
+                    type = DomainEventType.SESSION_UPDATED,
+                    aggregateType = EventAggregateType.SESSION,
+                    aggregateId = sessionUuid,
+                    version = EventVersion.Increment,
+                    sessionId = sessionUuid,
+                ),
+            )
             // El catálogo vigente excluye la rotación del joinCode de las acciones auditadas.
             ResponseEntity.ok(mapOf("joinCode" to newCode.value))
         }
@@ -370,5 +387,28 @@ class StaffFloorController(
         if (parsed.version() != 4 || parsed.toString() != value) {
             throw DomainException(ErrorCode.VALIDATION_FAILED, "Idempotency-Key must be a UUID v4")
         }
+    }
+
+    private fun appendSessionAndTableUpdates(restaurantId: UUID, sessionId: UUID, tableId: UUID) {
+        eventOutbox.append(
+            DomainEvent(
+                restaurantId,
+                DomainEventType.SESSION_UPDATED,
+                EventAggregateType.SESSION,
+                sessionId,
+                EventVersion.Increment,
+                sessionId,
+            ),
+        )
+        eventOutbox.append(
+            DomainEvent(
+                restaurantId,
+                DomainEventType.TABLE_UPDATED,
+                EventAggregateType.TABLE,
+                tableId,
+                EventVersion.Increment,
+                sessionId,
+            ),
+        )
     }
 }

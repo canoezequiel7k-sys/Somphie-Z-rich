@@ -1,5 +1,10 @@
 package com.somphie.floor.api
 
+import com.somphie.events.DomainEvent
+import com.somphie.events.DomainEventType
+import com.somphie.events.EventAggregateType
+import com.somphie.events.EventOutboxService
+import com.somphie.events.EventVersion
 import com.somphie.floor.application.ParticipantRevocationService
 import com.somphie.floor.domain.JoinSessionRequest
 import com.somphie.floor.domain.OpenSessionRequest
@@ -38,6 +43,7 @@ class FloorController(
     private val joinCodeGenerator: JoinCodeGenerator,
     private val participantRevocationService: ParticipantRevocationService,
     private val clock: Clock,
+    private val eventOutbox: EventOutboxService,
 ) {
 
     private val secureRandom = SecureRandom()
@@ -131,6 +137,7 @@ class FloorController(
             "tokenHash" to tokenHash,
             "joinedAt" to java.sql.Timestamp.from(now)
         ))
+        appendSessionAndTableUpdates(UUID.fromString(restaurantId), UUID.fromString(sessionId), UUID.fromString(tableId))
 
         val response = SessionAccessResponse(
             session = SessionInfoDto(
@@ -194,5 +201,28 @@ class FloorController(
 
     private fun hashToken(token: String): String {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8)))
+    }
+
+    private fun appendSessionAndTableUpdates(restaurantId: UUID, sessionId: UUID, tableId: UUID) {
+        eventOutbox.append(
+            DomainEvent(
+                restaurantId,
+                DomainEventType.SESSION_UPDATED,
+                EventAggregateType.SESSION,
+                sessionId,
+                EventVersion.Increment,
+                sessionId,
+            ),
+        )
+        eventOutbox.append(
+            DomainEvent(
+                restaurantId,
+                DomainEventType.TABLE_UPDATED,
+                EventAggregateType.TABLE,
+                tableId,
+                EventVersion.Increment,
+                sessionId,
+            ),
+        )
     }
 }

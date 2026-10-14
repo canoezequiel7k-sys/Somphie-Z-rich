@@ -1,5 +1,5 @@
 # ADR-0006: Tiempo real con SSE
-**Estado:** aprobada por el dueño (D-160, 2026-10-14); implementación WP-BE-60 pendiente.
+**Estado:** aprobada por el dueño (D-160, 2026-10-14); implementación WP-BE-60 parcial. Endpoint, cursor, retención y algunos productores están implementados; ver [ficha WP-BE-60](../../08-agentes/backend-work/wp-be-60.md) para brechas abiertas.
 
 ## Contexto
 Los eventos fluyen servidor → cliente. Las acciones del cliente ya usan REST.

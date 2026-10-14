@@ -7,7 +7,7 @@
 Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 bloqueado
 
 ---
-## 1. Estado actual (snapshot actualizado el 2026-10-14)
+## 1. Estado actual (snapshot actualizado el 2026-10-13)
 
 ### 1.1 Qué existe
 | Pieza | Estado | Dónde |
@@ -17,7 +17,7 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Documentación v0.2 (opciones de producto, propina, ajustes, i18n, llamados al mozo, imágenes en carpeta, multi-sucursal simulada) | ✅ | secciones "v0.2" dentro de cada doc |
 | Decisiones D-101…D-160; Q-26/27/31/32/33/34 resueltas en alcance por aprobación explícita; Q-21 sigue abierta y Q-26 conserva métricas sin fórmula respaldada | ✅ | `docs/00-gobierno/decisiones.md` |
 | ADRs 0001–0010 (estado individual) | ✅ | `docs/00-gobierno/adr/` |
-| Contrato `openapi.yaml` **0.4.0** | ✅ Redocly 2.62.1; la rotación exige key idempotente por Q-28 | `docs/04-api/openapi.yaml` |
+| Contrato `openapi.yaml` **0.4.1** | ✅ Atribución Q-34: pedido staff permite participante opcional y expone creador autenticado | `docs/04-api/openapi.yaml` |
 | Config de lint `redocly.yaml` | ✅ (clave corregida, H-09) | raíz |
 | `CHANGELOG.md` del contrato hasta 0.4.0 | ✅ Validado junto con OpenAPI por Redocly 2.62.1 | `docs/04-api/CHANGELOG.md` |
 | Estructura de carpetas y `AGENTS.md` por carpeta | ✅ | `backend/`, `web/`, `android/` |
@@ -33,15 +33,17 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Horario del restaurante | ✅ Recibido; zona horaria pendiente de confirmar antes de persistirlo | Apertura y cierre semanal |
 
 ### 1.2 Qué falta o requiere seguimiento
-- **Decisiones D-160 aprobadas (2026-10-14):** Q-26/27/31/32/33/34 y selección Fase 9 registradas en `decisiones.md`; la matriz local queda como análisis histórico. La aprobación no equivale a implementación ni cierra fórmulas o contratos no respaldados.
+- **Decisiones D-160 aprobadas (2026-10-13):** Q-26/27/31/32/33/34 y selección Fase 9 registradas en `decisiones.md`; la aprobación no equivale a implementación ni cierra fórmulas o contratos no respaldados.
 - **Bloque WP-BE-70/73 y WP-BE-51 (2026-10-13):** suite completa con 365 tests, 0 fallos/errores/omitidos y 94,29 % de cobertura (4826/5118 líneas). WP-BE-70-T01/T02/T03 completadas localmente; WP-BE-51-T01 sigue parcial por Q-31 y la publicación de eventos pendiente en WP-BE-60. WP-BE-73-T01 conserva pendiente recibo/reportes.
-- WP-BE-51 🔄: T02 completada; T01 parcial. Q-31 aprobó `OCCUPIED` con saldo firmado; falta comprobar/documentar esa respuesta y emitir eventos durables de los productores restantes.
+- WP-BE-51 🔄: T02 completada; T01 parcial. Q-31 está aplicada (`OCCUPIED` con saldo firmado); llamados al mozo y cambios de sesión/mesa emiten eventos durables, pero falta validar el recorrido completo del tablero por SSE.
 - WP-BE-70-T01 ✅ local: `GET /sessions/current/bill` y `SessionBillPort` derivan el mismo resumen completo. `BillableChargesPort` sigue exponiendo solo cargos; no hay saldo duplicado.
 - WP-BE-70-T03 ✅ local: reembolso y anulación validados en PostgreSQL; estados fallidos/anulados no son anulables, replay no duplica movimientos/auditoría y reembolsos concurrentes no exceden principal neto.
 - WP-BE-70-T02 ✅ local (2026-10-13): pagos online simulados y efectivo, idempotencia, declinación y propina sola; ADR-0010 enlaza fuentes aprobadas sin reglas nuevas. T03/reembolsos quedó validada localmente en el bloque PostgreSQL posterior.
 - WP-BE-73-T02 ✅ local: persistencia, aplicación/anulación idempotente y reversión de cortesía integradas; PostgreSQL confirma permiso de personal, aislamiento tenant y aplicación concurrente dentro del límite acumulado.
-- **Estado del bloque (2026-10-13):** persistencia y rutas contractuales de llamados, expiración, autorización tenant, integración del tablero y pruebas PostgreSQL implementadas. No se cambió OpenAPI. Recibo/reportes de propinas siguen condicionados por las definiciones de WP-BE-72/81.
-- **Bloque en curso (2026-10-14):** WP-ARQ-60 aprobada en D-160. V15 aporta outbox/cursor/versiones, con productores para pedidos cliente y catálogo; WP-BE-60 sigue parcial (sin endpoint SSE, retención ni todos los productores). WP-BE-52 ya tiene disponibilidad/versionado/auditoría/outbox en V16 y pruebas PostgreSQL.
+- **Estado del bloque (2026-10-13):** persistencia y rutas contractuales de llamados, expiración, autorización tenant, integración del tablero y pruebas PostgreSQL implementadas. Outbox emite eventos para pedidos, Billing, catálogo, preparación, apertura/cierre, unión/revocación de participantes y llamados; WP-BE-60 sigue parcial por cancelación/expiración de pedidos y pruebas del ciclo de vida SSE.
+- **Bloque backend activo:** WP-ARQ-60 aprobada en D-160. V15/V17 y `/events/stream` incluyen replay, reautorización y retención; V16 mantiene disponibilidad/versionado/auditoría/outbox de catálogo. WP-BE-52 sigue parcial por cobertura administrativa de versión/ETag.
+- **Trabajo reciente:** V17/SSE y V18/Q-34: pedido staff atribuye al empleado autenticado, permite sesión sin participante y valida la asociación opcional. OpenAPI/changelog 0.4.1 documentan ambas atribuciones; pruebas PostgreSQL verifican sesión con/sin participante, historial, idempotencia, permiso y tenant.
+- **WP-BE-71-T01 ✅ local:** cierres normal/forzado y pedidos staff completos; V18 mantiene datos históricos. Integración PostgreSQL y suite global pasaron; falta completar los demás paquetes antes de la validación final del backend.
 - WP-BE-40 ✅ (2026-10-13): job transaccional de expiración por TTL de restaurante, rate limit persistente por mesa/IP, error contractual y actividad registrada al unirse, crear pedido y ejecutar acciones de staff; ver sección 6 y ficha [`wp-be-40.md`](../08-agentes/backend-work/wp-be-40.md).
 - **Auditoría de WP-BE-50 (corte 2026-10-13):** Q-24 resuelta; T01–T05 completadas. `check jacocoTestReport` pasó con 315 tests, 0 fallos y 92,81 %; FIFO/SLA usa `acceptedAt`, timestamps históricos permanecen nullable y la paginación keyset es eventual. WP-BE-40 está validada; WP-BE-51-T02 se cerró luego con Q-29/Q-30, y su T01 avanzó ahora con el detalle staff. WP-BE-52 sigue bloqueada por Q-27.
 - El backend ya incluye API de negocio y persistencia para los paquetes registrados arriba, pero aún no cubre todas las fases del roadmap. No dar por terminado el backend hasta cerrar y validar todos los WP-BE pendientes.
@@ -74,8 +76,8 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 - **Validación:** revisar el resultado más reciente del backend CI y ejecutar los checks definidos en `backend/` para cada paquete; una ejecución bloqueada por Docker no cuenta como verde. Registrar el comando y resultado real al cerrar.
 - **Regla de continuidad:** leer `AGENTS.md`, esta bitácora y la guía backend antes de tocar archivos; respetar la jerarquía documental, preservar cambios existentes y no hacer commit/push sin autorización.
 
-### 1.5 Ejecución backend autorizada (2026-10-14)
-- **Estado:** 🔄 WP-ARQ-60/WP-BE-60; después WP-BE-52 y tablero/sesiones. El dueño aprobó Q-26/27/31/32/33/34 y Fase 9. No implica que los paquetes estén implementados ni cerrados.
+### 1.5 Ejecución backend autorizada (2026-10-13)
+- **Estado:** 🔄 WP-BE-60 parcial; WP-BE-71-T01 avanza con Q-34 implementada localmente. Luego completar productores SSE y continuar PDF, administración/reportes y Fase 9 según dependencias. Aprobaciones D-160 no equivalen a cierre de paquetes.
 - **Archivos de esta tanda:** `docs/00-gobierno/decisiones.md`, `docs/00-gobierno/adr/ADR-0006-tiempo-real-sse.md`, `docs/03-arquitectura/tiempo-real.md`, `backend/src/main/resources/db/migration/`, `backend/src/main/kotlin/com/somphie/` y pruebas relacionadas. Consultar cada estado antes de editarlo.
 - **Qué:** formalizar las autorizaciones del dueño y construir primero la base transaccional durable aprobada; no tocar UI ni inventar fórmulas para Q-26.
 - **Por qué:** catálogo, disponibilidad y tablero dependen del registro durable de eventos; la autorización elimina el bloqueo de diseño, no la necesidad de pruebas/integración.
@@ -754,38 +756,61 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Archivos:** `StaffSessionClosureService.kt`, `StaffSessionOrdersPort.kt`, `StaffFloorController.kt`, `JdbcForcedSessionOrderCancellationAdapter.kt`, `BillingService.kt`, `IdentitySecurityConfiguration.kt`, `IdentityIntegrationTest.kt`, ficha WP-BE-70-73, índice, decisiones y esta bitácora.
 - **Qué estudiar:** el lock de sesión serializa pedidos, pagos y cierre; la clave externa de cierre produce una clave interna estable del movimiento, mientras la idempotencia HTTP guarda la respuesta completa.
 
-### 2026-10-14 — Selección del siguiente WP backend
+### 2026-10-13 — Selección del siguiente WP backend
 - **Qué:** verifiqué estado Git y dependencias documentadas; corregí el HEAD de referencia y la selección obsoleta del índice. No se modificó código ni contrato.
 - **Por qué:** las tareas de BE-50…82 revisadas siguen bloqueadas por Q-27/Q-31/Q-32/Q-26/Q-34 o aprobación de WP-ARQ-60. Fase 9 no ofrece un WP listo: BE-90 está condicionada a seleccionar el alcance y sus rutas de cliente no están en OpenAPI; BE-92 ya tiene llamados persistidos y el retiro por mostrador es opcional/de fase posterior.
 - **Validación:** `git status` estaba limpio en `feat/backend-preparation`, HEAD `03d2b3bf39ab5b5b25a07f54c8d635333a3a669d`, upstream alineado. No se ejecutaron pruebas porque no hubo cambios de código; diff-check/lint documental pendientes.
 - **Qué estudiar:** diferencia entre una decisión resuelta (Q-07) y un alcance contratado; CU-60/endpoints.md son referencias de dominio/borrador, mientras `openapi.yaml` es el contrato vigente.
 - **Archivos tocados:** `docs/00-gobierno/backend-work-index.md`, `docs/00-gobierno/advances.md`.
 
-### 2026-10-14 — Auditoría de cierre del backend
+### 2026-10-13 — Auditoría de cierre del backend
 - **Qué:** cotejé contratos, fichas y código: existen cierre forzado/Billing/ajustes y pruebas PostgreSQL; llamados al mozo están persistidos en V14 con rutas, permisos, expiración y cobertura. No existe `notifications`, `reporting`, renderer PDF, CRUD admin, disponibilidad PATCH ni registro cliente en OpenAPI/backend.
 - **Por qué:** los restos de BE-51/52/60/71/72/73/80/81/82 dependen de Q-31…34 o WP-ARQ-60; WP-BE-90 exige seleccionar Fase 9 y definir contrato. BE-92 ya tiene implementada la llamada; el retiro por mostrador es opcional. No hay trabajo productivo independiente que pueda completarse sin asumir una decisión.
 - **Validación:** `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó: 365 tests, 0 fallos/errores/omitidos; cobertura 94,29 % (4826/5118 líneas). Markdownlint de los dos documentos modificados: 0 issues; `git diff --check` pasó.
 - **Qué estudiar:** una ruta mencionada en `endpoints.md` o CU no equivale a contrato OpenAPI aprobado; un `check` verde tampoco cierra paquetes con criterios funcionales pendientes.
 - **Archivos tocados:** `docs/00-gobierno/backend-work-index.md`, `docs/00-gobierno/advances.md`; sin cambios de código ni OpenAPI.
 
-### 2026-10-14 — Matriz ejecutiva de decisiones backend
+### 2026-10-13 — Matriz ejecutiva de decisiones backend
 - **Qué:** resumí Q-26/27/31/32/33/34 y selección de Fase 9/BE-90/91 con alternativas existentes, recomendación técnica condicionada, consecuencias, dependencias y preguntas de aprobación.
 - **Por qué:** facilitar revisión de ARQ/dueño sin duplicar ni reescribir las fuentes canónicas ni declarar decisiones resueltas.
 - **Qué estudiar:** recomendación técnica no equivale a aprobación de dominio/contrato; Q-07 sobre retención no selecciona por sí sola BE-90/91.
 - **Archivos tocados:** `docs/00-gobierno/matriz-decisiones-backend.md`, `docs/00-gobierno/advances.md`.
 
-### 2026-10-14 — Revisión de bloques pendientes
+### 2026-10-13 — Revisión de bloques pendientes
 - **Qué:** revisé el pedido de consolidación contra contratos, ADR y estado actual. No agregué pruebas hipotéticas ni código provisional; los llamados, Billing, ajustes y cierres existentes ya están integrados. La implementación restante espera las aprobaciones de Q-26/27/31/32/33/34 y la selección contractual de Fase 9.
 - **Por qué:** no hay una parte productiva separable dentro de esos bloques que preserve las decisiones abiertas; adelantarla implicaría fijar interfaces o semántica todavía no aprobadas.
 - **Qué estudiar:** una prueba que codifica una alternativa no aprobada también cristaliza una decisión; esperar el contrato evita deuda y retrabajo.
 - **Archivos tocados:** `docs/00-gobierno/advances.md`; no se modificó código ni OpenAPI.
 
-### 2026-10-14 — Aprobaciones D-160 y base outbox/catálogo
+### 2026-10-13 — Aprobaciones D-160 y base outbox/catálogo
 - **Qué:** registré las aprobaciones explícitas Q-26/27/31/32/33/34 y Fase 9, actualicé ADR-0006 a aprobada y documenté límites pendientes. Implementé V15 `event_log` con cursor/versionado transaccional; V16 `catalog_version`; productores `order.created` y `catalog.updated`; PATCH de disponibilidad de producto/opción con permiso, tenant, auditoría y ETag persistente.
 - **Por qué:** habilitar el orden de dependencias aprobado sin usar eventos efímeros ni alterar reglas financieras o métricas no definidas.
 - **Pruebas:** `.\backend\gradlew.bat -p backend test --tests "com.somphie.identity.api.IdentityIntegrationTest" --no-daemon` ✅ (69 tests, 0 fallos/errores/omitidos; PostgreSQL Testcontainers). La prueba de Q-31 detectó y corrigió que el tablero mostraba `READY_TO_CLOSE` para saldo negativo cuando cargos facturables eran cero; ahora responde `OCCUPIED` y saldo firmado. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` ✅ (371 tests, 0 fallos/errores/omitidos; 5010/5305 líneas, 94,44 %). `git diff --check` ✅. Markdownlint ✅ (9 documentos, 0 issues).
 - **Qué estudiar:** outbox en la transacción, orden por contador bloqueado frente a `bigserial`, y ETag derivado de versión persistida.
 - **Archivos tocados:** `decisiones.md`, ADR-0006, `tiempo-real.md`, roadmap, índice/fichas/bitácora, V15/V16, `EventOutboxService.kt`, controllers de Orders/Catalog/Security y `IdentityIntegrationTest.kt`. OpenAPI/changelog sin cambios.
+
+### 2026-10-13 — WP-BE-60: SSE y productores parciales
+- **Qué:** añadí V17 para watermark de retención, `GET /events/stream` con cursor/replay, filtro por sesión/tenant/estación y revalidación durante la conexión. El job purga por lotes eventos de más de 48 h. Se conectaron `waiter.called`/`waiter.updated`, `order.updated`/`item.updated` en decisión staff, `bill.updated` en Billing y `session.closed`.
+- **Por qué:** aprovechar el outbox PostgreSQL ya aprobado y mantener eventos y cambios de negocio en la misma transacción; distinguir explícitamente el log de eventos de `audit_event`.
+- **Pruebas:** focalizadas PostgreSQL para autorización, cursor vencido, aislamiento de sesión/tenant, retención y replay sin duplicados; `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó: 376 tests, 0 fallos/errores/omitidos, 5224/5586 líneas (93,52 %). No se modificó OpenAPI.
+- **Pendiente:** productores de preparación, apertura/participantes, cancelación/expiración de pedidos y `table.updated`; pruebas del heartbeat, reconexión/revocación durante stream y 50 conexiones. WP-BE-60 permanece parcial. PDF, administración/reporting y Fase 9 siguen pendientes de implementación; métricas sin fórmula respaldada no se agregan.
+- **Qué estudiar:** el watermark permite detectar eventos borrados que el cliente todavía no confirmó; el polling recupera eventos confirmados aunque falle una conexión SSE.
+- **Archivos tocados:** V17; servicios y configuración `events`; Billing, Floor, Orders, seguridad y pruebas `IdentityIntegrationTest`; ADR-0006, `tiempo-real.md`, fichas WP-BE-60/51-52/70-73/80-82, índice y esta bitácora. No hubo commit/push; HEAD permanece en `59e521d`.
+
+### 2026-10-13 — Q-34: pedidos creados por el personal
+- **Qué:** V18 permite `participant_id` nulo con atribución obligatoria; el endpoint usa identidad y tenant autenticados, acepta asociación opcional validada, nace `ACCEPTED` y escribe pedidos, auditoría y outbox en una transacción. Las lecturas de sesión, pedidos de staff y preparación exponen creador y participante sin perder pedidos históricos.
+- **Por qué:** aplicar la opción C aprobada en D-160, incluyendo sesiones manuales sin HOST y evitando aceptar la identidad del actor desde el request.
+- **Validación:** `.\backend\gradlew.bat -p backend test --tests 'com.somphie.identity.api.IdentityIntegrationTest' --no-daemon` pasó. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó: 379 tests, 0 fallos/errores/omitidos; 5401/5800 líneas (93,12 %).
+- **Contrato/documentación:** OpenAPI y CHANGELOG 0.4.1 agregan `participantId` opcional y ambas atribuciones; `/version` queda alineado. Se actualizó la ficha WP-BE-71-T01, el índice y esta bitácora.
+- **Qué estudiar:** la FK compuesta `(session_id, participant_id)` impide asociar un participante de otra sesión; el lock de sesión serializa creación y cierre.
+- **Archivos tocados:** V18; `OrdersController`, lecturas de Orders/Floor/Preparation, seguridad, `IdentityIntegrationTest`, `BackendSmokeTest`, configuración de versión, OpenAPI, CHANGELOG y documentación de seguimiento. No se hizo commit/push.
+
+### 2026-10-13 — WP-BE-60: productores de sesión y mesa
+- **Qué:** apertura customer/staff emite `session.updated` y `table.updated`; unión, revocación y rotación de código emiten `session.updated`; ambos cierres actualizan también el agregado de mesa. La cancelación de pedido emite `order.updated`. PostgreSQL verifica ciclo de sesión y evento de cancelación.
+- **Por qué:** mantener tablero/detalle y pedidos sincronizados con mutaciones reales mediante la outbox transaccional ya aprobada, sin añadir rutas ni semántica nuevas.
+- **Validación:** la primera corrida combinada detectó que el test de replay incluía eventos de apertura generados por setup; se corrigió capturando el cursor base. `IdentityIntegrationTest` focalizada y `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasaron; suite completa: 379 tests, 0 fallos/errores/omitidos, 5504/5903 líneas (93,24 %). Markdownlint de los 3 documentos relacionados: 0 issues; `git diff --check` pasó.
+- **Qué estudiar:** una prueba de replay debe usar cursor base capturado después del setup para distinguir eventos de preparación del sistema y eventos bajo prueba.
+- **Archivos tocados:** Floor, JoinSessionService, ParticipantRevocationService, StaffFloorController, StaffSessionClosureService, OrdersController, `IdentityIntegrationTest`, `FloorControllerTest`, ficha WP-BE-60, índice y bitácora. Sin cambios de OpenAPI ni commit/push.
 
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)

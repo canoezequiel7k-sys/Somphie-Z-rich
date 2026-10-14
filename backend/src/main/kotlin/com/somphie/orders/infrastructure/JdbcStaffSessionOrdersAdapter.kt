@@ -72,11 +72,13 @@ class JdbcStaffSessionOrdersAdapter(
             SELECT o.id, o.display_code, o.status, o.version, o.total_minor, o.note,
                    o.created_at, o.decided_at, o.decided_by, o.rejection_reason, o.rejection_text,
                    p.id AS participant_id, p.display_name AS participant_name,
+                   creator.id AS creator_user_id, creator.display_name AS creator_name,
                    u.display_name AS decider_name
             FROM customer_order o
             JOIN table_session ts ON ts.id = o.session_id
             JOIN dining_table dt ON dt.id = ts.table_id AND dt.restaurant_id = o.restaurant_id
-            JOIN session_participant p ON p.id = o.participant_id
+            LEFT JOIN session_participant p ON p.id = o.participant_id
+            LEFT JOIN app_user creator ON creator.id = o.created_by_user_id
             LEFT JOIN app_user u ON u.id = o.decided_by
             WHERE o.session_id = :sessionId AND o.restaurant_id = :restaurantId
             ORDER BY o.created_at, o.id
@@ -92,6 +94,8 @@ class JdbcStaffSessionOrdersAdapter(
                 createdAt = rs.getTimestamp("created_at").toInstant(),
                 participantId = rs.getObject("participant_id", UUID::class.java),
                 participantName = rs.getString("participant_name"),
+                creatorUserId = rs.getObject("creator_user_id", UUID::class.java),
+                creatorName = rs.getString("creator_name"),
                 decidedAt = rs.getTimestamp("decided_at")?.toInstant(),
                 deciderId = rs.getObject("decided_by", UUID::class.java),
                 deciderName = rs.getString("decider_name"),

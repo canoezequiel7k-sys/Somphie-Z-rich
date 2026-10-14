@@ -102,6 +102,7 @@ class ApiExceptionHandler {
         ErrorCode.ACCOUNT_DISABLED,
         ErrorCode.PASSWORD_CHANGE_REQUIRED,
         ErrorCode.SESSION_ACCESS_REVOKED,
+        ErrorCode.STREAM_SCOPE_FORBIDDEN,
         -> HttpStatus.FORBIDDEN
         ErrorCode.ACCOUNT_TEMPORARILY_LOCKED,
         ErrorCode.JOIN_CODE_RATE_LIMITED,
@@ -135,6 +136,8 @@ class ApiExceptionHandler {
         ErrorCode.IDEMPOTENCY_KEY_REQUIRED,
         ErrorCode.VALIDATION_FAILED,
         -> HttpStatus.BAD_REQUEST
+        ErrorCode.EVENT_ID_TOO_OLD,
+        -> HttpStatus.GONE
         ErrorCode.ORDER_ALREADY_DECIDED,
         ErrorCode.ORDER_NOT_CANCELLABLE,
         ErrorCode.ORDER_EXPIRED,

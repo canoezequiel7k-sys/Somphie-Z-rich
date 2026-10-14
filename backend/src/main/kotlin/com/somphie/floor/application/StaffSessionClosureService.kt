@@ -1,6 +1,11 @@
 package com.somphie.floor.application
 
 import com.somphie.audit.AuditService
+import com.somphie.events.DomainEvent
+import com.somphie.events.DomainEventType
+import com.somphie.events.EventAggregateType
+import com.somphie.events.EventOutboxService
+import com.somphie.events.EventVersion
 import com.somphie.floor.domain.JoinCode
 import com.somphie.floor.domain.SessionClosureContext
 import com.somphie.floor.domain.SessionCloseReason
@@ -26,6 +31,7 @@ class StaffSessionClosureService(
     private val forcedOrderCancellation: ForcedSessionOrderCancellationPort,
     private val forcedSessionRefund: ForcedSessionRefundPort,
     private val audit: AuditService,
+    private val eventOutbox: EventOutboxService,
     private val clock: Clock,
 ) {
     private data class StoredSession(
@@ -137,6 +143,7 @@ class StaffSessionClosureService(
             beforeSummary = """{"status":"OPEN"}""",
             afterSummary = """{"status":"CLOSED","closeReason":"${closeReason.name}"}""",
         )
+        appendSessionClosed(restaurantId, sessionId, stored.tableId)
         return stored.copy(status = closed.status, closedAt = closedAt, closeReason = closeReason, joinCode = null)
             .toResponse()
     }
@@ -242,8 +249,32 @@ class StaffSessionClosureService(
             beforeSummary = """{"status":"OPEN"}""",
             afterSummary = afterSummary,
         )
+        appendSessionClosed(restaurantId, sessionId, stored.tableId)
         return stored.copy(status = closed.status, closedAt = closedAt, closeReason = closeReason, joinCode = null)
             .toResponse()
+    }
+
+    private fun appendSessionClosed(restaurantId: UUID, sessionId: UUID, tableId: UUID) {
+        eventOutbox.append(
+            DomainEvent(
+                restaurantId = restaurantId,
+                type = DomainEventType.SESSION_CLOSED,
+                aggregateType = EventAggregateType.SESSION,
+                aggregateId = sessionId,
+                version = EventVersion.Increment,
+                sessionId = sessionId,
+            ),
+        )
+        eventOutbox.append(
+            DomainEvent(
+                restaurantId = restaurantId,
+                type = DomainEventType.TABLE_UPDATED,
+                aggregateType = EventAggregateType.TABLE,
+                aggregateId = tableId,
+                version = EventVersion.Increment,
+                sessionId = sessionId,
+            ),
+        )
     }
 
     private fun StoredSession.toResponse(): Map<String, Any> =

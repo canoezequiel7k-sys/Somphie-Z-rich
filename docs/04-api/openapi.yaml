@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Somphie Zúrich API
-  version: 0.4.0
+  version: 0.4.1
   summary: Contrato REST del backend de Somphie Zúrich (pedidos por QR, operación del personal, cuenta y pagos simulados).
   description: |
     Fuente de verdad del contrato (ADR-0008). Todo cambio se hace **primero aquí** y en `CHANGELOG.md`.
@@ -1703,7 +1703,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/VersionInfo'}
-              example: {build: 0.1.0, contractVersion: 0.4.0}
+              example: {build: 0.1.0, contractVersion: 0.4.1}
         '500': {$ref: '#/components/responses/InternalError'}
   /media/{path}:
     get:
@@ -2327,6 +2327,10 @@ components:
           minItems: 1
           maxItems: 30
           items: {$ref: '#/components/schemas/CreateOrderItem'}
+        participantId:
+          allOf:
+            - {$ref: '#/components/schemas/Uuid'}
+          description: Participante asociado a esta sesión, si corresponde.
         note: {type: string, maxLength: 140}
         acknowledgedTotalMinor: {$ref: '#/components/schemas/MoneyMinor'}
     OrderItemOption:
@@ -2375,7 +2379,17 @@ components:
         version: {type: integer, description: Permite descartar eventos o respuestas atrasadas.}
         createdBy:
           type: object
-          description: Se omite para Cocina (sin datos de participantes).
+          description: Se omite para Cocina. Identifica al participante o al empleado que creó el pedido.
+          oneOf:
+            - required: [participantId, displayName]
+            - required: [userId, displayName]
+          properties:
+            participantId: {$ref: '#/components/schemas/Uuid'}
+            userId: {$ref: '#/components/schemas/Uuid'}
+            displayName: {type: string}
+        participant:
+          type: object
+          description: Participante asociado a un pedido creado por personal.
           required: [participantId, displayName]
           properties:
             participantId: {$ref: '#/components/schemas/Uuid'}

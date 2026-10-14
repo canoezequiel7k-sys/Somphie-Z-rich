@@ -1,5 +1,10 @@
 package com.somphie.floor.api
 
+import com.somphie.events.DomainEvent
+import com.somphie.events.DomainEventType
+import com.somphie.events.EventAggregateType
+import com.somphie.events.EventOutboxService
+import com.somphie.events.EventVersion
 import com.somphie.floor.domain.ParticipantInfoDto
 import com.somphie.floor.domain.SessionAccessResponse
 import com.somphie.floor.domain.SessionInfoDto
@@ -24,8 +29,9 @@ sealed interface JoinSessionResult {
 class JoinSessionService(
     private val jdbc: NamedParameterJdbcTemplate,
     private val clock: Clock,
+    private val eventOutbox: EventOutboxService,
 ) {
-    private data class ActiveSession(val id: UUID, val joinCode: String, val tableLabel: String)
+    private data class ActiveSession(val id: UUID, val restaurantId: UUID, val joinCode: String, val tableLabel: String)
     private data class AttemptState(val failureCount: Int, val windowStartedAt: Instant, val blockedUntil: Instant?)
 
     @Transactional
@@ -83,7 +89,7 @@ class JoinSessionService(
 
         val session = jdbc.query(
             """
-            SELECT ts.id, ts.join_code, dt.label AS table_label
+            SELECT ts.id, ts.restaurant_id, ts.join_code, dt.label AS table_label
             FROM table_session ts
             JOIN dining_table dt ON dt.id = ts.table_id
             WHERE ts.table_id = :tableId AND ts.status = 'OPEN'
@@ -93,6 +99,7 @@ class JoinSessionService(
         ) { rs, _ ->
             ActiveSession(
                 rs.getObject("id", UUID::class.java),
+                rs.getObject("restaurant_id", UUID::class.java),
                 rs.getString("join_code"),
                 rs.getString("table_label"),
             )
@@ -161,6 +168,16 @@ class JoinSessionService(
                 "role" to role,
                 "tokenHash" to tokenHash,
                 "joinedAt" to java.sql.Timestamp.from(now),
+            ),
+        )
+        eventOutbox.append(
+            DomainEvent(
+                restaurantId = session.restaurantId,
+                type = DomainEventType.SESSION_UPDATED,
+                aggregateType = EventAggregateType.SESSION,
+                aggregateId = session.id,
+                version = EventVersion.Increment,
+                sessionId = session.id,
             ),
         )
         return JoinSessionResult.Joined(

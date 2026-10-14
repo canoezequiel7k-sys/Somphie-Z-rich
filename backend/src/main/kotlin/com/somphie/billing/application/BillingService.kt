@@ -1,6 +1,11 @@
 package com.somphie.billing.application
 
 import com.somphie.audit.AuditService
+import com.somphie.events.DomainEvent
+import com.somphie.events.DomainEventType
+import com.somphie.events.EventAggregateType
+import com.somphie.events.EventOutboxService
+import com.somphie.events.EventVersion
 import com.somphie.billing.domain.AdjustmentContext
 import com.somphie.billing.domain.AdjustmentKind
 import com.somphie.billing.domain.AdjustmentRequest
@@ -53,6 +58,7 @@ class BillingService(
     private val idempotencyService: IdempotencyService,
     private val paymentProvider: SimulatedPaymentProvider,
     private val audit: AuditService,
+    private val eventOutbox: EventOutboxService,
     private val clock: Clock,
 ) : CourtesyCancellationPort, ForcedSessionRefundPort {
 
@@ -95,6 +101,7 @@ class BillingService(
             reason = reason,
             afterSummary = """{"amountMinor":${payment.amount.minor},"source":"FORCED_SESSION_CLOSE","label":"automático por cierre forzado"}""",
         )
+        appendBillUpdated(sessionId, restaurantId)
         return (billQuery.billForSession(sessionId, restaurantId).getValue("balanceMinor") as Number).toLong()
     }
 
@@ -140,6 +147,7 @@ class BillingService(
             },
         )
         if (!approved) return declinedResult(payment.id)
+        appendBillUpdated(access.sessionId, access.restaurantId)
         return paymentResult(payment.id, access.sessionId, access.restaurantId, 201)
     }
 
@@ -176,6 +184,7 @@ class BillingService(
             "PAYMENT_CREATED", "PAYMENT", payment.id.toString(),
             afterSummary = """{"amountMinor":${payment.amount.minor},"tipMinor":${payment.tip.minor},"method":"${payment.method.name}"}""",
         )
+        appendBillUpdated(sessionId, profile.account.restaurantId)
         return paymentResult(payment.id, sessionId, profile.account.restaurantId, 201)
     }
 
@@ -233,6 +242,7 @@ class BillingService(
             profile.account.restaurantId.toString(), "USER", profile.account.id.toString(),
             "PAYMENT_VOIDED", "PAYMENT", paymentId.toString(), reason = reason,
         )
+        appendBillUpdated(sessionId, profile.account.restaurantId)
         return paymentResult(paymentId, sessionId, profile.account.restaurantId, 200)
     }
 
@@ -266,6 +276,7 @@ class BillingService(
             "REFUND_CREATED", "PAYMENT", payment.id.toString(), reason = command.reason,
             afterSummary = """{"amountMinor":${payment.amount.minor}}""",
         )
+        appendBillUpdated(sessionId, profile.account.restaurantId)
         return paymentResult(payment.id, sessionId, profile.account.restaurantId, 201)
     }
 
@@ -393,6 +404,7 @@ class BillingService(
             "ADJUSTMENT_APPLIED", "ADJUSTMENT", id.toString(), reason = command.reasonCode,
             afterSummary = """{"kind":"${kind.name}","amountMinor":${amount.minor}}""",
         )
+        appendBillUpdated(sessionId, profile.account.restaurantId)
         return adjustmentView(id, profile.account.restaurantId)
     }
 
@@ -457,6 +469,7 @@ class BillingService(
             profile.account.restaurantId.toString(), "USER", profile.account.id.toString(),
             "ADJUSTMENT_VOIDED", "ADJUSTMENT", adjustmentId.toString(), reason = reason,
         )
+        appendBillUpdated(sessionId, profile.account.restaurantId)
         return adjustmentView(adjustmentId, profile.account.restaurantId)
     }
 
@@ -500,6 +513,7 @@ class BillingService(
                 restaurantId.toString(), "USER", actorId.toString(),
                 "ADJUSTMENT_VOIDED", "ADJUSTMENT", row.first.toString(), reason = reason,
             )
+            appendBillUpdated(row.second, restaurantId)
         }
     }
 
@@ -761,6 +775,19 @@ class BillingService(
                 rs.getTimestamp("revoked_at") != null,
             )
         }.firstOrNull() ?: throw DomainException(ErrorCode.UNAUTHENTICATED, "Invalid guest token")
+    }
+
+    private fun appendBillUpdated(sessionId: UUID, restaurantId: UUID) {
+        eventOutbox.append(
+            DomainEvent(
+                restaurantId = restaurantId,
+                type = DomainEventType.BILL_UPDATED,
+                aggregateType = EventAggregateType.SESSION,
+                aggregateId = sessionId,
+                version = EventVersion.Increment,
+                sessionId = sessionId,
+            ),
+        )
     }
 
     private fun idempotencyScope(actorType: String, sessionId: UUID, actorId: UUID): String =

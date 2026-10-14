@@ -1,5 +1,6 @@
 package com.somphie.preparation.application
 
+import com.somphie.events.EventOutboxService
 import com.somphie.orders.domain.ItemSnapshot
 import com.somphie.orders.domain.Order
 import com.somphie.orders.domain.OrderItem
@@ -9,6 +10,7 @@ import com.somphie.shared.domain.Money
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.mock
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -17,6 +19,7 @@ import java.util.UUID
 class ApplyItemActionTest {
     private val now = Instant.parse("2026-10-12T12:00:00Z")
     private val restaurantId = UUID.randomUUID()
+    private val sessionId = UUID.randomUUID()
     private val stationId = UUID.randomUUID()
     private val itemIds = listOf(UUID.randomUUID(), UUID.randomUUID())
     private val baseOrder = Order.create(
@@ -29,9 +32,14 @@ class ApplyItemActionTest {
         },
         now.minusSeconds(30),
     ).accept(now.minusSeconds(20))
-    private val repository = FakeRepository(baseOrder)
+    private val repository = FakeRepository(baseOrder, sessionId)
     private val courtesyCancellation = FakeCourtesyCancellation()
-    private val service = ApplyItemAction(repository, courtesyCancellation, Clock.fixed(now, ZoneOffset.UTC))
+    private val service = ApplyItemAction(
+        repository,
+        courtesyCancellation,
+        Clock.fixed(now, ZoneOffset.UTC),
+        mock(EventOutboxService::class.java),
+    )
     private val access = PreparationAccess(
         restaurantId, UUID.randomUUID(), "Cocina",
         setOf("KITCHEN"), setOf("item.prepare", "item.deliver", "item.undo", "order.cancel", "order.read"),
@@ -120,17 +128,17 @@ class ApplyItemActionTest {
         }
     }
 
-    private class FakeRepository(var order: Order) : PreparationActionRepository {
+    private class FakeRepository(var order: Order, private val sessionId: UUID) : PreparationActionRepository {
         var saveCount = 0
         var auditCount = 0
         var lastExpectedVersion: Long? = null
         var lastActivityAt: Instant? = null
 
         override fun lockForAction(restaurantId: UUID, itemId: UUID) =
-            LockedPreparationOrder(order, true, emptySet())
+            LockedPreparationOrder(order, true, sessionId, emptySet())
 
         override fun lockOrderForAction(restaurantId: UUID, orderId: UUID) =
-            if (orderId == order.id) LockedPreparationOrder(order, true, emptySet()) else null
+            if (orderId == order.id) LockedPreparationOrder(order, true, sessionId, emptySet()) else null
 
         override fun save(
             restaurantId: UUID,

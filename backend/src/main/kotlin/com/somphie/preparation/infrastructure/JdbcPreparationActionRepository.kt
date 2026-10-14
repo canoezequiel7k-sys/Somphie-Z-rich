@@ -149,7 +149,7 @@ class JdbcPreparationActionRepository(
             rejection = reason,
             version = orderRow.version,
         )
-        return LockedPreparationOrder(order, sessionOpen, items.map { it.snapshot.stationId }.toSet())
+        return LockedPreparationOrder(order, sessionOpen, sessionId, items.map { it.snapshot.stationId }.toSet())
     }
 
     override fun save(
@@ -244,12 +244,14 @@ class JdbcPreparationActionRepository(
             """
             SELECT o.id, o.session_id, o.status, o.display_code, o.total_minor, o.note, o.created_at,
                    o.version, o.decided_at, o.decided_by, p.id AS participant_id,
-                   p.display_name AS participant_name, u.display_name AS decider_name,
+                   p.display_name AS participant_name, creator.id AS creator_user_id,
+                   creator.display_name AS creator_name, u.display_name AS decider_name,
                    dt.label AS table_label, o.rejection_reason, o.rejection_text
             FROM customer_order o
             JOIN table_session ts ON ts.id = o.session_id
             JOIN dining_table dt ON dt.id = ts.table_id
-            JOIN session_participant p ON p.id = o.participant_id
+            LEFT JOIN session_participant p ON p.id = o.participant_id
+            LEFT JOIN app_user creator ON creator.id = o.created_by_user_id
             LEFT JOIN app_user u ON u.id = o.decided_by
             WHERE o.id = :orderId AND o.restaurant_id = :restaurantId
               $stationFilter
@@ -267,7 +269,17 @@ class JdbcPreparationActionRepository(
                 "totalMinor" to rs.getLong("total_minor"),
             ).apply {
                 if ("KITCHEN" !in access.roles) {
-                    put("createdBy", mapOf("participantId" to rs.getString("participant_id"), "displayName" to rs.getString("participant_name")))
+                    if (rs.getObject("creator_user_id", UUID::class.java) != null) {
+                        put("createdBy", mapOf(
+                            "userId" to rs.getString("creator_user_id"),
+                            "displayName" to rs.getString("creator_name"),
+                        ))
+                        rs.getString("participant_id")?.let {
+                            put("participant", mapOf("participantId" to it, "displayName" to rs.getString("participant_name")))
+                        }
+                    } else {
+                        put("createdBy", mapOf("participantId" to rs.getString("participant_id"), "displayName" to rs.getString("participant_name")))
+                    }
                 }
                 rs.getTimestamp("decided_at")?.toInstant()?.toString()?.let { put("decidedAt", it) }
                 rs.getObject("decided_by", UUID::class.java)?.let {

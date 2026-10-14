@@ -3,6 +3,7 @@ package com.somphie.identity.api
 import com.jayway.jsonpath.JsonPath
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -13,6 +14,7 @@ import org.hamcrest.Matchers.hasItem
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.crypto.password.PasswordEncoder
+import org.springframework.security.oauth2.jwt.JwtDecoder
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -41,8 +43,12 @@ import com.somphie.events.DomainEvent
 import com.somphie.events.DomainEventType
 import com.somphie.events.EventAggregateType
 import com.somphie.events.EventOutboxService
+import com.somphie.events.EventRetentionJob
+import com.somphie.events.EventStreamService
 import com.somphie.events.EventVersion
 import com.somphie.events.StoredDomainEvent
+import com.somphie.shared.domain.DomainException
+import com.somphie.shared.domain.ErrorCode
 
 @SpringBootTest(properties = ["DEMO_MODE=true"])
 @AutoConfigureMockMvc
@@ -59,13 +65,23 @@ class IdentityIntegrationTest {
     private lateinit var passwordEncoder: PasswordEncoder
 
     @Autowired
+    private lateinit var jwtDecoder: JwtDecoder
+
+    @Autowired
     private lateinit var eventOutbox: EventOutboxService
+
+    @Autowired
+    private lateinit var eventStreamService: EventStreamService
+
+    @Autowired
+    private lateinit var eventRetentionJob: EventRetentionJob
 
     @Autowired
     private lateinit var transactionManager: PlatformTransactionManager
 
     @BeforeEach
     fun seedAccount() {
+        jdbc.update("DELETE FROM customer_order WHERE created_by_user_id = ?", USER_ID)
         jdbc.update("DELETE FROM bill_adjustment WHERE restaurant_id = ?", RESTAURANT_ID)
         jdbc.update("DELETE FROM auth_login_attempt")
         jdbc.update("DELETE FROM audit_event WHERE target_id = ?", USER_ID)
@@ -104,6 +120,182 @@ class IdentityIntegrationTest {
     }
 
     @Test
+    fun `staff event stream requires an authenticated staff token`() {
+        mockMvc.perform(get("/events/stream").param("scope", "staff"))
+            .andExpect(status().isUnauthorized)
+            .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+    }
+
+    @Test
+    fun `session event stream rejects unknown guest tokens`() {
+        mockMvc.perform(
+            get("/events/stream")
+                .param("scope", "session")
+                .header("Authorization", "Bearer gt_invalid"),
+        )
+            .andExpect(status().isUnauthorized)
+            .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+    }
+
+    @Test
+    fun `event stream rejects malformed cursors before opening a connection`() {
+        mockMvc.perform(
+            get("/events/stream")
+                .param("scope", "session")
+                .header("Authorization", "Bearer gt_invalid")
+                .header("Last-Event-ID", "not-a-number"),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+    }
+
+    @Test
+    fun `event stream rejects cursors older than the persisted retention watermark`() {
+        jdbc.update(
+            """
+            INSERT INTO event_retention (restaurant_id, last_deleted_event_id)
+            VALUES (?, 2)
+            ON CONFLICT (restaurant_id) DO UPDATE SET last_deleted_event_id = 2
+            """.trimIndent(),
+            RESTAURANT_ID,
+        )
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+
+        mockMvc.perform(
+            get("/events/stream")
+                .param("scope", "staff")
+                .header("Authorization", "Bearer $token")
+                .header("Last-Event-ID", "1"),
+        )
+            .andExpect(status().isGone)
+            .andExpect(jsonPath("$.code").value("EVENT_ID_TOO_OLD"))
+    }
+
+    @Test
+    fun `session event replay is isolated to the authorized session`() {
+        jdbc.update("DELETE FROM event_retention WHERE restaurant_id = ?", RESTAURANT_ID)
+        jdbc.update(
+            "INSERT INTO restaurant (id, name, timezone, currency) VALUES (?, 'Other stream tenant', 'UTC', 'CHF') ON CONFLICT (id) DO NOTHING",
+            OTHER_RESTAURANT_ID,
+        )
+        jdbc.update(
+            "INSERT INTO restaurant_settings (restaurant_id) VALUES (?) ON CONFLICT (restaurant_id) DO NOTHING",
+            OTHER_RESTAURANT_ID,
+        )
+        val first = createGuestSession()
+        val second = createGuestSession()
+        val foreign = createGuestSession(OTHER_RESTAURANT_ID)
+        val baselineCursor = jdbc.queryForObject(
+            "SELECT COALESCE(MAX(id), 0) FROM event_log WHERE restaurant_id = ?",
+            Long::class.java,
+            RESTAURANT_ID,
+        ) ?: 0L
+        TransactionTemplate(transactionManager).executeWithoutResult {
+            listOf(first, second).forEach { fixture ->
+                eventOutbox.append(
+                    DomainEvent(
+                        restaurantId = RESTAURANT_ID,
+                        type = DomainEventType.SESSION_UPDATED,
+                        aggregateType = EventAggregateType.SESSION,
+                        aggregateId = UUID.fromString(fixture.sessionId),
+                        version = EventVersion.Increment,
+                        sessionId = UUID.fromString(fixture.sessionId),
+                    ),
+                )
+            }
+
+            @Test
+            fun `session creation joining and revocation publish durable updates`() {
+                val fixture = createGuestSession()
+                val joinCode = jdbc.queryForObject(
+                    "SELECT join_code FROM table_session WHERE id = ?",
+                    String::class.java,
+                    UUID.fromString(fixture.sessionId),
+                )!!
+                val joined = mockMvc.perform(
+                    post("/public/tables/${fixture.tableCode}/join")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""{"displayName":"Joining guest","joinCode":"$joinCode"}"""),
+                ).andExpect(status().isCreated)
+                    .andReturn().response.contentAsString
+                val joinedParticipantId = json(joined, "$.participant.id")
+
+                mockMvc.perform(
+                    delete("/sessions/current/participants/$joinedParticipantId")
+                        .header("Authorization", "Bearer ${fixture.token}"),
+                ).andExpect(status().isOk)
+
+                val eventTypes = jdbc.queryForList(
+                    "SELECT type FROM event_log WHERE session_id = ? ORDER BY id",
+                    String::class.java,
+                    UUID.fromString(fixture.sessionId),
+                )
+                assertEquals(
+                    listOf(
+                        DomainEventType.SESSION_UPDATED.wireValue,
+                        DomainEventType.TABLE_UPDATED.wireValue,
+                        DomainEventType.SESSION_UPDATED.wireValue,
+                        DomainEventType.SESSION_UPDATED.wireValue,
+                    ),
+                    eventTypes,
+                )
+            }
+            eventOutbox.append(
+                DomainEvent(
+                    restaurantId = OTHER_RESTAURANT_ID,
+                    type = DomainEventType.SESSION_UPDATED,
+                    aggregateType = EventAggregateType.SESSION,
+                    aggregateId = UUID.fromString(foreign.sessionId),
+                    version = EventVersion.Increment,
+                    sessionId = UUID.fromString(foreign.sessionId),
+                ),
+            )
+        }
+
+        val access = eventStreamService.authorize("session", "Bearer ${first.token}", null)
+        val replayed = eventStreamService.eventsAfter(access, baselineCursor)
+        val firstSessionEvents = replayed.filter { it.sessionId == UUID.fromString(first.sessionId) }
+
+        assertEquals(1, firstSessionEvents.size)
+        assertEquals(DomainEventType.SESSION_UPDATED, firstSessionEvents.single().type)
+        assertTrue(replayed.none { it.sessionId == UUID.fromString(second.sessionId) })
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val staffAccess = eventStreamService.authorize("staff", null, jwtDecoder.decode(staffToken))
+        assertTrue(
+            eventStreamService.eventsAfter(staffAccess, 0).none {
+                it.aggregateId == UUID.fromString(foreign.sessionId)
+            },
+        )
+        jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
+        assertEquals(
+            ErrorCode.STREAM_SCOPE_FORBIDDEN,
+            assertThrows(DomainException::class.java) {
+                eventStreamService.authorize("staff", null, jwtDecoder.decode(staffToken))
+            }.code,
+        )
+
+        jdbc.update(
+            "UPDATE event_log SET occurred_at = CURRENT_TIMESTAMP - INTERVAL '49 hours' WHERE restaurant_id = ? AND id = ?",
+            RESTAURANT_ID,
+            firstSessionEvents.single().eventId,
+        )
+        eventRetentionJob.deleteExpiredEvents()
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE restaurant_id = ? AND id = ?",
+                Int::class.java,
+                RESTAURANT_ID,
+                firstSessionEvents.single().eventId,
+            ),
+        )
+        assertEquals(
+            ErrorCode.EVENT_ID_TOO_OLD,
+            assertThrows(DomainException::class.java) { eventStreamService.ensureCursor(access, 0) }.code,
+        )
+    }
+
+    @Test
     fun `staff endpoints require an authenticated account`() {
         mockMvc.perform(get("/staff/orders"))
             .andExpect(status().isUnauthorized)
@@ -127,6 +319,14 @@ class IdentityIntegrationTest {
                 .andExpect(jsonPath("$.readOnly").value(true))
         }
 
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE session_id = ? AND type = 'session.closed'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
         assertEquals(
             1,
             jdbc.queryForObject(
@@ -1024,6 +1224,14 @@ class IdentityIntegrationTest {
         1,
         jdbc.queryForObject("SELECT count(*) FROM waiter_call WHERE id = ?", Int::class.java, UUID.fromString(callId)),
         )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE session_id = ? AND type = 'waiter.called'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
 
         mockMvc.perform(
         post("/sessions/current/waiter-calls")
@@ -1055,6 +1263,14 @@ class IdentityIntegrationTest {
         ).andExpect(status().isOk)
         .andExpect(jsonPath("$.status").value("RESOLVED"))
         .andExpect(jsonPath("$.resolvedAt").isNotEmpty)
+        assertEquals(
+            2,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE session_id = ? AND type = 'waiter.updated'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
         mockMvc.perform(
         post("/staff/waiter-calls/$callId/resolve")
             .header("Authorization", "Bearer $staffToken"),
@@ -1532,6 +1748,14 @@ class IdentityIntegrationTest {
             .andReturn().response.contentAsString
         assertEquals(20, JsonPath.read<Int>(created, "$.bill.tipsMinor"))
         val paymentId = json(created, "$.payment.id")
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE session_id = ? AND type = 'bill.updated'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
         val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
         val voidKey = UUID.randomUUID().toString()
         val body = """{"reason":"Duplicate collection"}"""
@@ -1546,6 +1770,14 @@ class IdentityIntegrationTest {
             .andExpect(jsonPath("$.payment.status").value("VOIDED"))
             .andExpect(jsonPath("$.bill.paidMinor").value(0))
             .andExpect(jsonPath("$.bill.tipsMinor").value(0))
+        assertEquals(
+            2,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE session_id = ? AND type = 'bill.updated'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
 
         mockMvc.perform(
             post("/staff/payments/$paymentId/void")
@@ -1555,6 +1787,14 @@ class IdentityIntegrationTest {
                 .content(body),
         ).andExpect(status().isOk)
             .andExpect(header().string("Idempotent-Replayed", "true"))
+        assertEquals(
+            2,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE session_id = ? AND type = 'bill.updated'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
 
         mockMvc.perform(
             post("/staff/payments/$paymentId/void")
@@ -2718,6 +2958,22 @@ class IdentityIntegrationTest {
             jdbc.queryForObject("SELECT count(*) FROM audit_event WHERE target_id = CAST(? AS UUID)", Int::class.java, itemId),
         )
         assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE aggregate_id = CAST(? AS UUID) AND type = 'item.updated'",
+                Int::class.java,
+                itemId,
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE aggregate_id = CAST(? AS UUID) AND type = 'order.updated'",
+                Int::class.java,
+                orderId,
+            ),
+        )
+        assertEquals(
             "IN_PREPARATION",
             jdbc.queryForObject("SELECT status FROM order_item WHERE id = ?", String::class.java, itemId),
         )
@@ -2984,6 +3240,115 @@ class IdentityIntegrationTest {
     }
 
     @Test
+    fun `staff can create an order without a participant and replay it once`() {
+        val session = createStaffSession()
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val key = UUID.randomUUID().toString()
+        val request = """{"createdByUserId":"${UUID.randomUUID()}","items":[{"productId":"9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7","quantity":1,"optionIds":["e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7081","f6a7b8c9-d0e1-4f2a-8b3c-4d5e6f708192"]}]}"""
+
+        val created = mockMvc.perform(
+            post("/staff/sessions/${session.first}/orders")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request),
+        ).andExpect(status().isCreated)
+            .andExpect(jsonPath("$.status").value("ACCEPTED"))
+            .andExpect(jsonPath("$.createdBy.userId").value(USER_ID.toString()))
+            .andReturn().response.contentAsString
+        val orderId = UUID.fromString(json(created, "$.id"))
+        assertEquals(USER_ID, jdbc.queryForObject(
+            "SELECT created_by_user_id FROM customer_order WHERE id = ?", UUID::class.java, orderId,
+        ))
+        assertEquals(null, jdbc.queryForObject(
+            "SELECT participant_id FROM customer_order WHERE id = ?", UUID::class.java, orderId,
+        ))
+        mockMvc.perform(
+            post("/staff/sessions/${session.first}/orders")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request),
+        ).andExpect(status().isCreated)
+            .andExpect(header().string("Idempotent-Replayed", "true"))
+        assertEquals(1, jdbc.queryForObject(
+            "SELECT count(*) FROM customer_order WHERE id = ?", Int::class.java, orderId,
+        ))
+    }
+
+    @Test
+    fun `staff order attributes employee separately from its session participant`() {
+        val fixture = createGuestSession()
+        val actorId = UUID.randomUUID()
+        val token = createStaffToken(actorId, "staff-order-${UUID.randomUUID()}@somphie.demo", "WAITER")
+        val request = """{"participantId":"${fixture.participantId}","items":[{"productId":"9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7","quantity":1,"optionIds":["e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7081","f6a7b8c9-d0e1-4f2a-8b3c-4d5e6f708192"]}]}"""
+
+        val response = mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/orders")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request),
+        ).andExpect(status().isCreated)
+            .andExpect(jsonPath("$.createdBy.userId").value(actorId.toString()))
+            .andExpect(jsonPath("$.participant.participantId").value(fixture.participantId))
+            .andReturn().response.contentAsString
+        val orderId = UUID.fromString(json(response, "$.id"))
+        assertEquals(actorId, jdbc.queryForObject(
+            "SELECT created_by_user_id FROM customer_order WHERE id = ?", UUID::class.java, orderId,
+        ))
+        assertEquals(UUID.fromString(fixture.participantId), jdbc.queryForObject(
+            "SELECT participant_id FROM customer_order WHERE id = ?", UUID::class.java, orderId,
+        ))
+        mockMvc.perform(
+            get("/sessions/current/orders").header("Authorization", "Bearer ${fixture.token}"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.items[0].createdBy.userId").value(actorId.toString()))
+            .andExpect(jsonPath("$.items[0].participant.participantId").value(fixture.participantId))
+    }
+
+    @Test
+    fun `staff order creation enforces tenant and permission scope`() {
+        jdbc.update(
+            "INSERT INTO restaurant (id, name, timezone, currency) VALUES (?, 'Other order tenant', 'UTC', 'CHF') ON CONFLICT (id) DO NOTHING",
+            OTHER_RESTAURANT_ID,
+        )
+        jdbc.update(
+            "INSERT INTO restaurant_settings (restaurant_id) VALUES (?) ON CONFLICT (restaurant_id) DO NOTHING",
+            OTHER_RESTAURANT_ID,
+        )
+        val otherTenantSession = createGuestSession(OTHER_RESTAURANT_ID)
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val request = """{"items":[{"productId":"9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7","quantity":1,"optionIds":["e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7081","f6a7b8c9-d0e1-4f2a-8b3c-4d5e6f708192"]}]}"""
+        mockMvc.perform(
+            post("/staff/sessions/${otherTenantSession.sessionId}/orders")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request),
+        ).andExpect(status().isNotFound)
+
+        val foreignParticipant = createGuestSession()
+        val localSession = createStaffSession()
+        mockMvc.perform(
+            post("/staff/sessions/${localSession.first}/orders")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"participantId":"${foreignParticipant.participantId}","items":[{"productId":"9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7","quantity":1}]}"""),
+        ).andExpect(status().isNotFound)
+
+        val noPermissionToken = createStaffToken(UUID.randomUUID(), "kitchen-${UUID.randomUUID()}@somphie.demo", "KITCHEN")
+        val session = createStaffSession()
+        mockMvc.perform(
+            post("/staff/sessions/${session.first}/orders")
+                .header("Authorization", "Bearer $noPermissionToken")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request),
+        ).andExpect(status().isForbidden)
+    }
+    @Test
     fun `authorized waiter accepts an order and idempotently replays the persisted decision`() {
         val fixture = createGuestSession()
         val orderId = createOrder(fixture)
@@ -3010,6 +3375,22 @@ class IdentityIntegrationTest {
             "QUEUED",
             jdbc.queryForObject("SELECT status FROM order_item WHERE order_id = ?", String::class.java, UUID.fromString(orderId)),
         )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE aggregate_id = ? AND type = 'order.updated'",
+                Int::class.java,
+                UUID.fromString(orderId),
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE aggregate_type = 'ITEM' AND type = 'item.updated' AND session_id = ?",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
 
         mockMvc.perform(
             post("/staff/orders/$orderId/accept")
@@ -3020,6 +3401,14 @@ class IdentityIntegrationTest {
         ).andExpect(status().isOk)
             .andExpect(header().string("Idempotent-Replayed", "true"))
             .andExpect(content().json(accepted.response.contentAsString))
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE aggregate_id = ? AND type = 'order.updated'",
+                Int::class.java,
+                UUID.fromString(orderId),
+            ),
+        )
     }
 
     @Test
@@ -3493,6 +3882,55 @@ class IdentityIntegrationTest {
             token = json(result, "$.guestToken"),
             tableCode = tableCode,
         )
+    }
+
+    private fun createStaffSession(): Pair<UUID, String> {
+        val tableId = UUID.randomUUID()
+        val tableCode = "STAFF-${UUID.randomUUID()}"
+        val label = "Staff $tableCode"
+        val sessionId = UUID.randomUUID()
+        val now = java.sql.Timestamp.from(Instant.now())
+        jdbc.update(
+            "INSERT INTO dining_table (id, restaurant_id, label, table_code) VALUES (?, ?, ?, ?)",
+            tableId,
+            RESTAURANT_ID,
+            label,
+            tableCode,
+        )
+        jdbc.update(
+            """
+            INSERT INTO table_session (
+                id, restaurant_id, table_id, status, opened_at, opened_by_type, opened_by_user_id, last_activity_at
+            ) VALUES (?, ?, ?, 'OPEN', ?, 'STAFF', ?, ?)
+            """.trimIndent(),
+            sessionId,
+            RESTAURANT_ID,
+            tableId,
+            now,
+            USER_ID,
+            now,
+        )
+        return sessionId to label
+    }
+
+    private fun createStaffToken(userId: UUID, email: String, role: String): String {
+        val password = "staff-order-password"
+        jdbc.update(
+            """
+            INSERT INTO app_user (id, restaurant_id, email, password_hash, display_name, status)
+            VALUES (?, ?, ?, ?, ?, 'ACTIVE')
+            """.trimIndent(),
+            userId,
+            RESTAURANT_ID,
+            email,
+            passwordEncoder.encode(password),
+            "Staff Order Test",
+        )
+        jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, ?)", userId, role)
+        val response = mockMvc.perform(loginRequest(email, password))
+            .andExpect(status().isOk)
+            .andReturn()
+        return json(response.response.contentAsString, "$.accessToken")
     }
 
     private fun assertSessionRemainsOpen(sessionId: String) {
