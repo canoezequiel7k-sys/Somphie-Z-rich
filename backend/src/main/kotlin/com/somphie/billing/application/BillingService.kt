@@ -13,6 +13,7 @@ import com.somphie.billing.domain.PaymentMethod
 import com.somphie.billing.domain.PaymentRules
 import com.somphie.billing.domain.PaymentStatus
 import com.somphie.billing.domain.VoidRules
+import com.somphie.billing.domain.RefundRules
 import com.somphie.identity.domain.StaffProfile
 import com.somphie.orders.application.OrderChargesPort
 import com.somphie.preparation.application.CourtesyCancellationPort
@@ -33,6 +34,7 @@ data class BillingResult(val status: Int, val body: Map<String, Any>)
 
 data class CreatePaymentCommand(val amountMinor: Long, val tipMinor: Long, val method: String)
 data class CreateCashPaymentCommand(val amountMinor: Long, val tipMinor: Long, val payerLabel: String?)
+data class CreateRefundCommand(val amountMinor: Long, val reason: String)
 data class AdjustmentCommand(
     val kind: String,
     val percentBp: Int?,
@@ -189,6 +191,39 @@ class BillingService(
             "PAYMENT_VOIDED", "PAYMENT", paymentId.toString(), reason = reason,
         )
         return paymentResult(paymentId, sessionId, profile.account.restaurantId, 200)
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    fun createRefund(
+        sessionId: UUID,
+        profile: StaffProfile,
+        idempotencyKey: String,
+        command: CreateRefundCommand,
+    ): BillingResult {
+        requirePermission(profile, "payment.refund")
+        requireReason(command.reason)
+        lockOpenSession(sessionId, profile.account.restaurantId)
+        requireMovementKeyAvailable(sessionId, idempotencyKey)
+        val bill = billQuery.billForSession(sessionId, profile.account.restaurantId)
+        val netPaid = Money.of((bill.getValue("paidMinor") as Number).toLong())
+        val amount = Money.of(command.amountMinor)
+        RefundRules.validate(amount, netPaid)
+        val payment = Payment.refund(
+            id = UUID.randomUUID(),
+            sessionId = sessionId,
+            method = PaymentMethod.SIMULATED_ONLINE,
+            amount = amount,
+            netPaid = netPaid,
+            reason = command.reason,
+            idempotencyKey = idempotencyKey,
+        )
+        insertPayment(payment, profile.account.restaurantId)
+        audit.record(
+            profile.account.restaurantId.toString(), "USER", profile.account.id.toString(),
+            "REFUND_CREATED", "PAYMENT", payment.id.toString(), reason = command.reason,
+            afterSummary = """{"amountMinor":${payment.amount.minor}}""",
+        )
+        return paymentResult(payment.id, sessionId, profile.account.restaurantId, 201)
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -473,7 +508,10 @@ class BillingService(
             profile.account.id,
         )
 
-    fun adjustmentCreateIdempotencyScope(sessionId: UUID, profile: StaffProfile): String =
+        fun createRefundIdempotencyScope(sessionId: UUID, profile: StaffProfile): String =
+            idempotencyScope("user", sessionId, profile.account.id)
+
+        fun adjustmentCreateIdempotencyScope(sessionId: UUID, profile: StaffProfile): String =
         idempotencyScope("user", sessionId, profile.account.id)
 
     fun adjustmentVoidIdempotencyScope(adjustmentId: UUID, profile: StaffProfile): String =

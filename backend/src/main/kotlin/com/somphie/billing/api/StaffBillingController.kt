@@ -3,6 +3,7 @@ package com.somphie.billing.api
 import com.somphie.billing.application.AdjustmentCommand
 import com.somphie.billing.application.BillingService
 import com.somphie.billing.application.CreateCashPaymentCommand
+import com.somphie.billing.application.CreateRefundCommand
 import com.somphie.identity.application.IdentityService
 import com.somphie.identity.domain.StaffProfile
 import com.somphie.shared.domain.DomainException
@@ -69,7 +70,27 @@ class StaffBillingController(
         }
     }
 
-    @PostMapping("/staff/sessions/{sessionId}/adjustments")
+        @PostMapping("/staff/sessions/{sessionId}/refunds")
+        @Transactional
+        fun createRefund(
+            @PathVariable sessionId: String,
+            @RequestHeader("Idempotency-Key", required = false) key: String?,
+            @RequestBody request: CreateRefundRequest,
+            @AuthenticationPrincipal jwt: Jwt,
+        ): ResponseEntity<Map<String, Any>> {
+            val profile = authorize(jwt, "payment.refund")
+            val session = parseUuid(sessionId)
+            val idempotencyKey = requireIdempotencyKey(key)
+            return billingService.executeIdempotent(
+                billingService.createRefundIdempotencyScope(session, profile),
+                idempotencyKey,
+                "payment:refund:$session|$request",
+            ) {
+                billingService.createRefund(session, profile, idempotencyKey, CreateRefundCommand(request.amountMinor, request.reason))
+            }
+        }
+
+        @PostMapping("/staff/sessions/{sessionId}/adjustments")
     @Transactional
     fun applyAdjustment(
         @PathVariable sessionId: String,
@@ -168,6 +189,11 @@ data class CreateCashPaymentRequest(
     val amountMinor: Long,
     val tipMinor: Long? = null,
     val payerLabel: String? = null,
+)
+
+data class CreateRefundRequest(
+    val amountMinor: Long,
+    val reason: String,
 )
 
 data class ReasonRequest(val reason: String)
