@@ -1,6 +1,6 @@
 # Índice de trabajo del backend
 
-**Estado:** ejecución activa; rama `feat/backend-preparation`, HEAD observado al inicio `a1f3ac1`; worktree limpio al comenzar y cambios de esta tanda sin commit. **Revisión:** 2026-10-14.
+**Estado:** ejecución activa; rama `feat/backend-preparation`, HEAD actual `14b26a5`; worktree con documentación local sin commit. HEAD avanzó durante la validación; esta actualización no hizo commit ni push. **Revisión:** 2026-10-14.
 
 ### Actualización D-160 (estado vigente)
 
@@ -13,7 +13,7 @@
 | WP-BE-51-T01 | Parcial: Q-31 aplicada; llamados y cambios de sesión/mesa producen eventos, pero falta validar el tablero conectado al ciclo de vida SSE. |
 | WP-BE-71-T01 | Completada localmente: cierres y Q-34; historial expone creador/participante. Suite global posterior al cambio pasó. |
 | WP-BE-72 / WP-BE-80/81/82 / WP-BE-90/91 | Alcances aprobados; implementación y contratos específicos pendientes. Faltan fórmulas respaldadas para algunas métricas e identidad/verificación de cliente conforme a reglas vigentes. |
-| Validación (2026-10-14) | La prueba HTTP SSE focalizada y `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasaron: 380 pruebas, 0 fallos/errores/omitidas, 93,82 % (5538/5903 líneas). Markdownlint y `git diff --check` pendientes de esta tanda. OpenAPI 0.4.1 sin cambios. |
+| Validación (2026-10-14) | La prueba HTTP SSE focalizada y `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasaron: 380 pruebas, 0 fallos/errores/omitidas, 93,82 % (5538/5903 líneas). Markdownlint (3 documentos) y `git diff --check` pasaron. OpenAPI 0.4.1 sin cambios. |
 
 El mapa detallado que sigue es una foto histórica previa a D-160; sus bloqueos por aprobación ya no están vigentes.
 

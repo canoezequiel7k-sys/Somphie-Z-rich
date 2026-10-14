@@ -816,9 +816,9 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 ### 2026-10-14 — WP-BE-60: revocación en stream SSE ✅
 - **Qué:** `IdentityIntegrationTest` abre una conexión HTTP SSE real para un participante y comprueba que la revocación desde otro participante cierre la respuesta durante la reautorización. Revisé `table.updated`: hay productores transaccionales para apertura QR, apertura staff y cierre; no agregué productor por expiración de pedido porque no existe una mutación persistida que lo sustente.
 - **Por qué:** comprobar el ciclo real de una conexión larga, además de las pruebas existentes de autorización/replay y de emisión del outbox.
-- **Validación:** `.\backend\gradlew.bat -p backend test --tests "com.somphie.identity.api.IdentityIntegrationTest.revoking a participant closes their active event stream" --no-daemon` pasó. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó: 380 pruebas, 0 fallos/errores/omitidas; 5538/5903 líneas (93,82 %).
+- **Validación:** `.\backend\gradlew.bat -p backend test --tests "com.somphie.identity.api.IdentityIntegrationTest.revoking a participant closes their active event stream" --no-daemon` pasó. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó: 380 pruebas, 0 fallos/errores/omitidas; 5538/5903 líneas (93,82 %). Markdownlint de los 3 documentos relacionados: 0 issues; `git diff --check` pasó.
 - **Qué estudiar:** ciclo de vida de `SseEmitter`, reautorización periódica y cierre de la respuesta HTTP.
-- **Archivos tocados:** `backend/src/test/kotlin/com/somphie/identity/api/IdentityIntegrationTest.kt`, `docs/08-agentes/backend-work/wp-be-60.md`, `docs/00-gobierno/backend-work-index.md` y este archivo. Sin cambios de OpenAPI ni commit/push.
+- **Archivos tocados:** `backend/src/test/kotlin/com/somphie/identity/api/IdentityIntegrationTest.kt`, `docs/08-agentes/backend-work/wp-be-60.md`, `docs/00-gobierno/backend-work-index.md` y este archivo. Sin cambios de OpenAPI. No hice commit/push; HEAD avanzó durante la validación a `14b26a5` y se preservó.
 
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)
