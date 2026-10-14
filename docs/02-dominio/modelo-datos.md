@@ -31,8 +31,10 @@
 | `payment` | id, restaurant_id, session_id, kind, method, status, amount_minor, payer_participant_id?, payer_label?, reason, created_by_type/id, voided_at, idempotency_key | `CHECK(amount_minor > 0)`; `UNIQUE(session_id, idempotency_key)`; índice `(session_id)` |
 | `idempotency_record` | id, scope (actor+endpoint), key, request_hash, response_status, response_body jsonb, created_at, expires_at | `UNIQUE(scope, key)`; limpieza a 24 h |
 | `audit_event` | id, restaurant_id, occurred_at, actor_type, actor_id, action, target_type, target_id, reason, before_summary jsonb, after_summary jsonb, trace_id | **Append-only**: sin `UPDATE/DELETE` para el rol de la app; índices `(occurred_at)`, `(target_type,target_id)` |
-| `event_log` | id bigserial, restaurant_id, type, aggregate_type, aggregate_id, scope_session_id?, version, payload jsonb, created_at | Retención 24–48 h; índice `(id)` para `Last-Event-ID` |
+| `event_log` | id bigserial, restaurant_id, type, aggregate_type, aggregate_id, scope_session_id?, version, payload jsonb, created_at | Retención 48 h; índice `(id)` para `Last-Event-ID` |
 | `feedback` (F9) | id, session_id, participant_id, rating, comment | `UNIQUE(session_id, participant_id)` |
+
+> `event_log` describe el modelo objetivo de tiempo real; no existe todavía en las migraciones. La tabla implementada es `audit_event` (V7), con otro propósito y sin cursor/outbox SSE. No tratarlas como intercambiables; WP-BE-60 espera la decisión WP-ARQ-60.
 
 ## 3. Restricciones críticas (en SQL)
 
@@ -106,7 +108,7 @@ ALTER TABLE order_item ADD CONSTRAINT ck_item_status CHECK (status IN
 | `product_option_group` | product_id, group_id, sort_order | PK `(product_id, group_id)` |
 | `category_translation`, `product_translation`, `option_group_translation`, `option_translation` | entity_id, locale, name, (description) | PK `(entity_id, locale)` |
 | `bill_adjustment` | id, restaurant_id, session_id, kind, order_item_id?, percent_bp?, amount_minor, reason_code, reason_text, status, created_by, `limit_exempt`, created_at, voided_by?, voided_at?, void_reason?, idempotency_key | `CHECK(amount_minor > 0)`; `UNIQUE(session_id, idempotency_key)`; índice `(session_id, status)` y único parcial por ítem con cortesía activa |
-| `waiter_call` | id, restaurant_id, session_id, requested_by_participant_id, reason, text, status, created_at, acknowledged_by?, acknowledged_at?, resolved_at? | índice único parcial `(session_id, reason) WHERE status IN ('OPEN','ACKNOWLEDGED')` |
+| `waiter_call` | id, session_id, participant_id, reason, text, status, created_at, acknowledged_at?, resolved_at?, expires_at | `CHECK` de motivo/estado/ciclo de vida; índice único parcial `(session_id, reason) WHERE status IN ('OPEN','ACKNOWLEDGED')`; índices de sesión, expiración y cooldown |
 
 ### 7.2 Tablas modificadas
 | Tabla | Cambio |

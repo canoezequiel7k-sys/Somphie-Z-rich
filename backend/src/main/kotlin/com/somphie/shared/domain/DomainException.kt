@@ -53,6 +53,10 @@ enum class ErrorCode {
     SESSION_BALANCE_PENDING, // El cierre normal requiere saldo exactamente cero.
     PARTICIPANT_NOT_FOUND, // El participante indicado no pertenece a la sesión.
     HOST_CANNOT_BE_REVOKED, // El host no puede revocar su propio acceso.
+    WAITER_CALL_ALREADY_ACTIVE,
+    WAITER_CALL_COOLDOWN,
+    WAITER_CALL_NOT_FOUND,
+    STATE_CONFLICT,
 
     // --- Pagos (catálogo §5) ---
     PAYMENT_AMOUNT_INVALID,

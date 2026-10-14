@@ -33,7 +33,8 @@ class ApiExceptionHandler {
         val retryAfter = (exception.extra["retryAfterSec"] as? Number)?.toLong()
         val response = ResponseEntity.status(status).contentType(PROBLEM_JSON)
         if ((exception.code == ErrorCode.ACCOUNT_TEMPORARILY_LOCKED ||
-                exception.code == ErrorCode.JOIN_CODE_RATE_LIMITED) && retryAfter != null
+                exception.code == ErrorCode.JOIN_CODE_RATE_LIMITED ||
+                exception.code == ErrorCode.WAITER_CALL_COOLDOWN) && retryAfter != null
         ) {
             response.header(HttpHeaders.RETRY_AFTER, retryAfter.toString())
         }
@@ -104,6 +105,7 @@ class ApiExceptionHandler {
         -> HttpStatus.FORBIDDEN
         ErrorCode.ACCOUNT_TEMPORARILY_LOCKED,
         ErrorCode.JOIN_CODE_RATE_LIMITED,
+        ErrorCode.WAITER_CALL_COOLDOWN,
         -> HttpStatus.TOO_MANY_REQUESTS
         ErrorCode.ORDER_EMPTY,
         ErrorCode.ORDER_ALL_ITEMS_EXCLUDED,
@@ -120,6 +122,7 @@ class ApiExceptionHandler {
         ErrorCode.ORDER_NOT_FOUND,
         ErrorCode.RESOURCE_NOT_FOUND,
         ErrorCode.CATEGORY_NOT_FOUND,
+        ErrorCode.WAITER_CALL_NOT_FOUND,
         -> HttpStatus.NOT_FOUND
         ErrorCode.PRODUCT_NOT_FOUND,
         ErrorCode.IDEMPOTENCY_KEY_REUSED,
@@ -157,6 +160,8 @@ class ApiExceptionHandler {
         ErrorCode.ADJUSTMENT_ITEM_INVALID,
         ErrorCode.PAYMENT_NOT_VOIDABLE,
         ErrorCode.REFUND_EXCEEDS_PAID,
+        ErrorCode.WAITER_CALL_ALREADY_ACTIVE,
+        ErrorCode.STATE_CONFLICT,
         ErrorCode.IDEMPOTENCY_IN_PROGRESS,
         -> HttpStatus.CONFLICT
     }

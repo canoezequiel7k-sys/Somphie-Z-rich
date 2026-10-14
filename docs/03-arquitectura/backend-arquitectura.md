@@ -66,12 +66,18 @@ Reglas:
 | `OrderCommandPort` (orders) | preparation | Transiciones de ítem (`start`, `ready`, `deliver`, `cancel`, `undo`) |
 | `OrderChargesPort` (orders) | billing | Importes facturables y datos de ítems para cortesías; el dominio de pedidos aplica sus estados antes de entregar los cargos (única definición, ver `modelo-datos.md` §4) |
 | `OrderActivityPort` (orders) | floor (cierre) | ¿Hay pendientes/ítems activos? |
+| `SessionBillPort` (floor) | `StaffSessionQueryService`; lo implementa `BillQueryService` (billing) | Cuenta completa derivada bajo el lock de sesión; no usar `BillableChargesPort` como saldo |
+| `StaffSessionOrdersPort` (floor) | `StaffSessionQueryService`; lo implementa `JdbcStaffSessionOrdersAdapter` (orders) | Detalle de pedidos o actividad agregada por lote, aislados por restaurante |
+| `OrderChargesPort` (orders) | billing | Cargos de varias sesiones para el tablero; conserva la única selección de cargos |
+| `WaiterCallService` (floor) | controladores de Floor y consulta del tablero | Ciclo persistido, idempotente y limitado a la sesión/restaurante; expiración periódica |
 | `CurrentActor` (shared) | todos | Principal autenticado y permisos |
 | `AuditPort` (audit) | todos | Registrar evento en la misma transacción |
 | `EventPublisher` (shared) | todos | Publicar evento de dominio |
 | `EmailSender`, `PdfRenderer`, `PaymentProvider`, `Clock` (shared/infra) | varios | Aislar detalles externos |
 
-> **Ciclo potencial `floor ↔ orders` en el cierre:** el cierre vive en `floor` y consulta a `orders` mediante `OrderActivityPort`; `billing` aporta el saldo mediante `BillingSummaryPort`. Para evitar el ciclo, el caso de uso `CloseSession` se ubica en un **orquestador** (`application` de `floor`) que recibe esos puertos por inyección; `orders` jamás depende de `floor.application` salvo vía `SessionAccessPort`. Si aparece un ciclo real, se resuelve con eventos o moviendo el caso de uso al módulo que posee la mayor parte de la regla.
+> **Composición del detalle/tablero en `floor`:** Orders entrega el detalle o actividad agregada por puertos publicados por Floor; Billing reutiliza `BillCalculator` para resumir por lote bajo locks de sesión. No se duplica la derivación del saldo. El catálogo de auditoría excluye llamados al mozo y su publicación durable (`waiter.called`/`waiter.updated`) depende del outbox/SSE de WP-BE-60.
+>
+> **Estado de eventos:** el módulo `notifications`, `EventPublisher` y el flujo `event_log`/SSE de este diseño son objetivo, no código disponible. V7 implementa únicamente `audit_event`; WP-BE-60 espera el spike y la aprobación/reemplazo de ADR-0006 por WP-ARQ-60.
 
 ## 4. Flujo típico de una operación
 
@@ -85,10 +91,12 @@ flowchart LR
   A --> D[Dominio: reglas y transición]
   D --> R[(Repositorios)]
   UC --> AU[Auditoría misma tx]
-  UC --> EV[Evento de dominio]
-  EV --> AC[AFTER_COMMIT: event_log + SSE]
+  UC --> EVL[(event_log en la misma tx)]
+  EVL -->|commit| PUB[Publisher AFTER_COMMIT]
+  PUB --> SSE[Conexiones SSE filtradas]
   C --> RES[Respuesta o Problem+JSON]
 ```
+Este diagrama describe el flujo objetivo posterior a WP-ARQ-60: el evento queda durable dentro de la transacción y la difusión ocurre tras el commit. No implica que `EventPublisher` o `event_log` estén implementados hoy.
 
 Orden dentro del caso de uso: **idempotencia → autorización → carga con lock → validación de estado y reglas → cambio de dominio → persistir → auditoría → evento**.
 

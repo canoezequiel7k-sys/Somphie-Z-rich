@@ -53,6 +53,35 @@ class JdbcOrderChargesAdapter(
             )
         }
 
+    override fun billableLinesBySession(
+        sessionIds: List<UUID>,
+        restaurantId: UUID,
+    ): Map<UUID, List<BillableOrderLine>> {
+        if (sessionIds.isEmpty()) return emptyMap()
+        return jdbc.query(
+            """
+            SELECT o.session_id, o.display_code, oi.product_name, oi.quantity,
+                   oi.unit_price_minor, oi.line_total_minor
+            FROM customer_order o
+            JOIN order_item oi ON oi.order_id = o.id
+            WHERE o.session_id IN (:sessionIds)
+              AND o.restaurant_id = :restaurantId
+              AND o.status IN ('ACCEPTED', 'IN_PREPARATION', 'READY', 'DELIVERED')
+              AND oi.status <> 'CANCELLED'
+            ORDER BY o.session_id, o.created_at, o.id, oi.id
+            """.trimIndent(),
+            mapOf("sessionIds" to sessionIds, "restaurantId" to restaurantId),
+        ) { rs, _ ->
+            rs.getObject("session_id", UUID::class.java) to BillableOrderLine(
+                orderCode = rs.getString("display_code"),
+                productName = rs.getString("product_name"),
+                quantity = rs.getInt("quantity"),
+                unitPriceMinor = rs.getLong("unit_price_minor"),
+                lineTotalMinor = rs.getLong("line_total_minor"),
+            )
+        }.groupBy({ it.first }, { it.second })
+    }
+
     override fun courtesyItems(sessionId: UUID, restaurantId: UUID): List<CourtesyOrderItem> =
         jdbc.query(
             """

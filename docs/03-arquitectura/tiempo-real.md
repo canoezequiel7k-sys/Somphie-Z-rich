@@ -1,6 +1,8 @@
 # Tiempo real (Fase 6)
 
 > Decisión base: **SSE** con eventos "pista" (ADR-0006). Se confirma al iniciar la fase. Hasta entonces, **polling**.
+>
+> Estado al 2026-10-14: ADR-0006 sigue propuesta y WP-ARQ-60 debe aceptarla o reemplazarla tras el spike. No hay todavía `event_log`, publisher ni endpoint SSE; la sección de flujo siguiente es diseño objetivo, no infraestructura desplegada.
 
 ## 1. Estrategia por fases
 | Fase | Mecanismo |
@@ -29,8 +31,8 @@
 ## 4. Flujo de emisión
 ```mermaid
 flowchart LR
-  UC[Caso de uso<br/>commit] --> EVL[(event_log)]
-  EVL --> PUB[Publisher<br/>AFTER_COMMIT]
+  UC[Caso de uso en transacción] --> EVL[(event_log en la misma tx)]
+  EVL -->|commit| PUB[Publisher AFTER_COMMIT]
   PUB --> SSE[Conexiones SSE<br/>filtradas por alcance]
   SSE --> CL[Clientes]
   CL -->|reconsulta| API[REST]

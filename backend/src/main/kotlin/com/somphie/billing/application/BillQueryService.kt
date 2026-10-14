@@ -8,6 +8,8 @@ import com.somphie.billing.domain.ChargeLine
 import com.somphie.billing.domain.PaymentKind
 import com.somphie.billing.domain.PaymentLine
 import com.somphie.billing.domain.PaymentStatus
+import com.somphie.floor.application.SessionBillPort
+import com.somphie.floor.application.SessionBillSummary
 import com.somphie.orders.application.BillableOrderLine
 import com.somphie.orders.application.OrderChargesPort
 import com.somphie.shared.domain.DomainException
@@ -29,7 +31,7 @@ class BillQueryService(
     private val jdbc: NamedParameterJdbcTemplate,
     private val orderCharges: OrderChargesPort,
     private val clock: Clock,
-) : BillableChargesPort {
+) : BillableChargesPort, SessionBillPort {
     // La fila de sesión bloqueada serializa esta lectura con todos los escritores de la cuenta.
     @Transactional(isolation = Isolation.READ_COMMITTED)
     fun getCurrentBill(authorization: String?): Map<String, Any> {
@@ -69,7 +71,7 @@ class BillQueryService(
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
-    fun billForSession(sessionId: UUID, restaurantId: UUID): Map<String, Any> {
+    override fun billForSession(sessionId: UUID, restaurantId: UUID): Map<String, Any> {
         val session = jdbc.query(
             """
             SELECT ts.status, ts.closed_at, r.currency
@@ -165,6 +167,66 @@ class BillQueryService(
                 mapOf("orderCode" to it.orderCode, "totalMinor" to it.totalMinor)
             },
         )
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    override fun billSummariesForSessions(
+        sessionIds: List<UUID>,
+        restaurantId: UUID,
+    ): Map<UUID, SessionBillSummary> {
+        if (sessionIds.isEmpty()) return emptyMap()
+        val openSessionIds = jdbc.query(
+            """
+            SELECT id
+            FROM table_session
+            WHERE id IN (:sessionIds) AND restaurant_id = :restaurantId AND status = 'OPEN'
+            ORDER BY id
+            FOR UPDATE
+            """.trimIndent(),
+            mapOf("sessionIds" to sessionIds, "restaurantId" to restaurantId),
+        ) { rs, _ -> rs.getObject("id", UUID::class.java) }
+        if (openSessionIds.isEmpty()) return emptyMap()
+
+        val chargeLines = orderCharges.billableLinesBySession(openSessionIds, restaurantId)
+        val adjustments = jdbc.query(
+            """
+            SELECT session_id, status, amount_minor
+            FROM bill_adjustment
+            WHERE session_id IN (:sessionIds) AND restaurant_id = :restaurantId
+            ORDER BY session_id, created_at, id
+            """.trimIndent(),
+            mapOf("sessionIds" to openSessionIds, "restaurantId" to restaurantId),
+        ) { rs, _ ->
+            rs.getObject("session_id", UUID::class.java) to AdjustmentLine(
+                status = AdjustmentStatus.valueOf(rs.getString("status")),
+                amount = Money.of(rs.getLong("amount_minor")),
+            )
+        }.groupBy({ it.first }, { it.second })
+        val payments = jdbc.query(
+            """
+            SELECT session_id, kind, status, amount_minor, tip_minor
+            FROM payment
+            WHERE session_id IN (:sessionIds) AND restaurant_id = :restaurantId
+            ORDER BY session_id, created_at, id
+            """.trimIndent(),
+            mapOf("sessionIds" to openSessionIds, "restaurantId" to restaurantId),
+        ) { rs, _ ->
+            rs.getObject("session_id", UUID::class.java) to PaymentLine(
+                kind = PaymentKind.valueOf(rs.getString("kind")),
+                status = PaymentStatus.valueOf(rs.getString("status")),
+                amount = Money.of(rs.getLong("amount_minor")),
+                tip = Money.of(rs.getLong("tip_minor")),
+            )
+        }.groupBy({ it.first }, { it.second })
+
+        return openSessionIds.associateWith { sessionId ->
+            val summary = BillCalculator.summarize(
+                chargeLines[sessionId].orEmpty().map { ChargeLine(Money.of(it.lineTotalMinor)) },
+                adjustments[sessionId].orEmpty(),
+                payments[sessionId].orEmpty(),
+            )
+            SessionBillSummary(summary.charges.minor, summary.balance.minor)
+        }
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)

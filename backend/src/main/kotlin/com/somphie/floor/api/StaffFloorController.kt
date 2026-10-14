@@ -2,6 +2,8 @@ package com.somphie.floor.api
 
 import com.somphie.audit.AuditService
 import com.somphie.floor.application.ParticipantRevocationService
+import com.somphie.floor.application.StaffSessionQueryService
+import com.somphie.floor.application.WaiterCallService
 import com.somphie.floor.domain.JoinCode
 import com.somphie.floor.domain.SessionCloseReason
 import com.somphie.floor.domain.SessionInfoDto
@@ -21,9 +23,11 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestHeader
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.time.Clock
 import java.time.Instant
@@ -37,6 +41,8 @@ class StaffFloorController(
     private val auditService: AuditService,
     private val joinCodeGenerator: JoinCodeGenerator,
     private val participantRevocationService: ParticipantRevocationService,
+    private val staffSessionQueryService: StaffSessionQueryService,
+    private val waiterCallService: WaiterCallService,
     private val clock: Clock,
 ) {
     private data class StoredSessionState(
@@ -49,6 +55,57 @@ class StaffFloorController(
         val joinCode: JoinCode?,
         val lastActivityAt: Instant,
     )
+
+    @GetMapping("/staff/tables")
+    fun listTables(@AuthenticationPrincipal jwt: Jwt): Map<String, Any> {
+        val profile = authorize(jwt, "table.read")
+        return staffSessionQueryService.getTables(profile.account.restaurantId)
+    }
+
+    @GetMapping("/staff/sessions/{sessionId}")
+    fun getSession(
+        @PathVariable sessionId: String,
+        @AuthenticationPrincipal jwt: Jwt,
+    ): Map<String, Any> {
+        val profile = authorize(jwt, "session.read")
+        return staffSessionQueryService.getSession(
+            parseUuid(sessionId, "sessionId"),
+            profile.account.restaurantId,
+        )
+    }
+
+    @GetMapping("/staff/waiter-calls")
+    fun listWaiterCalls(
+        @RequestParam(required = false) status: List<String>?,
+        @AuthenticationPrincipal jwt: Jwt,
+    ): Map<String, Any> {
+        val profile = authorize(jwt, "waiter_call.handle")
+        return waiterCallService.listForStaff(profile.account.restaurantId, status)
+    }
+
+    @PostMapping("/staff/waiter-calls/{waiterCallId}/acknowledge")
+    fun acknowledgeWaiterCall(
+        @PathVariable waiterCallId: String,
+        @AuthenticationPrincipal jwt: Jwt,
+    ): Map<String, Any> {
+        val profile = authorize(jwt, "waiter_call.handle")
+        return waiterCallService.acknowledge(
+            parseUuid(waiterCallId, "waiterCallId"),
+            profile.account.restaurantId,
+        )
+    }
+
+    @PostMapping("/staff/waiter-calls/{waiterCallId}/resolve")
+    fun resolveWaiterCall(
+        @PathVariable waiterCallId: String,
+        @AuthenticationPrincipal jwt: Jwt,
+    ): Map<String, Any> {
+        val profile = authorize(jwt, "waiter_call.handle")
+        return waiterCallService.resolve(
+            parseUuid(waiterCallId, "waiterCallId"),
+            profile.account.restaurantId,
+        )
+    }
 
     @PostMapping("/staff/tables/{tableId}/sessions")
     @Transactional
@@ -254,10 +311,10 @@ class StaffFloorController(
         return profile
     }
 
-    private fun parseUuid(value: String): UUID = try {
+    private fun parseUuid(value: String, field: String = "tableId"): UUID = try {
         UUID.fromString(value)
     } catch (_: IllegalArgumentException) {
-        throw DomainException(ErrorCode.VALIDATION_FAILED, "Invalid tableId")
+        throw DomainException(ErrorCode.VALIDATION_FAILED, "Invalid $field")
     }
 
     private fun validateIdempotencyKey(value: String?) {

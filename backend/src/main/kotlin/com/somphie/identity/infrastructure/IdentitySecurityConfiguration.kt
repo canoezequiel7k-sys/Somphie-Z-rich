@@ -111,6 +111,17 @@ class IdentitySecurityConfiguration {
                     .hasAuthority("item.prepare")
                 it.requestMatchers(HttpMethod.GET, "/staff/stations/*/queue")
                     .hasAuthority("item.prepare")
+                it.requestMatchers(HttpMethod.GET, "/staff/tables")
+                    .hasAuthority("table.read")
+                it.requestMatchers(HttpMethod.GET, "/staff/waiter-calls")
+                    .hasAuthority("waiter_call.handle")
+                it.requestMatchers(
+                    HttpMethod.POST,
+                    "/staff/waiter-calls/*/acknowledge",
+                    "/staff/waiter-calls/*/resolve",
+                ).hasAuthority("waiter_call.handle")
+                it.requestMatchers(HttpMethod.GET, "/staff/sessions/*")
+                    .hasAuthority("session.read")
                 it.requestMatchers(HttpMethod.POST, "/staff/order-items/*/start", "/staff/order-items/*/ready")
                     .hasAuthority("item.prepare")
                 it.requestMatchers(HttpMethod.POST, "/staff/order-items/*/deliver", "/staff/orders/*/deliver-ready")
@@ -129,6 +140,8 @@ class IdentitySecurityConfiguration {
                     .hasAuthority("payment.register_cash")
                 it.requestMatchers(HttpMethod.POST, "/staff/payments/*/void")
                     .hasAuthority("payment.void")
+                it.requestMatchers(HttpMethod.POST, "/staff/sessions/*/refunds")
+                    .hasAuthority("payment.refund")
                 it.requestMatchers(HttpMethod.POST, "/staff/sessions/*/adjustments")
                     .hasAnyAuthority("adjustment.apply", "adjustment.apply_any")
                 it.requestMatchers(HttpMethod.GET, "/staff/sessions/*/adjustments")
@@ -144,9 +157,16 @@ class IdentitySecurityConfiguration {
                     .permitAll()
                 it.requestMatchers(HttpMethod.DELETE, "/sessions/current/participants/*")
                     .permitAll()
-                it.requestMatchers(HttpMethod.GET, "/sessions/current/orders", "/sessions/current/bill", "/sessions/current/payments", "/orders/*")
+                it.requestMatchers(
+                    HttpMethod.GET,
+                    "/sessions/current/orders",
+                    "/sessions/current/bill",
+                    "/sessions/current/payments",
+                    "/sessions/current/waiter-calls",
+                    "/orders/*",
+                )
                     .permitAll()
-                it.requestMatchers(HttpMethod.POST, "/sessions/current/payments")
+                it.requestMatchers(HttpMethod.POST, "/sessions/current/payments", "/sessions/current/waiter-calls")
                     .permitAll()
                 it.anyRequest().authenticated()
             }
@@ -170,6 +190,7 @@ class IdentitySecurityConfiguration {
         (path == "/sessions/current/orders" && method in setOf("GET", "POST")) ||
             (path == "/sessions/current/bill" && method == "GET") ||
         (path == "/sessions/current/payments" && method in setOf("GET", "POST")) ||
+            (path == "/sessions/current/waiter-calls" && method in setOf("GET", "POST")) ||
             (path.matches(Regex("^/sessions/current/participants/[^/]+$")) && method == "DELETE") ||
             (path.matches(Regex("^/orders/[^/]+$")) && method == "GET") ||
             (path.matches(Regex("^/orders/[^/]+/cancel$")) && method == "POST")

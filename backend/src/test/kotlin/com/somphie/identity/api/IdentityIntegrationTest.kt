@@ -167,7 +167,7 @@ class IdentityIntegrationTest {
         )
 
         val rejectedKey = UUID.randomUUID().toString()
-        val rejectedBody = """{"amountMinor":113,"method":"SIMULATED_ONLINE"}"""
+        val rejectedBody = """{"amountMinor":113,"tipMinor":10,"method":"SIMULATED_ONLINE"}"""
         mockMvc.perform(
             post("/sessions/current/payments")
                 .header("Authorization", "Bearer ${fixture.token}")
@@ -193,6 +193,14 @@ class IdentityIntegrationTest {
             jdbc.queryForObject(
                 "SELECT status FROM payment WHERE id = ?",
                 String::class.java,
+                UUID.fromString(rejectedPaymentId),
+            ),
+        )
+        assertEquals(
+            0L,
+            jdbc.queryForObject(
+                "SELECT tip_minor FROM payment WHERE id = ?",
+                Long::class.java,
                 UUID.fromString(rejectedPaymentId),
             ),
         )
@@ -270,7 +278,7 @@ class IdentityIntegrationTest {
             .andExpect(jsonPath("$.balanceMinor").value(250))
 
         val cashKey = UUID.randomUUID().toString()
-        val cashBody = """{"amountMinor":250,"payerLabel":"Caja"}"""
+        val cashBody = """{"amountMinor":250,"tipMinor":10,"payerLabel":"Caja"}"""
         mockMvc.perform(
             post("/staff/sessions/${fixture.sessionId}/payments")
                 .header("Authorization", "Bearer $staffToken")
@@ -280,6 +288,7 @@ class IdentityIntegrationTest {
         ).andExpect(status().isCreated)
             .andExpect(jsonPath("$.payment.method").value("CASH_COUNTER"))
             .andExpect(jsonPath("$.bill.paidMinor").value(450))
+            .andExpect(jsonPath("$.bill.tipsMinor").value(20))
             .andExpect(jsonPath("$.bill.balanceMinor").value(0))
         mockMvc.perform(
             post("/staff/sessions/${fixture.sessionId}/payments")
@@ -299,7 +308,7 @@ class IdentityIntegrationTest {
             .andExpect(jsonPath("$.payment.amountMinor").value(0))
             .andExpect(jsonPath("$.payment.tipMinor").value(20))
             .andExpect(jsonPath("$.bill.paidMinor").value(450))
-            .andExpect(jsonPath("$.bill.tipsMinor").value(30))
+            .andExpect(jsonPath("$.bill.tipsMinor").value(40))
             .andExpect(jsonPath("$.bill.balanceMinor").value(0))
 
         val voidKey = UUID.randomUUID().toString()
@@ -331,6 +340,850 @@ class IdentityIntegrationTest {
             0,
             jdbc.queryForObject(
                 "SELECT count(*) FROM bill_adjustment WHERE session_id = ? AND status = 'APPLIED'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+    }
+
+    @Test
+    fun `tip limit is enforced from gross charges and failed payments do not retain it`() {
+        val fixture = createBillableSession(amountMinor = 500)
+        jdbc.update(
+            "UPDATE restaurant_settings SET max_tip_percent = 10 WHERE restaurant_id = ?",
+            RESTAURANT_ID,
+        )
+        try {
+            mockMvc.perform(
+                post("/sessions/current/payments")
+                    .header("Authorization", "Bearer ${fixture.token}")
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"amountMinor":100,"tipMinor":51,"method":"SIMULATED_ONLINE"}"""),
+            ).andExpect(status().isUnprocessableEntity)
+                .andExpect(jsonPath("$.code").value("TIP_EXCEEDS_LIMIT"))
+                .andExpect(jsonPath("$.extra.maxTipMinor").value(50))
+
+            val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+            mockMvc.perform(
+                post("/staff/sessions/${fixture.sessionId}/payments")
+                    .header("Authorization", "Bearer $staffToken")
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"amountMinor":100,"tipMinor":51}"""),
+            ).andExpect(status().isUnprocessableEntity)
+                .andExpect(jsonPath("$.code").value("TIP_EXCEEDS_LIMIT"))
+
+            mockMvc.perform(
+                post("/sessions/current/payments")
+                    .header("Authorization", "Bearer ${fixture.token}")
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"amountMinor":100,"tipMinor":50,"method":"SIMULATED_ONLINE"}"""),
+            ).andExpect(status().isCreated)
+                .andExpect(jsonPath("$.bill.chargesMinor").value(500))
+                .andExpect(jsonPath("$.bill.tipsMinor").value(50))
+                .andExpect(jsonPath("$.bill.balanceMinor").value(400))
+
+            assertEquals(
+                1,
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM payment WHERE session_id = ? AND status = 'SUCCEEDED'",
+                    Int::class.java,
+                    UUID.fromString(fixture.sessionId),
+                ),
+            )
+        } finally {
+            jdbc.update(
+                "UPDATE restaurant_settings SET max_tip_percent = 100 WHERE restaurant_id = ?",
+                RESTAURANT_ID,
+            )
+        }
+    }
+
+    @Test
+    fun `tip only payment needs charges and an open session`() {
+        val empty = createGuestSession()
+        mockMvc.perform(
+            post("/sessions/current/payments")
+                .header("Authorization", "Bearer ${empty.token}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":0,"tipMinor":10,"method":"SIMULATED_ONLINE"}"""),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("TIP_NOT_ALLOWED"))
+
+        val fixture = createBillableSession(amountMinor = 100)
+        mockMvc.perform(
+            post("/sessions/current/payments")
+                .header("Authorization", "Bearer ${fixture.token}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":100,"method":"SIMULATED_ONLINE"}"""),
+        ).andExpect(status().isCreated)
+        jdbc.update(
+            """
+            UPDATE table_session
+            SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, close_reason = 'SETTLED', join_code = NULL
+            WHERE id = ?
+            """.trimIndent(),
+            UUID.fromString(fixture.sessionId),
+        )
+
+        mockMvc.perform(
+            post("/sessions/current/payments")
+                .header("Authorization", "Bearer ${fixture.token}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":0,"tipMinor":10,"method":"SIMULATED_ONLINE"}"""),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("SESSION_CLOSED"))
+
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM payment WHERE session_id = ? AND tip_minor > 0",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+    }
+
+    @Test
+    fun `staff session detail returns the same locked bill and enforces permission and tenant`() {
+        val fixture = createBillableSession()
+        mockMvc.perform(get("/staff/sessions/${fixture.sessionId}"))
+            .andExpect(status().isUnauthorized)
+
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val detail = mockMvc.perform(
+            get("/staff/sessions/${fixture.sessionId}")
+                .header("Authorization", "Bearer $staffToken"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.session.id").value(fixture.sessionId))
+            .andExpect(jsonPath("$.session.status").value("OPEN"))
+            .andExpect(jsonPath("$.session.readOnly").value(false))
+            .andExpect(jsonPath("$.participants.length()").value(1))
+            .andExpect(jsonPath("$.participants[0].role").value("HOST"))
+            .andExpect(jsonPath("$.orders.length()").value(1))
+            .andExpect(jsonPath("$.orders[0].items.length()").value(1))
+            .andExpect(jsonPath("$.bill.chargesMinor").value(500))
+            .andExpect(jsonPath("$.bill.balanceMinor").value(500))
+            .andReturn().response.contentAsString
+        assertEquals(1, JsonPath.read<List<*>>(detail, "$.bill.lines").size)
+
+        jdbc.update("UPDATE user_role SET role_code = 'KITCHEN' WHERE user_id = ?", USER_ID)
+        mockMvc.perform(
+            get("/staff/sessions/${fixture.sessionId}")
+                .header("Authorization", "Bearer $staffToken"),
+        ).andExpect(status().isForbidden)
+        jdbc.update("UPDATE user_role SET role_code = 'WAITER' WHERE user_id = ?", USER_ID)
+
+        jdbc.update(
+            """
+            INSERT INTO restaurant (id, name, timezone, currency)
+            VALUES (?, 'Foreign tenant', 'Europe/Zurich', 'CHF')
+            ON CONFLICT (id) DO NOTHING
+            """.trimIndent(),
+            OTHER_RESTAURANT_ID,
+        )
+        jdbc.update(
+            "INSERT INTO restaurant_settings (restaurant_id) VALUES (?) ON CONFLICT (restaurant_id) DO NOTHING",
+            OTHER_RESTAURANT_ID,
+        )
+        val foreign = createGuestSession(OTHER_RESTAURANT_ID)
+        mockMvc.perform(
+            get("/staff/sessions/${foreign.sessionId}")
+                .header("Authorization", "Bearer $staffToken"),
+        ).andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+
+        mockMvc.perform(
+            get("/staff/sessions/${UUID.randomUUID()}")
+                .header("Authorization", "Bearer $staffToken"),
+        ).andExpect(status().isNotFound)
+    }
+
+    @Test
+    fun `waiter calls persist idempotently and enforce active reason cooldown and expiry`() {
+        val fixture = createGuestSession()
+        val key = UUID.randomUUID().toString()
+        val created = mockMvc.perform(
+        post("/sessions/current/waiter-calls")
+            .header("Authorization", "Bearer ${fixture.token}")
+            .header("Idempotency-Key", key)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"reason":"BILL","text":"La cuenta, por favor"}"""),
+        ).andExpect(status().isCreated)
+        .andExpect(jsonPath("$.reason").value("BILL"))
+        .andExpect(jsonPath("$.status").value("OPEN"))
+        .andReturn().response.contentAsString
+        val callId = json(created, "$.id")
+
+        mockMvc.perform(
+        post("/sessions/current/waiter-calls")
+            .header("Authorization", "Bearer ${fixture.token}")
+            .header("Idempotency-Key", key)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"reason":"BILL","text":"La cuenta, por favor"}"""),
+        ).andExpect(status().isCreated)
+        .andExpect(header().string("Idempotent-Replayed", "true"))
+        .andExpect(jsonPath("$.id").value(callId))
+        assertEquals(
+        1,
+        jdbc.queryForObject("SELECT count(*) FROM waiter_call WHERE id = ?", Int::class.java, UUID.fromString(callId)),
+        )
+
+        mockMvc.perform(
+        post("/sessions/current/waiter-calls")
+            .header("Authorization", "Bearer ${fixture.token}")
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"reason":"BILL"}"""),
+        ).andExpect(status().isConflict)
+        .andExpect(jsonPath("$.code").value("WAITER_CALL_ALREADY_ACTIVE"))
+
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val staffList = mockMvc.perform(
+        get("/staff/waiter-calls")
+            .header("Authorization", "Bearer $staffToken"),
+        ).andExpect(status().isOk)
+        .andReturn().response.contentAsString
+        val staffCalls = JsonPath.read<List<Map<String, Any>>>(staffList, "$.items")
+        assertTrue(staffCalls.any { it["id"] == callId && it["tableLabel"] != null })
+
+        mockMvc.perform(
+        post("/staff/waiter-calls/$callId/acknowledge")
+            .header("Authorization", "Bearer $staffToken"),
+        ).andExpect(status().isOk)
+        .andExpect(jsonPath("$.status").value("ACKNOWLEDGED"))
+        .andExpect(jsonPath("$.acknowledgedAt").isNotEmpty)
+        mockMvc.perform(
+        post("/staff/waiter-calls/$callId/resolve")
+            .header("Authorization", "Bearer $staffToken"),
+        ).andExpect(status().isOk)
+        .andExpect(jsonPath("$.status").value("RESOLVED"))
+        .andExpect(jsonPath("$.resolvedAt").isNotEmpty)
+        mockMvc.perform(
+        post("/staff/waiter-calls/$callId/resolve")
+            .header("Authorization", "Bearer $staffToken"),
+        ).andExpect(status().isConflict)
+        .andExpect(jsonPath("$.code").value("STATE_CONFLICT"))
+        mockMvc.perform(
+        post("/sessions/current/waiter-calls")
+            .header("Authorization", "Bearer ${fixture.token}")
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"reason":"BILL"}"""),
+        ).andExpect(status().isTooManyRequests)
+        .andExpect(header().exists("Retry-After"))
+        .andExpect(jsonPath("$.code").value("WAITER_CALL_COOLDOWN"))
+        .andExpect(jsonPath("$.extra.retryAfterSec").isNumber)
+
+        val expired = mockMvc.perform(
+        post("/sessions/current/waiter-calls")
+            .header("Authorization", "Bearer ${fixture.token}")
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"reason":"WATER"}"""),
+        ).andExpect(status().isCreated)
+        .andReturn().response.contentAsString
+        val expiredId = UUID.fromString(json(expired, "$.id"))
+        jdbc.update(
+        "UPDATE waiter_call SET expires_at = CURRENT_TIMESTAMP - INTERVAL '31 minutes' WHERE id = ?",
+        expiredId,
+        )
+        val guestCalls = mockMvc.perform(
+        get("/sessions/current/waiter-calls")
+            .header("Authorization", "Bearer ${fixture.token}"),
+        ).andExpect(status().isOk)
+        .andReturn().response.contentAsString
+        val guestCallRows = JsonPath.read<List<Map<String, Any>>>(guestCalls, "$.items")
+        assertTrue(guestCallRows.any { it["id"] == expiredId.toString() && it["status"] == "EXPIRED" })
+        assertEquals(
+        "EXPIRED",
+        jdbc.queryForObject("SELECT status FROM waiter_call WHERE id = ?", String::class.java, expiredId),
+        )
+    }
+
+    @Test
+    fun `waiter call endpoints enforce guest validity staff permission and tenant`() {
+        val fixture = createGuestSession()
+        mockMvc.perform(
+        post("/sessions/current/waiter-calls")
+            .header("Authorization", "Bearer ${fixture.token}")
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"reason":"UNKNOWN"}"""),
+        ).andExpect(status().isBadRequest)
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+        mockMvc.perform(
+        post("/sessions/current/waiter-calls")
+            .header("Authorization", "Bearer ${fixture.token}")
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"reason":"HELP","text":"${"x".repeat(81)}"}"""),
+        ).andExpect(status().isBadRequest)
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+
+        val call = mockMvc.perform(
+        post("/sessions/current/waiter-calls")
+            .header("Authorization", "Bearer ${fixture.token}")
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"reason":"HELP"}"""),
+        ).andExpect(status().isCreated)
+        .andReturn().response.contentAsString
+        val callId = json(call, "$.id")
+
+        mockMvc.perform(
+        get("/staff/waiter-calls"),
+        ).andExpect(status().isUnauthorized)
+        mockMvc.perform(
+        post("/staff/waiter-calls/$callId/acknowledge"),
+        ).andExpect(status().isUnauthorized)
+        jdbc.update("UPDATE user_role SET role_code = 'KITCHEN' WHERE user_id = ?", USER_ID)
+        val kitchenToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        mockMvc.perform(
+        get("/staff/waiter-calls").header("Authorization", "Bearer $kitchenToken"),
+        ).andExpect(status().isForbidden)
+        jdbc.update("UPDATE user_role SET role_code = 'WAITER' WHERE user_id = ?", USER_ID)
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+
+        jdbc.update(
+        """
+        INSERT INTO restaurant (id, name, timezone, currency)
+        VALUES (?, 'Foreign tenant', 'Europe/Zurich', 'CHF')
+        ON CONFLICT (id) DO NOTHING
+        """.trimIndent(),
+        OTHER_RESTAURANT_ID,
+        )
+        jdbc.update(
+            "INSERT INTO restaurant_settings (restaurant_id) VALUES (?) ON CONFLICT (restaurant_id) DO NOTHING",
+            OTHER_RESTAURANT_ID,
+        )
+        val foreignFixture = createGuestSession(OTHER_RESTAURANT_ID)
+        val foreignCall = mockMvc.perform(
+        post("/sessions/current/waiter-calls")
+            .header("Authorization", "Bearer ${foreignFixture.token}")
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"reason":"HELP"}"""),
+        ).andExpect(status().isCreated)
+        .andReturn().response.contentAsString
+        val staffCalls = mockMvc.perform(
+        get("/staff/waiter-calls").header("Authorization", "Bearer $staffToken"),
+        ).andExpect(status().isOk)
+        .andReturn().response.contentAsString
+        assertFalse(
+        JsonPath.read<List<Map<String, Any>>>(staffCalls, "$.items")
+            .any { it["id"] == json(foreignCall, "$.id") },
+        )
+        mockMvc.perform(
+        post("/staff/waiter-calls/${json(foreignCall, "$.id")}/acknowledge")
+            .header("Authorization", "Bearer $staffToken"),
+        ).andExpect(status().isNotFound)
+        .andExpect(jsonPath("$.code").value("WAITER_CALL_NOT_FOUND"))
+        mockMvc.perform(
+        post("/staff/waiter-calls/${UUID.randomUUID()}/acknowledge")
+            .header("Authorization", "Bearer $staffToken"),
+        ).andExpect(status().isNotFound)
+        .andExpect(jsonPath("$.code").value("WAITER_CALL_NOT_FOUND"))
+
+        jdbc.update(
+        "UPDATE session_participant SET revoked_at = CURRENT_TIMESTAMP WHERE id = ?",
+        UUID.fromString(fixture.participantId),
+        )
+        mockMvc.perform(
+        post("/sessions/current/waiter-calls")
+            .header("Authorization", "Bearer ${fixture.token}")
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"reason":"WATER"}"""),
+        ).andExpect(status().isForbidden)
+        .andExpect(jsonPath("$.code").value("SESSION_ACCESS_REVOKED"))
+    }
+
+    @Test
+    fun `concurrent waiter calls for one reason persist only one active row`() {
+        val fixture = createGuestSession()
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+        val requests = (1..2).map {
+            Callable {
+                ready.countDown()
+                check(start.await(10, TimeUnit.SECONDS))
+                val response = mockMvc.perform(
+                    post("/sessions/current/waiter-calls")
+                        .header("Authorization", "Bearer ${fixture.token}")
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""{"reason":"WATER"}"""),
+                ).andReturn().response
+                response.status to response.contentAsString
+            }
+        }
+        val futures = requests.map(pool::submit)
+        assertTrue(ready.await(10, TimeUnit.SECONDS))
+        start.countDown()
+        val results = futures.map { it.get(30, TimeUnit.SECONDS) }
+        assertEquals(listOf(201, 409), results.map { it.first }.sorted())
+        assertTrue(results.any { (status, body) ->
+            status == 409 && json(body, "$.code") == "WAITER_CALL_ALREADY_ACTIVE"
+        })
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                """
+                SELECT count(*) FROM waiter_call
+                WHERE session_id = ? AND reason = 'WATER' AND status IN ('OPEN', 'ACKNOWLEDGED')
+                """.trimIndent(),
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        } finally {
+        pool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `staff table board derives order billing and waiter call status for its tenant`() {
+        val fixture = createGuestSession()
+        val sessionId = UUID.fromString(fixture.sessionId)
+        val tableId = jdbc.queryForObject(
+        "SELECT table_id FROM table_session WHERE id = ?",
+        UUID::class.java,
+        sessionId,
+        )!!
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        fun tableRow(): Map<String, Any> {
+        val response = mockMvc.perform(
+            get("/staff/tables").header("Authorization", "Bearer $staffToken"),
+        ).andExpect(status().isOk)
+            .andReturn().response.contentAsString
+        val rows = JsonPath.read<List<Map<String, Any>>>(response, "$.items")
+        return rows.single { it["tableId"] == tableId.toString() }
+        }
+
+        assertEquals("READY_TO_CLOSE", tableRow()["displayStatus"])
+        val call = mockMvc.perform(
+        post("/sessions/current/waiter-calls")
+            .header("Authorization", "Bearer ${fixture.token}")
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"reason":"BILL"}"""),
+        ).andExpect(status().isCreated)
+        .andReturn().response.contentAsString
+        assertEquals(true, tableRow()["waiterCallActive"])
+
+        val orderId = UUID.fromString(createOrder(fixture))
+        addOrderItem(orderId.toString(), fixture)
+        assertEquals("PENDING_ORDERS", tableRow()["displayStatus"])
+        jdbc.update("UPDATE customer_order SET status = 'ACCEPTED' WHERE id = ?", orderId)
+        jdbc.update("UPDATE order_item SET status = 'IN_PREPARATION' WHERE order_id = ?", orderId)
+        assertEquals("IN_SERVICE", tableRow()["displayStatus"])
+        jdbc.update("UPDATE order_item SET status = 'DELIVERED' WHERE order_id = ?", orderId)
+        assertEquals("AWAITING_PAYMENT", tableRow()["displayStatus"])
+
+        mockMvc.perform(
+        post("/sessions/current/payments")
+            .header("Authorization", "Bearer ${fixture.token}")
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"amountMinor":100,"method":"SIMULATED_ONLINE"}"""),
+        ).andExpect(status().isCreated)
+        val paid = tableRow()
+        assertEquals("READY_TO_CLOSE", paid["displayStatus"])
+        assertEquals(0, (paid["balanceMinor"] as Number).toLong())
+        assertEquals(sessionId.toString(), paid["sessionId"])
+
+        mockMvc.perform(get("/staff/tables"))
+        .andExpect(status().isUnauthorized)
+    }
+
+    @Test
+    fun `refund limit uses net principal and does not refund tips`() {
+        val fixture = createOverpaidSession(amountMinor = 200, tipMinor = 20)
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/refunds")
+                .header("Authorization", "Bearer $staffToken")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":201,"reason":"Overpayment correction"}"""),
+        ).andExpect(status().isConflict)
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+            .andExpect(jsonPath("$.code").value("REFUND_EXCEEDS_PAID"))
+            .andExpect(jsonPath("$.extra.maxRefundMinor").value(200))
+
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/refunds")
+                .header("Authorization", "Bearer $staffToken")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":200,"reason":"Overpayment correction"}"""),
+        ).andExpect(status().isCreated)
+            .andExpect(jsonPath("$.payment.kind").value("REFUND"))
+            .andExpect(jsonPath("$.payment.amountMinor").value(200))
+            .andExpect(jsonPath("$.payment.tipMinor").value(0))
+            .andExpect(jsonPath("$.bill.paidMinor").value(0))
+            .andExpect(jsonPath("$.bill.tipsMinor").value(20))
+            .andExpect(jsonPath("$.bill.balanceMinor").value(0))
+    }
+
+    @Test
+    fun `refund requires staff permission and cannot cross restaurant tenant`() {
+        val fixture = createOverpaidSession()
+        val body = """{"amountMinor":200,"reason":"Overpayment correction"}"""
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/refunds")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isUnauthorized)
+
+        jdbc.update("UPDATE user_role SET role_code = 'KITCHEN' WHERE user_id = ?", USER_ID)
+        val kitchenToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/refunds")
+                .header("Authorization", "Bearer $kitchenToken")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isForbidden)
+
+        jdbc.update("UPDATE user_role SET role_code = 'WAITER' WHERE user_id = ?", USER_ID)
+        jdbc.update(
+            """
+            INSERT INTO restaurant (id, name, timezone, currency)
+            VALUES (?, 'Foreign tenant', 'Europe/Zurich', 'CHF')
+            ON CONFLICT (id) DO NOTHING
+            """.trimIndent(),
+            OTHER_RESTAURANT_ID,
+        )
+        jdbc.update(
+            "INSERT INTO restaurant_settings (restaurant_id) VALUES (?) ON CONFLICT (restaurant_id) DO NOTHING",
+            OTHER_RESTAURANT_ID,
+        )
+        val foreignFixture = createGuestSession(OTHER_RESTAURANT_ID)
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        mockMvc.perform(
+            post("/staff/sessions/${foreignFixture.sessionId}/refunds")
+                .header("Authorization", "Bearer $staffToken")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM payment WHERE session_id = ? AND kind = 'REFUND'",
+                Int::class.java,
+                UUID.fromString(foreignFixture.sessionId),
+            ),
+        )
+    }
+
+    @Test
+    fun `refund retry with the same key returns one persisted movement`() {
+        val fixture = createOverpaidSession()
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val key = UUID.randomUUID().toString()
+        val body = """{"amountMinor":200,"reason":"Overpayment correction"}"""
+
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/refunds")
+                .header("Authorization", "Bearer $staffToken")
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isCreated)
+            .andExpect(jsonPath("$.payment.kind").value("REFUND"))
+
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/refunds")
+                .header("Authorization", "Bearer $staffToken")
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isCreated)
+            .andExpect(header().string("Idempotent-Replayed", "true"))
+
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM payment WHERE session_id = ? AND kind = 'REFUND'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                """
+                SELECT count(*) FROM audit_event
+                WHERE action = 'REFUND_CREATED'
+                  AND target_id = (SELECT id FROM payment WHERE session_id = ? AND kind = 'REFUND')
+                """.trimIndent(),
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+    }
+
+    @Test
+    fun `concurrent refunds with distinct keys serialize against net paid`() {
+        val fixture = createOverpaidSession()
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val attempts = (1..2).map {
+                executor.submit<Pair<Int, String>> {
+                    ready.countDown()
+                    check(start.await(5, TimeUnit.SECONDS))
+                    val response = mockMvc.perform(
+                        post("/staff/sessions/${fixture.sessionId}/refunds")
+                            .header("Authorization", "Bearer $staffToken")
+                            .header("Idempotency-Key", UUID.randomUUID().toString())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""{"amountMinor":200,"reason":"Overpayment correction"}"""),
+                    ).andReturn().response
+                    response.status to response.contentAsString
+                }
+            }
+            assertTrue(ready.await(5, TimeUnit.SECONDS))
+            start.countDown()
+            val responses = attempts.map { it.get(20, TimeUnit.SECONDS) }
+            assertEquals(listOf(201, 409), responses.map { it.first }.sorted())
+            val conflict = responses.single { it.first == 409 }.second
+            assertEquals("REFUND_EXCEEDS_PAID", JsonPath.read<String>(conflict, "$.code"))
+            assertEquals(0, JsonPath.read<Int>(conflict, "$.extra.maxRefundMinor"))
+        } finally {
+            executor.shutdownNow()
+        }
+        assertEquals(
+            200L,
+            jdbc.queryForObject(
+                "SELECT COALESCE(SUM(amount_minor), 0) FROM payment WHERE session_id = ? AND kind = 'REFUND'",
+                Long::class.javaObjectType,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM audit_event WHERE action = 'REFUND_CREATED' AND target_id IN (SELECT id FROM payment WHERE session_id = ? AND kind = 'REFUND')",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+    }
+
+    @Test
+    fun `void rejects a failed payment without changing its state`() {
+        val fixture = createBillableSession()
+        val failed = mockMvc.perform(
+            post("/sessions/current/payments")
+                .header("Authorization", "Bearer ${fixture.token}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":113,"method":"SIMULATED_ONLINE"}"""),
+        ).andExpect(status().isUnprocessableEntity)
+            .andReturn().response.contentAsString
+        val paymentId = json(failed, "$.paymentId")
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+
+        mockMvc.perform(
+            post("/staff/payments/$paymentId/void")
+                .header("Authorization", "Bearer $staffToken")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"reason":"Invalid payment"}"""),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("PAYMENT_NOT_VOIDABLE"))
+
+        assertEquals(
+            "FAILED",
+            jdbc.queryForObject(
+                "SELECT status FROM payment WHERE id = ?",
+                String::class.java,
+                UUID.fromString(paymentId),
+            ),
+        )
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM audit_event WHERE action = 'PAYMENT_VOIDED' AND target_id = ?",
+                Int::class.java,
+                UUID.fromString(paymentId),
+            ),
+        )
+    }
+
+    @Test
+    fun `successful payment void is idempotent and cannot be repeated with a new key`() {
+        val fixture = createBillableSession()
+        val created = mockMvc.perform(
+            post("/sessions/current/payments")
+                .header("Authorization", "Bearer ${fixture.token}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":200,"tipMinor":20,"method":"SIMULATED_ONLINE"}"""),
+        ).andExpect(status().isCreated)
+            .andReturn().response.contentAsString
+        assertEquals(20, JsonPath.read<Int>(created, "$.bill.tipsMinor"))
+        val paymentId = json(created, "$.payment.id")
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val voidKey = UUID.randomUUID().toString()
+        val body = """{"reason":"Duplicate collection"}"""
+
+        mockMvc.perform(
+            post("/staff/payments/$paymentId/void")
+                .header("Authorization", "Bearer $staffToken")
+                .header("Idempotency-Key", voidKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.payment.status").value("VOIDED"))
+            .andExpect(jsonPath("$.bill.paidMinor").value(0))
+            .andExpect(jsonPath("$.bill.tipsMinor").value(0))
+
+        mockMvc.perform(
+            post("/staff/payments/$paymentId/void")
+                .header("Authorization", "Bearer $staffToken")
+                .header("Idempotency-Key", voidKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isOk)
+            .andExpect(header().string("Idempotent-Replayed", "true"))
+
+        mockMvc.perform(
+            post("/staff/payments/$paymentId/void")
+                .header("Authorization", "Bearer $staffToken")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("PAYMENT_NOT_VOIDABLE"))
+
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM audit_event WHERE action = 'PAYMENT_VOIDED' AND target_id = ?",
+                Int::class.java,
+                UUID.fromString(paymentId),
+            ),
+        )
+    }
+
+    @Test
+    fun `adjustments enforce staff permission and tenant isolation`() {
+        val fixture = createBillableSession()
+        val body = """{"kind":"DISCOUNT_AMOUNT","amountMinor":100,"reasonCode":"PROMOTION"}"""
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/adjustments")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isUnauthorized)
+
+        jdbc.update("UPDATE user_role SET role_code = 'KITCHEN' WHERE user_id = ?", USER_ID)
+        val kitchenToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/adjustments")
+                .header("Authorization", "Bearer $kitchenToken")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isForbidden)
+
+        jdbc.update("UPDATE user_role SET role_code = 'WAITER' WHERE user_id = ?", USER_ID)
+        jdbc.update(
+            """
+            INSERT INTO restaurant (id, name, timezone, currency)
+            VALUES (?, 'Foreign tenant', 'Europe/Zurich', 'CHF')
+            ON CONFLICT (id) DO NOTHING
+            """.trimIndent(),
+            OTHER_RESTAURANT_ID,
+        )
+        jdbc.update(
+            "INSERT INTO restaurant_settings (restaurant_id) VALUES (?) ON CONFLICT (restaurant_id) DO NOTHING",
+            OTHER_RESTAURANT_ID,
+        )
+        val foreignFixture = createGuestSession(OTHER_RESTAURANT_ID)
+        val waiterToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        mockMvc.perform(
+            post("/staff/sessions/${foreignFixture.sessionId}/adjustments")
+                .header("Authorization", "Bearer $waiterToken")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM bill_adjustment WHERE session_id = ?",
+                Int::class.java,
+                UUID.fromString(foreignFixture.sessionId),
+            ),
+        )
+    }
+
+    @Test
+    fun `concurrent staff adjustments enforce the accumulated limit`() {
+        val fixture = createBillableSession(amountMinor = 1000)
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val attempts = (1..2).map {
+                executor.submit<Pair<Int, String>> {
+                    ready.countDown()
+                    check(start.await(5, TimeUnit.SECONDS))
+                    val response = mockMvc.perform(
+                        post("/staff/sessions/${fixture.sessionId}/adjustments")
+                            .header("Authorization", "Bearer $staffToken")
+                            .header("Idempotency-Key", UUID.randomUUID().toString())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""{"kind":"DISCOUNT_AMOUNT","amountMinor":100,"reasonCode":"PROMOTION"}"""),
+                    ).andReturn().response
+                    response.status to response.contentAsString
+                }
+            }
+            assertTrue(ready.await(5, TimeUnit.SECONDS))
+            start.countDown()
+            val responses = attempts.map { it.get(20, TimeUnit.SECONDS) }
+            assertEquals(listOf(201, 403), responses.map { it.first }.sorted())
+            val rejected = responses.single { it.first == 403 }.second
+            assertEquals("ADJUSTMENT_LIMIT_EXCEEDED", JsonPath.read<String>(rejected, "$.code"))
+        } finally {
+            executor.shutdownNow()
+        }
+
+        // El lock de sesión hace que el límite acumulado se recalcule tras la primera escritura.
+        assertEquals(
+            100L,
+            jdbc.queryForObject(
+                "SELECT COALESCE(SUM(amount_minor), 0) FROM bill_adjustment WHERE session_id = ? AND status = 'APPLIED'",
+                Long::class.javaObjectType,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM audit_event WHERE action = 'ADJUSTMENT_APPLIED' AND target_id IN (SELECT id FROM bill_adjustment WHERE session_id = ?)",
                 Int::class.java,
                 UUID.fromString(fixture.sessionId),
             ),
@@ -2124,6 +2977,33 @@ class IdentityIntegrationTest {
             token = json(result, "$.guestToken"),
             tableCode = tableCode,
         )
+    }
+
+    private fun createBillableSession(amountMinor: Long = 500): GuestFixture {
+        val fixture = createGuestSession()
+        val orderId = createOrder(fixture)
+        addOrderItem(orderId, fixture)
+        jdbc.update("UPDATE customer_order SET status = 'ACCEPTED' WHERE id = ?", UUID.fromString(orderId))
+        jdbc.update(
+            "UPDATE order_item SET line_total_minor = ?, unit_price_minor = ? WHERE order_id = ?",
+            amountMinor,
+            amountMinor,
+            UUID.fromString(orderId),
+        )
+        return fixture
+    }
+
+    private fun createOverpaidSession(amountMinor: Long = 200, tipMinor: Long = 0): GuestFixture {
+        val fixture = createBillableSession(amountMinor)
+        mockMvc.perform(
+            post("/sessions/current/payments")
+                .header("Authorization", "Bearer ${fixture.token}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":$amountMinor,"tipMinor":$tipMinor,"method":"SIMULATED_ONLINE"}"""),
+        ).andExpect(status().isCreated)
+        jdbc.update("UPDATE order_item SET status = 'CANCELLED' WHERE session_id = ?", UUID.fromString(fixture.sessionId))
+        return fixture
     }
 
     private fun createStaffTable(restaurantId: UUID, active: Boolean = true): UUID {

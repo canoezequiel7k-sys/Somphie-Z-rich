@@ -28,6 +28,8 @@ data class CourtesyOrderItem(
 interface OrderChargesPort {
     fun billableLines(sessionId: UUID, restaurantId: UUID): List<BillableOrderLine>
 
+    fun billableLinesBySession(sessionIds: List<UUID>, restaurantId: UUID): Map<UUID, List<BillableOrderLine>>
+
     fun pendingOrders(sessionId: UUID, restaurantId: UUID): List<PendingOrderSummary>
 
     fun courtesyItems(sessionId: UUID, restaurantId: UUID): List<CourtesyOrderItem>
