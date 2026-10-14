@@ -7,9 +7,33 @@ interface StaffSessionOrdersPort {
     fun ordersForSession(sessionId: UUID, restaurantId: UUID): List<StaffSessionOrder>
 
     fun activityBySession(sessionIds: List<UUID>, restaurantId: UUID): Map<UUID, StaffSessionOrderActivity>
+
+    fun closureActivity(sessionId: UUID, restaurantId: UUID): SessionClosureOrderActivity
+}
+
+interface ForcedSessionOrderCancellationPort {
+    fun cancelOpenWork(
+        sessionId: UUID,
+        restaurantId: UUID,
+        actorId: UUID,
+        reason: String,
+        now: Instant,
+    )
+}
+
+interface ForcedSessionRefundPort {
+    fun refundNegativeBalance(
+        sessionId: UUID,
+        restaurantId: UUID,
+        actorId: UUID,
+        reason: String,
+        idempotencyKey: String,
+    ): Long
 }
 
 data class StaffSessionOrderActivity(val pendingOrdersCount: Int, val hasItemsInService: Boolean)
+
+data class SessionClosureOrderActivity(val pendingOrderIds: List<UUID>, val activeItemIds: List<UUID>)
 
 data class StaffSessionOrder(
     val id: UUID,

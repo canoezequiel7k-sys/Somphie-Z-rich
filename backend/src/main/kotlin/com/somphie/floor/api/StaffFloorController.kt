@@ -2,6 +2,7 @@ package com.somphie.floor.api
 
 import com.somphie.audit.AuditService
 import com.somphie.floor.application.ParticipantRevocationService
+import com.somphie.floor.application.StaffSessionClosureService
 import com.somphie.floor.application.StaffSessionQueryService
 import com.somphie.floor.application.WaiterCallService
 import com.somphie.floor.domain.JoinCode
@@ -27,11 +28,14 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestHeader
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
+
+data class ForcedSessionCloseRequest(val reason: String)
 
 @RestController
 class StaffFloorController(
@@ -41,6 +45,7 @@ class StaffFloorController(
     private val auditService: AuditService,
     private val joinCodeGenerator: JoinCodeGenerator,
     private val participantRevocationService: ParticipantRevocationService,
+    private val sessionClosureService: StaffSessionClosureService,
     private val staffSessionQueryService: StaffSessionQueryService,
     private val waiterCallService: WaiterCallService,
     private val clock: Clock,
@@ -72,6 +77,44 @@ class StaffFloorController(
             parseUuid(sessionId, "sessionId"),
             profile.account.restaurantId,
         )
+    }
+
+    @PostMapping("/staff/sessions/{sessionId}/close")
+    fun closeSession(
+        @PathVariable sessionId: String,
+        @AuthenticationPrincipal jwt: Jwt,
+    ): Map<String, Any> {
+        val profile = authorize(jwt, "session.close")
+        return sessionClosureService.closeNormally(
+            parseUuid(sessionId, "sessionId"),
+            profile.account.restaurantId,
+            profile.account.id,
+        )
+    }
+
+    @PostMapping("/staff/sessions/{sessionId}/force-close")
+    @Transactional
+    fun forceCloseSession(
+        @PathVariable sessionId: String,
+        @RequestHeader(name = "Idempotency-Key", required = false) idempotencyKey: String?,
+        @RequestBody request: ForcedSessionCloseRequest,
+        @AuthenticationPrincipal jwt: Jwt,
+    ): ResponseEntity<Map<String, Any>> {
+        val profile = authorize(jwt, "session.force_close")
+        val sessionUuid = parseUuid(sessionId, "sessionId")
+        validateIdempotencyKey(idempotencyKey)
+        val scope = "staff-session-force-close:${profile.account.restaurantId}:${profile.account.id}:$sessionUuid"
+        return idempotencyService.executeIdempotent(scope, idempotencyKey, request.toString()) {
+            ResponseEntity.status(HttpStatus.OK).body(
+                sessionClosureService.forceClose(
+                    sessionUuid,
+                    profile.account.restaurantId,
+                    profile.account.id,
+                    requireNotNull(idempotencyKey),
+                    request.reason,
+                ),
+            )
+        }
     }
 
     @GetMapping("/staff/waiter-calls")

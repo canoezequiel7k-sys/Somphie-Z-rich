@@ -5,6 +5,7 @@ import com.somphie.floor.application.StaffSessionOrderActivity
 import com.somphie.floor.application.StaffSessionOrderItem
 import com.somphie.floor.application.StaffSessionOrderOption
 import com.somphie.floor.application.StaffSessionOrdersPort
+import com.somphie.floor.application.SessionClosureOrderActivity
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository
 import tools.jackson.core.type.TypeReference
@@ -16,6 +17,31 @@ class JdbcStaffSessionOrdersAdapter(
     private val jdbc: NamedParameterJdbcTemplate,
     private val objectMapper: ObjectMapper,
 ) : StaffSessionOrdersPort {
+    override fun closureActivity(sessionId: UUID, restaurantId: UUID): SessionClosureOrderActivity {
+        val parameters = mapOf("sessionId" to sessionId, "restaurantId" to restaurantId)
+        val pendingOrderIds = jdbc.query(
+            """
+            SELECT id FROM customer_order
+            WHERE session_id = :sessionId AND restaurant_id = :restaurantId AND status = 'PENDING_REVIEW'
+            ORDER BY id
+            """.trimIndent(),
+            parameters,
+        ) { rs, _ -> rs.getObject("id", UUID::class.java) }
+        val activeItemIds = jdbc.query(
+            """
+            SELECT oi.id
+            FROM order_item oi
+            JOIN customer_order o ON o.id = oi.order_id
+            WHERE o.session_id = :sessionId
+              AND o.restaurant_id = :restaurantId
+              AND oi.status IN ('QUEUED', 'IN_PREPARATION', 'READY')
+            ORDER BY oi.id
+            """.trimIndent(),
+            parameters,
+        ) { rs, _ -> rs.getObject("id", UUID::class.java) }
+        return SessionClosureOrderActivity(pendingOrderIds, activeItemIds)
+    }
+
     override fun activityBySession(
         sessionIds: List<UUID>,
         restaurantId: UUID,

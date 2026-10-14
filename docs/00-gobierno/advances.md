@@ -7,7 +7,7 @@
 Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 bloqueado
 
 ---
-## 1. Estado actual (snapshot actualizado el 2026-10-14)
+## 1. Estado actual (snapshot actualizado el 2026-10-13)
 
 ### 1.1 Qué existe
 | Pieza | Estado | Dónde |
@@ -33,13 +33,13 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Horario del restaurante | ✅ Recibido; zona horaria pendiente de confirmar antes de persistirlo | Apertura y cierre semanal |
 
 ### 1.2 Qué falta o requiere seguimiento
-- **Bloque WP-BE-70/73 y WP-BE-51 (2026-10-14):** suite completa con 357 tests, 0 fallos/errores/omitidos y 93,96 % de cobertura (4544/4836 líneas). WP-BE-70-T01/T02/T03 completadas localmente; WP-BE-51-T01 sigue parcial por Q-31 y la publicación de eventos pendiente en WP-BE-60. WP-BE-73-T01 conserva pendiente recibo/reportes.
+- **Bloque WP-BE-70/73 y WP-BE-51 (2026-10-13):** suite completa con 365 tests, 0 fallos/errores/omitidos y 94,29 % de cobertura (4826/5118 líneas). WP-BE-70-T01/T02/T03 completadas localmente; WP-BE-51-T01 sigue parcial por Q-31 y la publicación de eventos pendiente en WP-BE-60. WP-BE-73-T01 conserva pendiente recibo/reportes.
 - WP-BE-51 🔄: T02 completada; T01 parcial local: detalle y tablero staff implementados; `waiterCallActive` deriva de llamados persistidos, pero el estado para saldo negativo requiere resolver Q-31 y los eventos durables dependen de WP-BE-60/WP-ARQ-60.
 - WP-BE-70-T01 ✅ local: `GET /sessions/current/bill` y `SessionBillPort` derivan el mismo resumen completo. `BillableChargesPort` sigue exponiendo solo cargos; no hay saldo duplicado.
 - WP-BE-70-T03 ✅ local: reembolso y anulación validados en PostgreSQL; estados fallidos/anulados no son anulables, replay no duplica movimientos/auditoría y reembolsos concurrentes no exceden principal neto.
 - WP-BE-70-T02 ✅ local (2026-10-13): pagos online simulados y efectivo, idempotencia, declinación y propina sola; ADR-0010 enlaza fuentes aprobadas sin reglas nuevas. T03/reembolsos quedó validada localmente en el bloque PostgreSQL posterior.
 - WP-BE-73-T02 ✅ local: persistencia, aplicación/anulación idempotente y reversión de cortesía integradas; PostgreSQL confirma permiso de personal, aislamiento tenant y aplicación concurrente dentro del límite acumulado.
-- **Estado del bloque (2026-10-14):** persistencia y rutas contractuales de llamados, expiración, autorización tenant, integración del tablero y pruebas PostgreSQL implementadas. No se cambió OpenAPI. Recibo/reportes de propinas siguen condicionados por las definiciones de WP-BE-72/81.
+- **Estado del bloque (2026-10-13):** persistencia y rutas contractuales de llamados, expiración, autorización tenant, integración del tablero y pruebas PostgreSQL implementadas. No se cambió OpenAPI. Recibo/reportes de propinas siguen condicionados por las definiciones de WP-BE-72/81.
 - **Siguiente bloque habilitante:** resolver Q-31 con ARQ/dueño y ejecutar el spike WP-ARQ-60 para aceptar/reemplazar ADR-0006; en paralelo, elevar a ARQ/dueño la definición del renderer PDF y resolver Q-26 para reportes. No implementar SSE/outbox ni superficies de propinas sin esas definiciones.
 - WP-BE-40 ✅ (2026-10-13): job transaccional de expiración por TTL de restaurante, rate limit persistente por mesa/IP, error contractual y actividad registrada al unirse, crear pedido y ejecutar acciones de staff; ver sección 6 y ficha [`wp-be-40.md`](../08-agentes/backend-work/wp-be-40.md).
 - **Auditoría de WP-BE-50 (corte 2026-10-13):** Q-24 resuelta; T01–T05 completadas. `check jacocoTestReport` pasó con 315 tests, 0 fallos y 92,81 %; FIFO/SLA usa `acceptedAt`, timestamps históricos permanecen nullable y la paginación keyset es eventual. WP-BE-40 está validada; WP-BE-51-T02 se cerró luego con Q-29/Q-30, y su T01 avanzó ahora con el detalle staff. WP-BE-52 sigue bloqueada por Q-27.
@@ -699,7 +699,7 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Archivos:** `backend/src/test/kotlin/com/somphie/identity/api/IdentityIntegrationTest.kt`, `backend/src/main/kotlin/com/somphie/identity/infrastructure/IdentitySecurityConfiguration.kt`, fichas WP-BE-70/73 y WP-BE-51/52, índice del backend y esta bitácora. Contrato y migración no cambiaron.
 - **Qué estudiar:** cómo el `FOR UPDATE` de la fila de sesión serializa writers independientes y hace que cada operación recalcule el saldo neto y los límites acumulados con los datos confirmados.
 
-### 2026-10-14 — resumen financiero staff y aceptación de propinas
+### 2026-10-13 — resumen financiero staff y aceptación de propinas
 - **Qué:** `SessionBillPort` (publicado por floor e implementado por Billing) conecta `GET /staff/sessions/{sessionId}` con la cuenta completa en la misma transacción/lock. La integración devuelve sesión, participantes, pedidos e ítems y cubre permiso, tenant y recurso inexistente. PostgreSQL verifica topes configurables de propina online/efectivo, pago solo propina sin cargos o con sesión cerrada, fallo sin propina, saldo, replay, anulación y reembolso sin devolverla. No se implementó `GET /staff/tables`.
 - **Por qué:** la cuenta debe tener una sola fuente de verdad. El tablero contractual requiere `waiterCallActive`, pero no existe tabla ni flujo de llamados; no se respondió con un `false` fijo ni se inventó persistencia/semántica.
 - **Validación:** `.\backend\gradlew.bat -p backend test --tests 'com.somphie.identity.api.IdentityIntegrationTest' --no-daemon` pasó; `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó (353 tests, 0 fallos/errores/omitidos; 4178/4473 líneas = 93,40 %); Redocly 2.62.1 validó OpenAPI; Markdownlint 0.23.3 pasó en 5 documentos; `git diff --check` pasó.
@@ -707,7 +707,7 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Archivos:** puertos de floor para cuenta/pedidos, adaptador JDBC de orders, query staff, `StaffFloorController`, seguridad, pruebas PostgreSQL, arquitectura, fichas WP-BE-70/73 y WP-BE-51/52, índice y bitácora.
 - **Qué estudiar:** declarar el puerto en el módulo consumidor evita acoplar Floor a la implementación de Billing; el lock compartido permite recalcular sin duplicar estado.
 
-### 2026-10-14 — Q-31 + WP-BE-60 + dependencias de propinas — investigación cerrada
+### 2026-10-13 — Q-31 + WP-BE-60 + dependencias de propinas — investigación cerrada
 - **Qué:** contrato confirma saldo firmado negativo tras cancelar ítems pagados, pero no define su `displayStatus`; Q-31 sigue abierta. No existe decisión WP-ARQ-60 habilitante ni infraestructura `event_log`/publisher/SSE; `audit_event` solo cubre auditoría. La revisión de WP-BE-73-T01 confirma que recibo depende del renderer/decisión de WP-BE-72 y reportes siguen sin contrato por Q-26/WP-BE-81.
 - **Por qué:** implementar cualquiera de esas superficies requeriría escoger semántica de negocio o arquitectura que las fuentes dejan explícitamente abiertas.
 - **Archivos actualizados:** decisiones, ficha e índice WP-BE, modelo de datos, arquitectura backend/tiempo real y bitácora. Sin cambios de código, migraciones u OpenAPI.
@@ -715,13 +715,36 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Bloqueos y próximo paso:** ARQ/dueño debe responder Q-31; WP-ARQ-60 debe hacer el spike y aceptar/reemplazar ADR-0006; definir renderer PDF y resolver Q-26. Después de esas decisiones se puede implementar WP-BE-60 completa y avanzar el recibo/reportes sin inventar contrato.
 - **Qué estudiar:** `audit_event` documenta quién hizo qué; `event_log` guarda pistas reanudables para streams y es otro mecanismo, inexistente hasta aprobar WP-BE-60.
 
-### 2026-10-14 — WP-BE-51-T01 — avance local, parcial
+### 2026-10-13 — WP-BE-71 cierre normal — avance parcial validado
+- **Qué:** `POST /staff/sessions/{sessionId}/close` usa los puertos de Billing y Orders bajo lock de sesión; valida pedidos pendientes, ítems activos y saldo cero, cierra/audita una sola vez y conserva la respuesta idempotente para repeticiones concurrentes. Quedan pendientes `force-close` y el pedido en nombre del cliente.
+- **Por qué:** WP-BE-70 ya provee el resumen derivado y `TableSession` define el cierre normal; no depende de Q-31, Q-32, Q-33 ni Q-26.
+- **Archivos:** `StaffSessionClosureService`, `StaffSessionOrdersPort`, `JdbcStaffSessionOrdersAdapter`, `StaffFloorController`, `IdentitySecurityConfiguration`, pruebas PostgreSQL de `IdentityIntegrationTest`, índice, ficha WP-BE-70-73 y esta bitácora. Sin cambios de OpenAPI ni migraciones; se preservó `backend/AGENTS.md`.
+- **Validación:** prueba focalizada de `IdentityIntegrationTest` pasó (59 tests); `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó (361 tests, 0 fallos/errores/omitidos; 4659/4952 líneas = 94,08 %); Markdownlint pasó en 10 documentos (0 incidencias), `git diff --check` y diagnósticos Kotlin sin errores.
+- **Qué estudiar:** el lock de sesión serializa el cierre con mutaciones; Billing mantiene la cuenta como única fuente de saldo.
+
+### 2026-10-13 — propuestas WP-ARQ-60, Q-31 y reporting/PDF — propuesta lista para revisión
+- **Qué:** ADR-0006 compara PostgreSQL durable/SSE, `AFTER_COMMIT` en memoria, `LISTEN/NOTIFY` y broker; recomienda log PostgreSQL transaccional más aviso opcional. Q-31 expone A (conservar `OCCUPIED` y saldo firmado) y B (nuevo estado solo con justificación), con impacto y recomendación condicionada. Q-32 separa contenido de recibo ya fijado de las decisiones de renderer/ciclo de vida; Q-26 concreta las definiciones faltantes de reportes. Q-33 pide aprobación del spike.
+- **Por qué:** el código está bloqueado por aprobación arquitectónica/contractual; quedan documentadas opciones, recomendación y efectos trazables para ARQ/dueño, sin convertir propuestas en reglas.
+- **Archivos:** ADR-0006, decisiones Q-26/Q-31/Q-32/Q-33, índice y fichas WP-BE-60/70-73/80-82, modelo de datos, arquitectura backend/tiempo real y esta bitácora. Sin código, migraciones u OpenAPI; `backend/AGENTS.md` preexistente preservado.
+- **Validación de esta tanda:** `npx --yes markdownlint-cli2@0.23.3` sobre los 10 documentos modificados → 0 incidencias; `git diff --check` → correcto. No se ejecutaron pruebas backend ni Redocly porque no hubo cambios de código ni contrato.
+- **Pendiente:** Q-31, Q-32, Q-33 y Q-26 siguen abiertas; WP-BE-60, el displayStatus de WP-BE-51-T01, renderer/PDF y reportes no se implementan hasta resolver sus preguntas. No se cierra WP-BE-73-T01.
+- **Qué estudiar:** el log durable con cursor debe ser la fuente para replay; una notificación `AFTER_COMMIT` en memoria no recupera publicaciones perdidas tras un reinicio.
+
+### 2026-10-13 — WP-BE-51-T01 — avance local, parcial
 - **Qué:** V14 y los casos de uso/API persisten, listan, toman, resuelven y expiran llamados; el tablero staff integra el estado persistido, pedidos agregados y cuenta derivada de Billing. Pruebas PostgreSQL cubren replay, duplicados, cooldown, expiración, validación, permisos, tenant, concurrencia y tablero.
 - **Por qué:** RN-WCL/OpenAPI definen el ciclo y sus límites. Lock de sesión + índice único parcial evitan dos llamados activos del mismo motivo; la cuenta no se duplica.
 - **Validación:** `.\backend\gradlew.bat -p backend test --tests '*waiter calls*' --tests '*waiter call endpoints*' --tests '*concurrent waiter calls*' --tests '*staff table board*' --no-daemon` pasó; `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó: 357 tests, 0 fallos/errores/omitidos, 93,96 % (4544/4836 líneas).
 - **Pendiente/bloqueo:** Q-31 aún requiere definir el `displayStatus` contractual ante saldo negativo; publicación durable `waiter.called`/`waiter.updated` depende de WP-BE-60. No se cerró T01. WP-BE-73-T01 sigue parcial por recibo PDF y reportes sin decisión/contrato suficiente.
 - **Archivos de esta tanda:** V14; servicio/controladores/job y puertos/adaptadores de Floor, Billing y Orders; configuración de seguridad/errores; pruebas PostgreSQL; arquitectura, modelo de datos, fichas WP-BE-51/52, WP-BE-60 y WP-BE-70/73, índice y esta bitácora.
 - **Qué estudiar:** la FK compuesta impide asociar un participante a otra sesión; el tablero consulta Billing/Orders en lote; el outbox/SSE y las dos definiciones de propinas siguen fuera del alcance habilitado.
+
+### 2026-10-13 — WP-BE-71-T01 — cierre forzado validado; pedido staff bloqueado
+- **Qué:** `force-close` cancela pedidos `PENDING_REVIEW` e ítems activos bajo el lock de sesión, revierte cortesías, deja que Billing derive el saldo y registra reembolso simulado solo por el exceso de principal, sin devolver propinas. Actualiza sesión y auditorías dentro de la transacción, con permiso e idempotencia.
+- **Por qué:** RN-SES-06/D-159 y OpenAPI definen el resultado; reusar Order/Preparation evita duplicar transiciones y Billing sigue como fuente única del saldo.
+- **Validación:** integración PostgreSQL enfocada: 63 tests, 0 fallos/errores/omitidos. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`: 365 tests, 0 fallos/errores/omitidos; 94,29 % (4826/5118 líneas). Rollback validado al fallar la persistencia del reembolso, con reintento exitoso.
+- **Bloqueo:** pedido en nombre del cliente requiere resolver Q-34: atribución cuando existe HOST y cuando la sesión manual no tiene participante. No se implementó `/orders` ni se cambió OpenAPI.
+- **Archivos:** `StaffSessionClosureService.kt`, `StaffSessionOrdersPort.kt`, `StaffFloorController.kt`, `JdbcForcedSessionOrderCancellationAdapter.kt`, `BillingService.kt`, `IdentitySecurityConfiguration.kt`, `IdentityIntegrationTest.kt`, ficha WP-BE-70-73, índice, decisiones y esta bitácora.
+- **Qué estudiar:** el lock de sesión serializa pedidos, pagos y cierre; la clave externa de cierre produce una clave interna estable del movimiento, mientras la idempotencia HTTP guarda la respuesta completa.
 
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)

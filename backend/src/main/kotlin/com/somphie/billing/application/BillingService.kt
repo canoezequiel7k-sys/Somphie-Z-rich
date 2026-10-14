@@ -14,6 +14,7 @@ import com.somphie.billing.domain.PaymentRules
 import com.somphie.billing.domain.PaymentStatus
 import com.somphie.billing.domain.VoidRules
 import com.somphie.billing.domain.RefundRules
+import com.somphie.floor.application.ForcedSessionRefundPort
 import com.somphie.identity.domain.StaffProfile
 import com.somphie.orders.application.OrderChargesPort
 import com.somphie.preparation.application.CourtesyCancellationPort
@@ -53,7 +54,49 @@ class BillingService(
     private val paymentProvider: SimulatedPaymentProvider,
     private val audit: AuditService,
     private val clock: Clock,
-) : CourtesyCancellationPort {
+) : CourtesyCancellationPort, ForcedSessionRefundPort {
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    override fun refundNegativeBalance(
+        sessionId: UUID,
+        restaurantId: UUID,
+        actorId: UUID,
+        reason: String,
+        idempotencyKey: String,
+    ): Long {
+        lockOpenSession(sessionId, restaurantId)
+        val bill = billQuery.billForSession(sessionId, restaurantId)
+        val balanceMinor = (bill.getValue("balanceMinor") as Number).toLong()
+        if (balanceMinor >= 0) return balanceMinor
+
+        val amountMinor = Math.negateExact(balanceMinor)
+        val netPaid = Money.of((bill.getValue("paidMinor") as Number).toLong())
+        val paymentKey = UUID.nameUUIDFromBytes(
+            "forced-session-close:$sessionId:$idempotencyKey".toByteArray(Charsets.UTF_8),
+        ).toString()
+        requireMovementKeyAvailable(sessionId, paymentKey)
+        val payment = Payment.refund(
+            id = UUID.randomUUID(),
+            sessionId = sessionId,
+            method = PaymentMethod.SIMULATED_ONLINE,
+            amount = Money.of(amountMinor),
+            netPaid = netPaid,
+            reason = reason,
+            idempotencyKey = paymentKey,
+        )
+        insertPayment(payment, restaurantId)
+        audit.record(
+            restaurantId.toString(),
+            "USER",
+            actorId.toString(),
+            "REFUND_CREATED",
+            "PAYMENT",
+            payment.id.toString(),
+            reason = reason,
+            afterSummary = """{"amountMinor":${payment.amount.minor},"source":"FORCED_SESSION_CLOSE","label":"automático por cierre forzado"}""",
+        )
+        return (billQuery.billForSession(sessionId, restaurantId).getValue("balanceMinor") as Number).toLong()
+    }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     fun createGuestPayment(authorization: String?, idempotencyKey: String, command: CreatePaymentCommand): BillingResult {

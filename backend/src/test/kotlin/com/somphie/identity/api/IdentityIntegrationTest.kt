@@ -92,6 +92,475 @@ class IdentityIntegrationTest {
     }
 
     @Test
+    fun `staff closes an empty session once and retries return the closed session`() {
+        val fixture = createGuestSession()
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val route = "/staff/sessions/${fixture.sessionId}/close"
+
+        repeat(2) {
+            mockMvc.perform(post(route).header("Authorization", "Bearer $token"))
+                .andExpect(status().isOk)
+                .andExpect(jsonPath("$.status").value("CLOSED"))
+                .andExpect(jsonPath("$.closeReason").value("EMPTY"))
+                .andExpect(jsonPath("$.readOnly").value(true))
+        }
+
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM audit_event WHERE action = 'SESSION_CLOSED' AND target_id = ?",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM table_session WHERE id = ? AND status = 'CLOSED' AND join_code IS NULL",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+
+        val settled = createBillableSession()
+        jdbc.update("UPDATE order_item SET status = 'DELIVERED' WHERE session_id = ?", UUID.fromString(settled.sessionId))
+        mockMvc.perform(
+            post("/staff/sessions/${settled.sessionId}/payments")
+                .header("Authorization", "Bearer $token")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":500,"tipMinor":0}"""),
+        ).andExpect(status().isCreated)
+        mockMvc.perform(
+            post("/staff/sessions/${settled.sessionId}/close").header("Authorization", "Bearer $token"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.closeReason").value("SETTLED"))
+    }
+
+    @Test
+    fun `normal close rejects pending orders active items and nonzero balance without mutation`() {
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+
+        val pending = createGuestSession()
+        val pendingOrder = createOrder(pending)
+        mockMvc.perform(
+            post("/staff/sessions/${pending.sessionId}/close").header("Authorization", "Bearer $token"),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("SESSION_HAS_PENDING_ORDERS"))
+            .andExpect(jsonPath("$.extra.orderIds[0]").value(pendingOrder))
+        assertSessionRemainsOpen(pending.sessionId)
+
+        val active = createGuestSession()
+        val activeOrder = createOrder(active)
+        addOrderItem(activeOrder, active)
+        jdbc.update("UPDATE customer_order SET status = 'ACCEPTED' WHERE id = ?", UUID.fromString(activeOrder))
+        jdbc.update("UPDATE order_item SET status = 'QUEUED' WHERE order_id = ?", UUID.fromString(activeOrder))
+        val activeItemId = jdbc.queryForObject(
+            "SELECT id FROM order_item WHERE order_id = ?",
+            UUID::class.java,
+            UUID.fromString(activeOrder),
+        )
+        mockMvc.perform(
+            post("/staff/sessions/${active.sessionId}/close").header("Authorization", "Bearer $token"),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("SESSION_HAS_ACTIVE_ITEMS"))
+            .andExpect(jsonPath("$.extra.itemIds[0]").value(activeItemId.toString()))
+        assertSessionRemainsOpen(active.sessionId)
+
+        val unpaid = createBillableSession()
+        jdbc.update("UPDATE order_item SET status = 'DELIVERED' WHERE session_id = ?", UUID.fromString(unpaid.sessionId))
+        mockMvc.perform(
+            post("/staff/sessions/${unpaid.sessionId}/close").header("Authorization", "Bearer $token"),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("SESSION_BALANCE_PENDING"))
+            .andExpect(jsonPath("$.extra.balanceMinor").value(500))
+        assertSessionRemainsOpen(unpaid.sessionId)
+    }
+
+    @Test
+    fun `normal close enforces permission and tenant isolation`() {
+        val fixture = createGuestSession()
+        jdbc.update(
+            """
+            INSERT INTO restaurant (id, name, timezone, currency)
+            VALUES (?, 'Foreign tenant', 'Europe/Zurich', 'CHF')
+            ON CONFLICT (id) DO NOTHING
+            """.trimIndent(),
+            OTHER_RESTAURANT_ID,
+        )
+        jdbc.update(
+            "INSERT INTO restaurant_settings (restaurant_id) VALUES (?) ON CONFLICT (restaurant_id) DO NOTHING",
+            OTHER_RESTAURANT_ID,
+        )
+        val foreign = createGuestSession(OTHER_RESTAURANT_ID)
+        var token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+
+        mockMvc.perform(
+            post("/staff/sessions/${foreign.sessionId}/close").header("Authorization", "Bearer $token"),
+        ).andExpect(status().isNotFound)
+        assertSessionRemainsOpen(foreign.sessionId)
+
+        jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
+        jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'KITCHEN')", USER_ID)
+        token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/close").header("Authorization", "Bearer $token"),
+        ).andExpect(status().isForbidden)
+        assertSessionRemainsOpen(fixture.sessionId)
+    }
+
+    @Test
+    fun `concurrent normal closes serialize and audit once`() {
+        val fixture = createGuestSession()
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val calls = (1..2).map {
+                executor.submit(Callable<Int> {
+                    ready.countDown()
+                    start.await(5, TimeUnit.SECONDS)
+                    mockMvc.perform(
+                        post("/staff/sessions/${fixture.sessionId}/close")
+                            .header("Authorization", "Bearer $token"),
+                    ).andReturn().response.status
+                })
+            }
+            assertTrue(ready.await(5, TimeUnit.SECONDS))
+            start.countDown()
+            assertEquals(listOf(200, 200), calls.map { it.get(10, TimeUnit.SECONDS) }.sorted())
+        } finally {
+            executor.shutdownNow()
+        }
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM audit_event WHERE action = 'SESSION_CLOSED' AND target_id = ?",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+    }
+
+    @Test
+    fun `forced close cancels pending and active work refunds principal and replays`() {
+        val fixture = createBillableSession()
+        val activeOrderId = jdbc.queryForObject(
+            "SELECT id FROM customer_order WHERE session_id = ?",
+            UUID::class.java,
+            UUID.fromString(fixture.sessionId),
+        )!!
+        jdbc.update(
+            "UPDATE customer_order SET status = 'IN_PREPARATION' WHERE id = ?",
+            activeOrderId,
+        )
+        jdbc.update(
+            "UPDATE order_item SET status = 'IN_PREPARATION', started_at = CURRENT_TIMESTAMP WHERE order_id = ?",
+            activeOrderId,
+        )
+        val pendingOrderId = UUID.fromString(createOrder(fixture))
+        mockMvc.perform(
+            post("/sessions/current/payments")
+                .header("Authorization", "Bearer ${fixture.token}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":500,"tipMinor":50,"method":"SIMULATED_ONLINE"}"""),
+        ).andExpect(status().isCreated)
+
+        jdbc.update("UPDATE user_role SET role_code = 'OWNER' WHERE user_id = ?", USER_ID)
+        val ownerToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val key = UUID.randomUUID().toString()
+        val route = "/staff/sessions/${fixture.sessionId}/force-close"
+        val body = """{"reason":"Customer left before service"}"""
+        mockMvc.perform(
+            post(route)
+                .header("Authorization", "Bearer $ownerToken")
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.closeReason").value("FORCED"))
+            .andExpect(jsonPath("$.readOnly").value(true))
+
+        mockMvc.perform(
+            post(route)
+                .header("Authorization", "Bearer $ownerToken")
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isOk)
+            .andExpect(header().string("Idempotent-Replayed", "true"))
+
+        assertEquals(
+            "CANCELLED",
+            jdbc.queryForObject("SELECT status FROM customer_order WHERE id = ?", String::class.java, pendingOrderId),
+        )
+        assertEquals(
+            "CANCELLED",
+            jdbc.queryForObject("SELECT status FROM order_item WHERE order_id = ?", String::class.java, activeOrderId),
+        )
+        assertEquals(
+            500L,
+            jdbc.queryForObject(
+                "SELECT SUM(amount_minor) FROM payment WHERE session_id = ? AND kind = 'REFUND'",
+                Long::class.javaObjectType,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        assertEquals(
+            50L,
+            jdbc.queryForObject(
+                "SELECT SUM(tip_minor) FROM payment WHERE session_id = ? AND kind = 'PAYMENT' AND status = 'SUCCEEDED'",
+                Long::class.javaObjectType,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM audit_event WHERE action = 'SESSION_FORCE_CLOSED' AND target_id = ?",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM audit_event WHERE action = 'REFUND_CREATED' AND after_summary ->> 'source' = 'FORCED_SESSION_CLOSE' AND target_id IN (SELECT id FROM payment WHERE session_id = ? AND kind = 'REFUND')",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+    }
+
+    @Test
+    fun `forced close rolls back cancellations and retries after refund persistence failure`() {
+        val fixture = createBillableSession()
+        val orderId = jdbc.queryForObject(
+            "SELECT id FROM customer_order WHERE session_id = ?",
+            UUID::class.java,
+            UUID.fromString(fixture.sessionId),
+        )!!
+        jdbc.update("UPDATE customer_order SET status = 'IN_PREPARATION' WHERE id = ?", orderId)
+        jdbc.update(
+            "UPDATE order_item SET status = 'IN_PREPARATION', started_at = CURRENT_TIMESTAMP WHERE order_id = ?",
+            orderId,
+        )
+        mockMvc.perform(
+            post("/sessions/current/payments")
+                .header("Authorization", "Bearer ${fixture.token}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":500,"tipMinor":0,"method":"SIMULATED_ONLINE"}"""),
+        ).andExpect(status().isCreated)
+
+        jdbc.update("UPDATE user_role SET role_code = 'OWNER' WHERE user_id = ?", USER_ID)
+        val ownerToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val key = UUID.randomUUID().toString()
+        jdbc.execute(
+            """
+            CREATE FUNCTION test_reject_force_close_refund() RETURNS trigger AS ${'$'}${'$'}
+            BEGIN
+                IF NEW.kind = 'REFUND' THEN RAISE EXCEPTION 'test refund failure'; END IF;
+                RETURN NEW;
+            END;
+            ${'$'}${'$'} LANGUAGE plpgsql
+            """.trimIndent(),
+        )
+        jdbc.execute(
+            "CREATE TRIGGER test_reject_force_close_refund BEFORE INSERT ON payment FOR EACH ROW EXECUTE FUNCTION test_reject_force_close_refund()",
+        )
+        try {
+            mockMvc.perform(
+                post("/staff/sessions/${fixture.sessionId}/force-close")
+                    .header("Authorization", "Bearer $ownerToken")
+                    .header("Idempotency-Key", key)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"reason":"Refund unavailable"}"""),
+            ).andExpect(status().isInternalServerError)
+        } finally {
+            jdbc.execute("DROP TRIGGER test_reject_force_close_refund ON payment")
+            jdbc.execute("DROP FUNCTION test_reject_force_close_refund()")
+        }
+
+        assertSessionRemainsOpen(fixture.sessionId)
+        assertEquals("IN_PREPARATION", jdbc.queryForObject(
+            "SELECT status FROM customer_order WHERE id = ?", String::class.java, orderId,
+        ))
+        assertEquals("IN_PREPARATION", jdbc.queryForObject(
+            "SELECT status FROM order_item WHERE order_id = ?", String::class.java, orderId,
+        ))
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM payment WHERE session_id = ? AND kind = 'REFUND'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/force-close")
+                .header("Authorization", "Bearer $ownerToken")
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"reason":"Refund unavailable"}"""),
+        ).andExpect(status().isOk)
+    }
+
+    @Test
+    fun `forced close records remaining debt without creating a refund`() {
+        val fixture = createBillableSession()
+        val orderId = jdbc.queryForObject(
+            "SELECT id FROM customer_order WHERE session_id = ?",
+            UUID::class.java,
+            UUID.fromString(fixture.sessionId),
+        )!!
+        jdbc.update("UPDATE customer_order SET status = 'DELIVERED' WHERE id = ?", orderId)
+        jdbc.update(
+            "UPDATE order_item SET status = 'DELIVERED', delivered_at = CURRENT_TIMESTAMP WHERE order_id = ?",
+            orderId,
+        )
+        jdbc.update("UPDATE user_role SET role_code = 'OWNER' WHERE user_id = ?", USER_ID)
+        val ownerToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+
+        mockMvc.perform(
+            post("/staff/sessions/${fixture.sessionId}/force-close")
+                .header("Authorization", "Bearer $ownerToken")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"reason":"Customer leaves unpaid"}"""),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.closeReason").value("FORCED"))
+
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM payment WHERE session_id = ? AND kind = 'REFUND'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        assertEquals(
+            500L,
+            jdbc.queryForObject(
+                "SELECT (after_summary ->> 'uncollectedBalanceMinor')::BIGINT FROM audit_event WHERE action = 'SESSION_FORCE_CLOSED' AND target_id = ?",
+                Long::class.javaObjectType,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+    }
+
+    @Test
+    fun `forced close enforces permission tenant and serializes concurrent keys`() {
+        val fixture = createBillableSession()
+        val orderId = jdbc.queryForObject(
+            "SELECT id FROM customer_order WHERE session_id = ?",
+            UUID::class.java,
+            UUID.fromString(fixture.sessionId),
+        )!!
+        jdbc.update("UPDATE customer_order SET status = 'IN_PREPARATION' WHERE id = ?", orderId)
+        jdbc.update(
+            "UPDATE order_item SET status = 'IN_PREPARATION', started_at = CURRENT_TIMESTAMP WHERE order_id = ?",
+            orderId,
+        )
+        mockMvc.perform(
+            post("/sessions/current/payments")
+                .header("Authorization", "Bearer ${fixture.token}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":500,"tipMinor":0,"method":"SIMULATED_ONLINE"}"""),
+        ).andExpect(status().isCreated)
+        val route = "/staff/sessions/${fixture.sessionId}/force-close"
+        val key = UUID.randomUUID().toString()
+        val body = """{"reason":"Duplicate request"}"""
+        mockMvc.perform(
+            post(route).header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON).content(body),
+        ).andExpect(status().isUnauthorized)
+
+        val waiterToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        mockMvc.perform(
+            post(route).header("Authorization", "Bearer $waiterToken")
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON).content(body),
+        ).andExpect(status().isForbidden)
+
+        jdbc.update("UPDATE user_role SET role_code = 'OWNER' WHERE user_id = ?", USER_ID)
+        val ownerToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        jdbc.update(
+            """
+            INSERT INTO restaurant (id, name, timezone, currency)
+            VALUES (?, 'Foreign tenant', 'Europe/Zurich', 'CHF')
+            ON CONFLICT (id) DO NOTHING
+            """.trimIndent(),
+            OTHER_RESTAURANT_ID,
+        )
+        jdbc.update(
+            "INSERT INTO restaurant_settings (restaurant_id) VALUES (?) ON CONFLICT (restaurant_id) DO NOTHING",
+            OTHER_RESTAURANT_ID,
+        )
+        val foreign = createGuestSession(OTHER_RESTAURANT_ID)
+        mockMvc.perform(
+            post("/staff/sessions/${foreign.sessionId}/force-close")
+                .header("Authorization", "Bearer $ownerToken")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isNotFound)
+        assertSessionRemainsOpen(foreign.sessionId)
+
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        val concurrentKeys = listOf(UUID.randomUUID().toString(), UUID.randomUUID().toString())
+        try {
+            val attempts = concurrentKeys.map { concurrentKey ->
+                executor.submit<Int> {
+                    ready.countDown()
+                    check(start.await(5, TimeUnit.SECONDS))
+                    mockMvc.perform(
+                        post(route)
+                            .header("Authorization", "Bearer $ownerToken")
+                            .header("Idempotency-Key", concurrentKey)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body),
+                    ).andReturn().response.status
+                }
+            }
+            assertTrue(ready.await(5, TimeUnit.SECONDS))
+            start.countDown()
+            assertEquals(listOf(200, 200), attempts.map { it.get(20, TimeUnit.SECONDS) }.sorted())
+        } finally {
+            executor.shutdownNow()
+        }
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM audit_event WHERE action = 'SESSION_FORCE_CLOSED' AND target_id = ?",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM payment WHERE session_id = ? AND kind = 'REFUND'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+        assertEquals(
+            500L,
+            jdbc.queryForObject(
+                "SELECT SUM(amount_minor) FROM payment WHERE session_id = ? AND kind = 'REFUND'",
+                Long::class.javaObjectType,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+    }
+
+    @Test
     fun `guest bill derives charges from accepted snapshots and isolates the session`() {
         val fixture = createGuestSession()
         val otherSession = createGuestSession()
@@ -2976,6 +3445,25 @@ class IdentityIntegrationTest {
             participantId = json(result, "$.participant.id"),
             token = json(result, "$.guestToken"),
             tableCode = tableCode,
+        )
+    }
+
+    private fun assertSessionRemainsOpen(sessionId: String) {
+        assertEquals(
+            "OPEN",
+            jdbc.queryForObject(
+                "SELECT status FROM table_session WHERE id = ?",
+                String::class.java,
+                UUID.fromString(sessionId),
+            ),
+        )
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM audit_event WHERE action = 'SESSION_CLOSED' AND target_id = ?",
+                Int::class.java,
+                UUID.fromString(sessionId),
+            ),
         )
     }
 

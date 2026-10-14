@@ -78,6 +78,8 @@ Reglas:
 > **Composición del detalle/tablero en `floor`:** Orders entrega el detalle o actividad agregada por puertos publicados por Floor; Billing reutiliza `BillCalculator` para resumir por lote bajo locks de sesión. No se duplica la derivación del saldo. El catálogo de auditoría excluye llamados al mozo y su publicación durable (`waiter.called`/`waiter.updated`) depende del outbox/SSE de WP-BE-60.
 >
 > **Estado de eventos:** el módulo `notifications`, `EventPublisher` y el flujo `event_log`/SSE de este diseño son objetivo, no código disponible. V7 implementa únicamente `audit_event`; WP-BE-60 espera el spike y la aprobación/reemplazo de ADR-0006 por WP-ARQ-60.
+>
+> **Propuesta WP-ARQ-60 (no aprobada):** persistir el sobre de evento en PostgreSQL dentro de la misma transacción del cambio y leer el log desde SSE por cursor; un aviso post-commit en memoria puede despertar lectores, pero no garantiza entrega. El spike debe validar serialización del cursor por restaurante (orden de commit), versión para cada agregado, reautorización en streams largos, índices/retención, conexiones y costo de sondeo. Ver alternativas y preguntas en ADR-0006.
 
 ## 4. Flujo típico de una operación
 

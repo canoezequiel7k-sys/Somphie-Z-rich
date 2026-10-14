@@ -34,7 +34,7 @@
 | `event_log` | id bigserial, restaurant_id, type, aggregate_type, aggregate_id, scope_session_id?, version, payload jsonb, created_at | Retención 48 h; índice `(id)` para `Last-Event-ID` |
 | `feedback` (F9) | id, session_id, participant_id, rating, comment | `UNIQUE(session_id, participant_id)` |
 
-> `event_log` describe el modelo objetivo de tiempo real; no existe todavía en las migraciones. La tabla implementada es `audit_event` (V7), con otro propósito y sin cursor/outbox SSE. No tratarlas como intercambiables; WP-BE-60 espera la decisión WP-ARQ-60.
+> `event_log` describe el modelo objetivo de tiempo real; no existe todavía en las migraciones. La tabla implementada es `audit_event` (V7), con otro propósito y sin cursor/outbox SSE. No tratarlas como intercambiables. La propuesta de WP-ARQ-60 conserva el log durable en PostgreSQL y usa streams de solo lectura; para no saltar commits tardíos, propone serializar la asignación del cursor por restaurante. Esa contención y el envelope para aggregates sin `version` requieren aprobación/medición antes de fijar DDL.
 
 ## 3. Restricciones críticas (en SQL)
 
