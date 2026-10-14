@@ -105,7 +105,7 @@ ALTER TABLE order_item ADD CONSTRAINT ck_item_status CHECK (status IN
 | `option` | id, group_id, name, price_delta_minor, available, active, is_default, sort_order, version | `CHECK(price_delta_minor >= 0)` |
 | `product_option_group` | product_id, group_id, sort_order | PK `(product_id, group_id)` |
 | `category_translation`, `product_translation`, `option_group_translation`, `option_translation` | entity_id, locale, name, (description) | PK `(entity_id, locale)` |
-| `bill_adjustment` | id, restaurant_id, session_id, kind, order_item_id?, percent_bp?, amount_minor, reason_code, reason_text, status, created_by, created_at, voided_by?, voided_at?, void_reason?, idempotency_key | `CHECK(amount_minor > 0)`; `UNIQUE(session_id, idempotency_key)`; índice `(session_id, status)` |
+| `bill_adjustment` | id, restaurant_id, session_id, kind, order_item_id?, percent_bp?, amount_minor, reason_code, reason_text, status, created_by, `limit_exempt`, created_at, voided_by?, voided_at?, void_reason?, idempotency_key | `CHECK(amount_minor > 0)`; `UNIQUE(session_id, idempotency_key)`; índice `(session_id, status)` y único parcial por ítem con cortesía activa |
 | `waiter_call` | id, restaurant_id, session_id, requested_by_participant_id, reason, text, status, created_at, acknowledged_by?, acknowledged_at?, resolved_at? | índice único parcial `(session_id, reason) WHERE status IN ('OPEN','ACKNOWLEDGED')` |
 
 ### 7.2 Tablas modificadas
@@ -117,7 +117,7 @@ ALTER TABLE order_item ADD CONSTRAINT ck_item_status CHECK (status IN
 | `restaurant_settings` | + `max_tip_percent` (100), `max_staff_discount_percent` (**15**, D-142), `max_staff_adjustment_minor` (nullable: sin tope por defecto, D-142), `waiter_call_cooldown_sec` (60), `default_locale` (`es-AR`), `supported_locales` |
 
 ### 7.3 Consulta única de cuenta (actualizada)
-`billableChargesForSession` sigue siendo **la única** definición de cargos. Se agrega `appliedAdjustmentsForSession` (Σ `bill_adjustment` `APPLIED`) y `tipsForSession` (Σ `tip_minor` de pagos `SUCCEEDED`). `balance = charges − adjustments − paidNet`.
+`billableChargesForSession` sigue siendo **la única** definición de cargos. La cuenta deriva los ajustes `APPLIED`, pagos y reembolsos `SUCCEEDED` de sus tablas persistidas: `paidNet = pagos − reembolsos`; `balance = charges − ajustes − paidNet`. Las propinas solo suman desde pagos exitosos y no cambian el saldo. `limit_exempt` conserva si el ajuste fue aplicado con `adjustment.apply_any`, para que no consuma el límite acumulado del Mozo.
 
 ### 7.4 Retención (D-135)
 Nombres de invitados: anonimizar a los 12 meses (🟡). `waiter_call`: 30 días. El resto sin cambios.

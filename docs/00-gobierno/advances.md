@@ -7,7 +7,7 @@
 Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 bloqueado
 
 ---
-## 1. Estado actual (snapshot actualizado el 2026-10-13)
+## 1. Estado actual (snapshot actualizado el 2026-10-14)
 
 ### 1.1 Qué existe
 | Pieza | Estado | Dónde |
@@ -16,7 +16,7 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Documentación v0.1 (producto, dominio, arquitectura, API, diseño, pruebas, despliegue, agentes) | ✅ | `docs/` |
 | Documentación v0.2 (opciones de producto, propina, ajustes, i18n, llamados al mozo, imágenes en carpeta, multi-sucursal simulada) | ✅ | secciones "v0.2" dentro de cada doc |
 | Decisiones D-101…D-159; Q-01…Q-20 y Q-22/23/24/25/28/29/30 resueltas; Q-21/26/27 abiertas | ✅ | `docs/00-gobierno/decisiones.md` |
-| ADRs 0001–0009 (propuestas) | ✅ | `docs/00-gobierno/adr/` |
+| ADRs 0001–0010 (estado individual) | ✅ | `docs/00-gobierno/adr/` |
 | Contrato `openapi.yaml` **0.4.0** | ✅ Redocly 2.62.1; la rotación exige key idempotente por Q-28 | `docs/04-api/openapi.yaml` |
 | Config de lint `redocly.yaml` | ✅ (clave corregida, H-09) | raíz |
 | `CHANGELOG.md` del contrato hasta 0.4.0 | ✅ Validado junto con OpenAPI por Redocly 2.62.1 | `docs/04-api/CHANGELOG.md` |
@@ -33,7 +33,11 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Horario del restaurante | ✅ Recibido; zona horaria pendiente de confirmar antes de persistirlo | Apertura y cierre semanal |
 
 ### 1.2 Qué falta o requiere seguimiento
-- WP-BE-51 🔄 (2026-10-13): T02 completada localmente; apertura manual, rotación idempotente y revocación del HOST/personal. `check jacocoTestReport`: 334 tests, 0 fallos, 93,23 % cobertura; Q-29/Q-30 resueltas. T01 sigue bloqueada hasta persistir `balanceMinor` en WP-BE-70-T01.
+- **Bloque WP-BE-70/73 — validación integral ✅ (2026-10-14):** `check jacocoTestReport` pasó con 342 tests, 0 fallos/errores/omitidos y 91,91 % de cobertura de líneas. WP-BE-70-T02 quedó completada localmente; T01 sigue parcial, T03 carece de reembolsos y WP-BE-73-T02 conserva cobertura de aceptación pendiente.
+- WP-BE-51 🔄 (2026-10-13): T02 completada localmente; apertura manual, rotación idempotente y revocación del HOST/personal. Q-29/Q-30 resueltas. T01 sigue bloqueada hasta disponer del flujo de reembolsos y el puerto de saldo completo para el detalle staff.
+- WP-BE-70-T01 🔄: `GET /sessions/current/bill` deriva cargos, pagos, ajustes, propinas y reembolsos de movimientos persistidos; T01 parcial mientras el reembolso no se pueda registrar y validar. `BillableChargesPort` expone solo cargos. No hay saldo duplicado.
+- WP-BE-70-T02 ✅ local (2026-10-14): pagos online simulados y efectivo, idempotencia, declinación y propina sola; ADR-0010 enlaza fuentes aprobadas sin reglas nuevas. La validación integral pasó; T03/reembolsos queda aparte.
+- WP-BE-73-T02 🔄: persistencia, aplicación/anulación idempotente y reversión de cortesía integradas; aún falta probar de forma específica aislamiento/roles y concurrencia de ajustes antes de aceptar el ticket.
 - WP-BE-40 ✅ (2026-10-13): job transaccional de expiración por TTL de restaurante, rate limit persistente por mesa/IP, error contractual y actividad registrada al unirse, crear pedido y ejecutar acciones de staff; ver sección 6 y ficha [`wp-be-40.md`](../08-agentes/backend-work/wp-be-40.md).
 - Auditoría actual (2026-10-13): Q-24 resuelta; T01–T05 y WP-BE-50 completadas. `check jacocoTestReport` pasó con 315 tests, 0 fallos y 92,81 % de cobertura; integración/Testcontainers ejecutados. FIFO/SLA usa `acceptedAt`; timestamps históricos se preservan nullable; paginación keyset es eventual, sin backfill ni métricas agregadas. WP-BE-40 está validada; WP-BE-51 avanzó con apertura manual y rotación idempotente; T01 espera billing y la revocación T02 está en curso con Q-29/Q-30 resueltas. WP-BE-52 sigue bloqueada por Q-27.
 - El backend ya incluye API de negocio y persistencia para los paquetes registrados arriba, pero aún no cubre todas las fases del roadmap. No dar por terminado el backend hasta cerrar y validar todos los WP-BE pendientes.
@@ -623,7 +627,7 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Actividad:** se actualiza en una unión válida, alta de pedido y decisiones/acciones de preparación de staff; polling y lecturas no cuentan, de acuerdo con RN-SES-08. Los cambios participan de la transacción de la operación.
 - **Pruebas:** además de las seis integraciones listadas arriba, `IdentityIntegrationTest` cubre aceptación/rechazo concurrentes con preparación y actividad persistida; `BackendSmokeTest` cubre join concurrente con expiración y limpieza. `.\backend\gradlew.bat -p backend check jacocoTestReport` ✅ (322 tests, 0 fallos/errores/omitidos; JaCoCo 2933/3153 = 93,02 %). La primera suite completa encontró que el test de carrera compartía un pool de solo dos threads; se corrigió a tres para que join, expiración y titular del lock puedan solaparse de verdad.
 - **Alcance y riesgos:** no se cambia OpenAPI porque los dos errores ya están definidos. El intervalo del scheduler es 60 s por defecto; por lo tanto el cierre puede ocurrir hasta un intervalo después del TTL. Si la app se despliega detrás de proxy, configurar explícitamente la extracción confiable de IP antes de usar cabeceras forwarded.
-- **Estado siguiente:** WP-BE-40 satisface su DoD funcional y de integración. WP-BE-51-T02 avanzó con apertura manual y rotación; Q-29 confirmó la acción y auditoría transaccional y Q-30 confirmó el mapeo en persistencia. La revocación está en curso y T01 espera persistencia billing. WP-BE-52 permanece bloqueada por Q-27.
+- **Estado siguiente:** WP-BE-40 satisface su DoD funcional y de integración. WP-BE-51-T02 avanzó con apertura manual y rotación; Q-29 confirmó la acción y auditoría transaccional y Q-30 confirmó el mapeo en persistencia. T01 espera que billing complete pagos/ajustes; WP-BE-52 permanece bloqueada por Q-27.
 
 ### 2026-10-13 — WP-BE-51-T02 (registro histórico del avance inicial)
 - **Qué:** `POST /staff/tables/{tableId}/sessions` crea una sesión sin HOST, con `Idempotency-Key`, permiso `session.open_manual`, aislamiento tenant, bloqueo de mesa y `SESSION_OPENED` en la misma transacción. `POST /staff/sessions/{sessionId}/join-code/rotate` usa la key requerida por Q-28, permiso `participant.revoke`, lock de sesión y replay de respuesta. La apertura QR toma el lock de mesa compartido; `JoinCodeGenerator` centraliza la generación.
@@ -648,6 +652,41 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Pruebas/validaciones:** `IdentityIntegrationTest` focalizada pasó; `.\backend\gradlew.bat -p backend check jacocoTestReport` pasó con 334 tests, 0 fallos/errores/omitidos; cobertura de líneas 3220/3454 (93,23 %). Redocly 2.62.1 validó OpenAPI; Markdownlint pasó en seis documentos (0 issues); `git diff --check` pasó.
 - **Contrato y alcance:** HOST usa `DELETE /sessions/current/participants/{participantId}`; personal usa `POST /staff/sessions/{sessionId}/participants/{participantId}/revoke` y `participant.revoke`. WP-BE-51-T01 sigue bloqueada por fuente persistente de `balanceMinor`; WP-BE-52 sigue bloqueada por Q-27.
 - **Qué estudiar:** serialización sesión→participantes, revocación idempotente del agregado y mapeo `USER`/`PARTICIPANT` a V7.
+
+### 2026-10-13 — WP-BE-70-T01: lectura derivada de cuenta (parcial)
+- **Qué:** se agregó `GET /sessions/current/bill`, `OrderChargesPort`, adaptador de snapshots y luego `BillableChargesPort` (reemplazó el puerto local de nombre `BillingSummaryPort` antes de exponer un saldo parcial). El endpoint filtra por sesión/restaurante, excluye ítems cancelados, lista pedidos pendientes sin cobrarlos y entrega unidades menores enteras.
+- **Por qué:** RN-BIL-01/02 y `BillCalculator` determinan que la cuenta se deriva; no se persiste un saldo duplicado ni se inventa política para pagos/ajustes ausentes. La lectura completa usa una instantánea `REPEATABLE_READ`; tokens invitados se validan por hash, estado de revocación y ventana de lectura cerrada existente.
+- **Pruebas/validaciones:** `.\backend\gradlew.bat -p backend test --tests com.somphie.identity.api.IdentityIntegrationTest` ✅; `.\backend\gradlew.bat -p backend check jacocoTestReport` ✅ (338 tests, 0 fallos; 3321/3556 líneas = 93,39 %); Markdownlint 0 issues; `git diff --check` pasó. Redocly no se ejecutó: OpenAPI no cambió.
+- **Pendiente al momento del registro:** pagos y ajustes aún no tenían persistencia; el endpoint mostraba componentes vacíos y no era saldo final para WP-BE-51-T01. La trazabilidad faltante de WP-ARQ-70 se resolvió después con ADR-0010.
+- **Qué estudiar:** proyección de snapshots de pedido, consistencia `REPEATABLE_READ`, filtro de tenant y autenticación opaca separada de JWT.
+
+### Continuación — precisión del puerto y revisión WP-ARQ-70
+- **Qué cambió:** `BillingSummaryPort.balanceMinor` se reemplazó por `BillableChargesPort.chargesMinor`; el puerto ya no presenta cargos parciales como saldo reutilizable. La API de cuenta conserva su contrato.
+- **Evidencia de pagos:** D-006, D-125, RN-BIL-05, OpenAPI y `backend-arquitectura.md` §3 definen pago simulado y adaptador; no se localizó ADR separado en archivos ni historial. Se corrigieron ficha, índice y roadmap: WP-ARQ-70 conserva el ADR como pendiente de trazabilidad.
+- **Validación ejecutada:** `.\backend\gradlew.bat -p backend test --tests com.somphie.identity.api.IdentityIntegrationTest` pasó; `.\backend\gradlew.bat -p backend check jacocoTestReport` pasó (338 tests, 0 fallos/errores/omitidos; 3321/3556 líneas, 93,39 %); Markdownlint 0 issues; `git diff --check` pasó. No cambió OpenAPI.
+- **Bloqueo real:** T02 no se implementó: el ADR requerido no está disponible y faltan pagos/ajustes persistidos para completar la fuente de saldo de T01. Sin commit ni push.
+
+### Continuación — registro de decisiones de pagos simulados
+- **Qué:** ADR-0010 registra D-006, D-125, RN-BIL-05 y sus referencias contractuales/arquitectónicas sin agregar ni reaprobar reglas; ADR-0009, la ficha, el índice y el roadmap enlazan el registro. WP-ARQ-70 queda documentalmente resuelta.
+- **Por qué:** ADR-0009 y el roadmap pedían el registro formal; existían fuentes canónicas, pero faltaba el documento dedicado.
+- **Estado restante:** WP-BE-70-T02 no empezó. No hay pagos ni ajustes persistidos y la consulta actual solo agrega cargos; cobrar contra ese parcial incumpliría RN-BIL-02. Coordinar T01, T02 y WP-BE-73-T02 para derivar el saldo completo dentro de la transacción antes de abrir pagos; WP-BE-51-T01 sigue bloqueada.
+- **Validación de esta pasada:** `.\backend\gradlew.bat -p backend check jacocoTestReport` pasó: 338 pruebas, 0 fallos/errores/omitidos; 3321/3556 líneas (93,39 %). Markdownlint en 7 documentos y `git diff --check` pasaron. No hubo cambios de código respecto de la pasada focalizada previa.
+- **Qué estudiar:** diferencia entre registrar decisiones aprobadas en un ADR y decidir comportamientos nuevos que siguen sin fuente normativa.
+
+### Continuación — evaluación del bloque financiero (2026-10-13)
+- **Qué:** se contrastaron las fichas T01/T02/73-T02/51-T01, ADR-0009/0010, reglas, contrato, migraciones, modelos y patrones actuales; no se abrió código financiero nuevo.
+- **Por qué:** `RN-BIL-02/03` exigen derivar y validar el pago dentro de la transacción con sesión bloqueada; T02 y WP-BE-73-T02 además deben modificar el mismo agregado. La consulta actual solo tiene cargos y faltan pagos/ajustes persistidos; habilitar cualquiera de los escritores por separado validaría contra un saldo incompleto y podría aceptar montos incorrectos.
+- **Estado:** T01 parcial, T02 no iniciada, WP-BE-73-T02 parcial en dominio, WP-BE-51-T01 bloqueada. La siguiente implementación financiera segura debe integrar en conjunto cargos, pagos y ajustes en una única derivación/bloqueo; no se inventó política ni endpoint.
+- **Qué estudiar:** por qué un lock de fila solo garantiza corrección si todas las lecturas/mutaciones financieras usan la misma frontera transaccional.
+
+### 2026-10-14 — WP-BE-70-T02 / WP-BE-73-T02 — implementación local
+- **Qué:** se agregaron V13 (`payment`, `bill_adjustment`), los flujos de pago simulado/efectivo, propinas y ajustes, la proyección de cuenta y la reversión de cortesía al cancelar. Se corrigió idempotencia concurrente con `ON CONFLICT`, alcance actor+s sesión y chequeo de unicidad durable por sesión.
+- **Por qué:** RN-BIL/RN-ADJ exigen validar saldo y persistir movimiento bajo el lock de sesión; la cuenta se mantiene derivada y usa solo minor units. El error simulado conserva `paymentId` y se responde como `application/problem+json`.
+- **Pruebas focalizadas:** `.\backend\gradlew.bat -p backend test --tests 'com.somphie.identity.api.IdentityIntegrationTest' --tests 'com.somphie.shared.idempotency.IdempotencyServiceTest' --tests 'com.somphie.preparation.application.ApplyItemActionTest'` pasó con PostgreSQL/Testcontainers. Incluye pago declinado y replay, pago/efectivo/propina sola, combinación saldo+pago+ajuste, reintento concurrente y cancelación de cortesía.
+- **Validación final (2026-10-14):** `.\backend\gradlew.bat -p backend test --tests 'com.somphie.identity.api.IdentityIntegrationTest'` ✅; `.\backend\gradlew.bat -p backend check jacocoTestReport` ✅ (342 tests, 0 fallos/errores/omitidos; 3884/4226 líneas = 91,91 %); Markdownlint focalizado en seis documentos ✅; `git diff --check` ✅. Markdownlint global halló solo MD009 preexistente en `docs/05-diseno/mapa-pantallas.md:3`, archivo sin cambios. Redocly no se ejecutó: OpenAPI no cambió.
+- **Estado/bloqueos:** T02 de pagos queda completada localmente; T01 sigue parcial por reembolsos y el puerto de saldo para staff. T03 no implementa reembolsos; WP-BE-73-T02 sigue parcial hasta completar cobertura específica de roles/tenant y concurrencia de ajustes. WP-BE-51-T01 permanece bloqueada. Sin commit ni push.
+- **Archivos:** `backend/src/main/kotlin/com/somphie/billing/`, `backend/src/main/kotlin/com/somphie/orders/`, `backend/src/main/resources/db/migration/V13__billing_movements.sql`, `backend/src/main/kotlin/com/somphie/shared/idempotency/IdempotencyService.kt`, `backend/src/main/kotlin/com/somphie/identity/infrastructure/IdentitySecurityConfiguration.kt`, `backend/src/main/kotlin/com/somphie/preparation/application/ApplyItemAction.kt`, pruebas de integración/preparación y fichas/modelo/índice/roadmap.
+- **Qué estudiar:** `READ_COMMITTED` más `FOR UPDATE` de la sesión para serializar lectores con escritores; scope actor+s sesión; `ON CONFLICT DO NOTHING` para cerrar carrera de doble inserción.
 
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)

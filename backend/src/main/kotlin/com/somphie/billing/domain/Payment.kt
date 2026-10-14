@@ -103,6 +103,35 @@ class Payment private constructor(
     )
 
     companion object {
+        /** Reconstruye un movimiento ya persistido, preservando sus invariantes de dominio. */
+        fun restore(
+            id: UUID,
+            sessionId: UUID,
+            kind: PaymentKind,
+            method: PaymentMethod,
+            status: PaymentStatus,
+            amount: Money,
+            tip: Money,
+            payerParticipantId: UUID?,
+            payerLabel: String?,
+            reason: String?,
+            idempotencyKey: String,
+            voidedAt: Instant?,
+        ): Payment = Payment(
+            id = id,
+            sessionId = sessionId,
+            kind = kind,
+            method = method,
+            status = status,
+            amount = amount,
+            tip = tip,
+            payerParticipantId = payerParticipantId,
+            payerLabel = payerLabel,
+            reason = reason,
+            idempotencyKey = idempotencyKey,
+            voidedAt = voidedAt,
+        )
+
         /**
          * Registra un cobro ya validado por [PaymentRules] con el resultado del proveedor simulado.
          *

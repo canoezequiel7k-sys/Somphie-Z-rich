@@ -30,7 +30,8 @@ class ApplyItemActionTest {
         now.minusSeconds(30),
     ).accept(now.minusSeconds(20))
     private val repository = FakeRepository(baseOrder)
-    private val service = ApplyItemAction(repository, Clock.fixed(now, ZoneOffset.UTC))
+    private val courtesyCancellation = FakeCourtesyCancellation()
+    private val service = ApplyItemAction(repository, courtesyCancellation, Clock.fixed(now, ZoneOffset.UTC))
     private val access = PreparationAccess(
         restaurantId, UUID.randomUUID(), "Cocina",
         setOf("KITCHEN"), setOf("item.prepare", "item.deliver", "item.undo", "order.cancel", "order.read"),
@@ -87,6 +88,36 @@ class ApplyItemActionTest {
         assertEquals(2L, repository.order.version)
         assertEquals(0, repository.auditCount)
         assertEquals(0, repository.saveCount)
+    }
+
+    @Test
+    fun `cancelling an item voids any courtesy in the same action`() {
+        service.execute(access, itemIds.first(), ItemAction.CANCEL, "Ítem duplicado")
+
+        assertEquals(itemIds.first(), courtesyCancellation.itemId)
+        assertEquals("Ítem duplicado", courtesyCancellation.reason)
+        assertEquals(access.userId, courtesyCancellation.actorId)
+        assertEquals(now, courtesyCancellation.now)
+    }
+
+    private class FakeCourtesyCancellation : CourtesyCancellationPort {
+        var itemId: UUID? = null
+        var actorId: UUID? = null
+        var reason: String? = null
+        var now: Instant? = null
+
+        override fun voidCourtesyForCancelledItem(
+            restaurantId: UUID,
+            itemId: UUID,
+            actorId: UUID,
+            reason: String,
+            now: Instant,
+        ) {
+            this.itemId = itemId
+            this.actorId = actorId
+            this.reason = reason
+            this.now = now
+        }
     }
 
     private class FakeRepository(var order: Order) : PreparationActionRepository {

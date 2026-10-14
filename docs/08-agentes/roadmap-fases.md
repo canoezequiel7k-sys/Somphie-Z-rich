@@ -120,13 +120,13 @@ gantt
 **Salida:** una visita completa se cierra con cuenta y pagos coherentes.
 | WP | Agente | Descripción | Dep. | DoD |
 |---|---|---|---|---|
-| WP-ARQ-70 | ARQ | Resolver Q-01 (propina), Q-03 (descuentos), Q-08 (leyenda); ADR pagos simulados | — | Resueltas |
+| WP-ARQ-70 | ARQ | Resolver Q-01 (propina), Q-03 (descuentos), Q-08 (leyenda); ADR pagos simulados | — | Resuelta; ADR-0010 registra decisiones vigentes sin agregar reglas |
 | WP-UX-70 | UX | SC-C-10/11/13, SC-S-09/10; plantilla del comprobante | WP-ARQ-70 | Publicado |
 | WP-UX-71 | UX | Campo de propina libre (+ ayudas), pantalla de ajustes (SC-S-08/09), etiquetas de ajustes en cuenta y comprobante | WP-ARQ-70 | Publicado |
-| WP-BE-70 | BE | `billing`: cuenta derivada, pagos (idempotentes, lock `FOR UPDATE`), anulación, reembolso, efectivo, `SimulatedPaymentProvider` | WP-BE-50 | AC-CU-11/12; CL-005/023/100…108 |
+| WP-BE-70 | BE | `billing`: T02 de pagos simulados/efectivo completada localmente y validada; T01 parcial hasta exponer el puerto staff y cerrar reembolsos de T03; cuenta transaccional derivada, sin saldo duplicado | WP-BE-50 | AC-CU-11/12; CL-005/023/100…108 |
 | WP-BE-71 | BE | Cierre de sesión (reglas + forzado), tokens a solo lectura, pedido a nombre del cliente | WP-BE-70 | AC-CU-34/35; CL-109…113 |
 | WP-BE-72 | BE | Comprobante PDF no fiscal (`PdfRenderer`) | WP-BE-71, WP-UX-70 | RN-BIL-09 |
-| WP-BE-73 | BE | **Propina** (pago con/solo propina, tope) y **ajustes** (descuento %, monto, cortesía, manual; límites por rol; anulación; cancelación de ítem anula cortesía) | WP-BE-70 | RN-TIP-01…09, RN-ADJ-01…12; CL-180…198 |
+| WP-BE-73 | BE | **Propina** integrada a pagos; **ajustes** persistidos, idempotentes y reversión de cortesía al cancelar validadas; falta cerrar cobertura de permisos, tenant y concurrencia del ajuste | WP-BE-70 | RN-TIP-01…09, RN-ADJ-01…12; CL-180…198 |
 | WP-WEB-70 | WEB | Cuenta, pagar (divisor UI), participantes, visita finalizada, descarga PDF | WP-BE-70, WP-UX-70 | AC-CU-11/12/14 |
 | WP-WEB-71 | WEB | Propina libre en el pago, cuenta con ajustes y propinas | WP-BE-73, WP-UX-71 | AC-CU-12-g/h/i |
 | WP-AND-70 | AND | Pago en caja, anular/reembolsar, cierre y cierre forzado, saldo en tablero | WP-BE-71 | AC-CU-32…35 |

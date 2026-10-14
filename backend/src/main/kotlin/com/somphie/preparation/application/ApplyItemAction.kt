@@ -50,6 +50,16 @@ interface PreparationActionRepository {
     )
 }
 
+interface CourtesyCancellationPort {
+    fun voidCourtesyForCancelledItem(
+        restaurantId: UUID,
+        itemId: UUID,
+        actorId: UUID,
+        reason: String,
+        now: Instant,
+    )
+}
+
 @Service
 class GetStaffPreparationOrder(
     private val repository: PreparationActionRepository,
@@ -65,6 +75,7 @@ class GetStaffPreparationOrder(
 @Service
 class ApplyItemAction(
     private val repository: PreparationActionRepository,
+    private val courtesyCancellation: CourtesyCancellationPort,
     private val clock: Clock,
 ) {
     @Transactional
@@ -133,7 +144,8 @@ class ApplyItemAction(
             )
             ItemAction.DELIVER_READY -> locked.order.deliverReadyItems(now)
         }
-        if (updated.version != locked.order.version &&
+        val changed = updated.version != locked.order.version
+        if (changed &&
             !repository.save(
                 access.restaurantId,
                 updated,
@@ -144,6 +156,15 @@ class ApplyItemAction(
             )
         ) {
             throw DomainException(ErrorCode.ORDER_ALREADY_DECIDED, "Order was concurrently modified")
+        }
+        if (changed && action == ItemAction.CANCEL) {
+            courtesyCancellation.voidCourtesyForCancelledItem(
+                access.restaurantId,
+                checkNotNull(itemId),
+                access.userId,
+                checkNotNull(reason),
+                now,
+            )
         }
         val beforeById = locked.order.items.associateBy { it.id }
         updated.items.filter { beforeById[it.id]?.status != it.status }.forEach { item ->

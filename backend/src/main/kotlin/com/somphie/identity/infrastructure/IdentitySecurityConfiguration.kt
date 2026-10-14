@@ -88,6 +88,7 @@ class IdentitySecurityConfiguration {
         val bearerTokenResolver = BearerTokenResolver { request ->
             val token = defaultBearerTokenResolver.resolve(request)
             val path = request.requestURI.removePrefix(request.contextPath)
+            // Los tokens opacos de invitado se validan contra su participante/sesión en el caso de uso, no como JWT.
             if (token?.startsWith(GUEST_TOKEN_PREFIX) == true || isGuestEndpoint(request.method, path)) {
                 null
             } else {
@@ -124,6 +125,16 @@ class IdentitySecurityConfiguration {
                     .hasAuthority("participant.revoke")
                 it.requestMatchers(HttpMethod.POST, "/staff/sessions/*/participants/*/revoke")
                     .hasAuthority("participant.revoke")
+                it.requestMatchers(HttpMethod.POST, "/staff/sessions/*/payments")
+                    .hasAuthority("payment.register_cash")
+                it.requestMatchers(HttpMethod.POST, "/staff/payments/*/void")
+                    .hasAuthority("payment.void")
+                it.requestMatchers(HttpMethod.POST, "/staff/sessions/*/adjustments")
+                    .hasAnyAuthority("adjustment.apply", "adjustment.apply_any")
+                it.requestMatchers(HttpMethod.GET, "/staff/sessions/*/adjustments")
+                    .hasAuthority("session.read")
+                it.requestMatchers(HttpMethod.POST, "/staff/adjustments/*/void")
+                    .hasAuthority("adjustment.void")
                 it.requestMatchers("/staff/**").denyAll()
                 it.requestMatchers(HttpMethod.GET, "/menu", "/products/*", "/public/tables/*", "/media/**", "/version", "/actuator/health")
                     .permitAll()
@@ -133,7 +144,9 @@ class IdentitySecurityConfiguration {
                     .permitAll()
                 it.requestMatchers(HttpMethod.DELETE, "/sessions/current/participants/*")
                     .permitAll()
-                it.requestMatchers(HttpMethod.GET, "/sessions/current/orders", "/orders/*")
+                it.requestMatchers(HttpMethod.GET, "/sessions/current/orders", "/sessions/current/bill", "/sessions/current/payments", "/orders/*")
+                    .permitAll()
+                it.requestMatchers(HttpMethod.POST, "/sessions/current/payments")
                     .permitAll()
                 it.anyRequest().authenticated()
             }
@@ -155,6 +168,8 @@ class IdentitySecurityConfiguration {
 
     private fun isGuestEndpoint(method: String, path: String): Boolean =
         (path == "/sessions/current/orders" && method in setOf("GET", "POST")) ||
+            (path == "/sessions/current/bill" && method == "GET") ||
+        (path == "/sessions/current/payments" && method in setOf("GET", "POST")) ||
             (path.matches(Regex("^/sessions/current/participants/[^/]+$")) && method == "DELETE") ||
             (path.matches(Regex("^/orders/[^/]+$")) && method == "GET") ||
             (path.matches(Regex("^/orders/[^/]+/cancel$")) && method == "POST")
