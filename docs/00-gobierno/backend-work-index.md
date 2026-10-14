@@ -1,6 +1,6 @@
 # Índice de trabajo del backend
 
-**Estado:** ejecución activa; rama `feat/backend-preparation`, HEAD inicial de esta tanda `59e521d`; cambios locales siguen sin commit. **Revisión:** 2026-10-13.
+**Estado:** ejecución activa; rama `feat/backend-preparation`, HEAD observado al inicio `a1f3ac1`; worktree limpio al comenzar y cambios de esta tanda sin commit. **Revisión:** 2026-10-14.
 
 ### Actualización D-160 (estado vigente)
 
@@ -8,12 +8,12 @@
 |---|---|
 | Q-26/27/31/32/33/34 y Fase 9 | Alcance aprobado por el dueño; ver [decisiones](./decisiones.md). Fórmulas Q-26 y contratos de identidad Fase 9 no se inventan. |
 | WP-ARQ-60 | ADR-0006 aprobada: PostgreSQL outbox + SSE. |
-| WP-BE-60 | Parcial: V15/V17, endpoint SSE, cursor, retención, reautorización y productores de pedidos (incluida cancelación), Billing, catálogo, preparación y ciclo de vida de sesiones; faltan pruebas de carga/ciclo SSE y eventos para flujos de expiración aún no persistidos. |
+| WP-BE-60 | Parcial: V15/V17, endpoint SSE, cursor, retención, reautorización y productores de pedidos (incluida cancelación), Billing, catálogo, preparación y ciclo de vida de sesiones. Integración HTTP prueba cierre del stream al revocar un participante; faltan heartbeat, reconexión HTTP y carga de 50 streams. |
 | WP-BE-52 | Parcial: V16, disponibilidad de producto/opción, ETag persistente, auditoría y `catalog.updated` atómicos. |
 | WP-BE-51-T01 | Parcial: Q-31 aplicada; llamados y cambios de sesión/mesa producen eventos, pero falta validar el tablero conectado al ciclo de vida SSE. |
 | WP-BE-71-T01 | Completada localmente: cierres y Q-34; historial expone creador/participante. Suite global posterior al cambio pasó. |
 | WP-BE-72 / WP-BE-80/81/82 / WP-BE-90/91 | Alcances aprobados; implementación y contratos específicos pendientes. Faltan fórmulas respaldadas para algunas métricas e identidad/verificación de cliente conforme a reglas vigentes. |
-| Validación (2026-10-13) | `check jacocoTestReport --no-daemon`: 379 tests, 0 fallos/errores/omitidos, 93,24 % (5504/5903 líneas). `IdentityIntegrationTest`, Markdownlint y `git diff --check` pasaron. OpenAPI 0.4.1 sin cambios en esta tanda. |
+| Validación (2026-10-14) | La prueba HTTP SSE focalizada y `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasaron: 380 pruebas, 0 fallos/errores/omitidas, 93,82 % (5538/5903 líneas). Markdownlint y `git diff --check` pendientes de esta tanda. OpenAPI 0.4.1 sin cambios. |
 
 El mapa detallado que sigue es una foto histórica previa a D-160; sus bloqueos por aprobación ya no están vigentes.
 
