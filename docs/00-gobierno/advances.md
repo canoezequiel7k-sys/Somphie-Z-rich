@@ -7,7 +7,7 @@
 Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 bloqueado
 
 ---
-## 1. Estado actual (snapshot actualizado el 2026-10-13)
+## 1. Estado actual (snapshot actualizado el 2026-10-14)
 
 ### 1.1 Qué existe
 | Pieza | Estado | Dónde |
@@ -33,6 +33,7 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Horario del restaurante | ✅ Recibido; zona horaria pendiente de confirmar antes de persistirlo | Apertura y cierre semanal |
 
 ### 1.2 Qué falta o requiere seguimiento
+- **En curso (2026-10-14):** WP-BE-60: prueba de integración con conexión SSE HTTP real para verificar que revocar un participante cierre su stream al revalidar permisos. Archivos previstos: `backend/src/test/kotlin/com/somphie/identity/api/IdentityIntegrationTest.kt`, ficha WP-BE-60, índice backend y esta bitácora. No se cambia el contrato ni se cierra el paquete.
 - **Decisiones D-160 aprobadas (2026-10-13):** Q-26/27/31/32/33/34 y selección Fase 9 registradas en `decisiones.md`; la aprobación no equivale a implementación ni cierra fórmulas o contratos no respaldados.
 - **Bloque WP-BE-70/73 y WP-BE-51 (2026-10-13):** suite completa con 365 tests, 0 fallos/errores/omitidos y 94,29 % de cobertura (4826/5118 líneas). WP-BE-70-T01/T02/T03 completadas localmente; WP-BE-51-T01 sigue parcial por Q-31 y la publicación de eventos pendiente en WP-BE-60. WP-BE-73-T01 conserva pendiente recibo/reportes.
 - WP-BE-51 🔄: T02 completada; T01 parcial. Q-31 está aplicada (`OCCUPIED` con saldo firmado); llamados al mozo y cambios de sesión/mesa emiten eventos durables, pero falta validar el recorrido completo del tablero por SSE.
@@ -811,6 +812,12 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Validación:** la primera corrida combinada detectó que el test de replay incluía eventos de apertura generados por setup; se corrigió capturando el cursor base. `IdentityIntegrationTest` focalizada y `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasaron; suite completa: 379 tests, 0 fallos/errores/omitidos, 5504/5903 líneas (93,24 %). Markdownlint de los 3 documentos relacionados: 0 issues; `git diff --check` pasó.
 - **Qué estudiar:** una prueba de replay debe usar cursor base capturado después del setup para distinguir eventos de preparación del sistema y eventos bajo prueba.
 - **Archivos tocados:** Floor, JoinSessionService, ParticipantRevocationService, StaffFloorController, StaffSessionClosureService, OrdersController, `IdentityIntegrationTest`, `FloorControllerTest`, ficha WP-BE-60, índice y bitácora. Sin cambios de OpenAPI ni commit/push.
+
+### 2026-10-14 — WP-BE-60: revocación en stream SSE 🔄
+- **Qué:** en curso: agregar una prueba PostgreSQL de extremo a extremo con conexión SSE abierta y revocación de un participante.
+- **Por qué:** la prueba actual verifica revocación y autorización en consultas separadas; falta demostrar que la conexión larga detecta el cambio y se cierra.
+- **Qué estudiar:** ciclo de vida de `SseEmitter`, reautorización periódica y cierre de la respuesta HTTP.
+- **Archivos previstos:** `backend/src/test/kotlin/com/somphie/identity/api/IdentityIntegrationTest.kt`, `docs/08-agentes/backend-work/wp-be-60.md`, `docs/00-gobierno/backend-work-index.md` y este archivo.
 
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)

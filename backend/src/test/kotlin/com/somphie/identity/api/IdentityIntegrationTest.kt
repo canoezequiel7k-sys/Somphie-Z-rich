@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.hamcrest.Matchers.hasItem
 import org.springframework.http.MediaType
@@ -32,6 +33,10 @@ import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.security.MessageDigest
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.time.Instant
 import java.util.HexFormat
 import java.util.UUID
@@ -50,11 +55,17 @@ import com.somphie.events.StoredDomainEvent
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
 
-@SpringBootTest(properties = ["DEMO_MODE=true"])
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = ["DEMO_MODE=true"],
+)
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Testcontainers
 class IdentityIntegrationTest {
+    @LocalServerPort
+    private var port: Int = 0
+
     @Autowired
     private lateinit var mockMvc: MockMvc
 
@@ -169,6 +180,41 @@ class IdentityIntegrationTest {
         )
             .andExpect(status().isGone)
             .andExpect(jsonPath("$.code").value("EVENT_ID_TOO_OLD"))
+    }
+
+    @Test
+    fun `revoking a participant closes their active event stream`() {
+        val fixture = createGuestSession()
+        val member = createMemberFixture(fixture)
+        val cursor = jdbc.queryForObject(
+            "SELECT COALESCE(MAX(id), 0) FROM event_log WHERE restaurant_id = ?",
+            Long::class.java,
+            RESTAURANT_ID,
+        ) ?: 0L
+        val response = HttpClient.newHttpClient().send(
+            HttpRequest.newBuilder(URI("http://localhost:$port/events/stream?scope=session"))
+                .header("Authorization", "Bearer ${member.second}")
+                .header("Last-Event-ID", cursor.toString())
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofInputStream(),
+        )
+        assertEquals(200, response.statusCode())
+
+        val streamBody = response.body()
+        val reader = Executors.newSingleThreadExecutor()
+        try {
+            val streamClosed = reader.submit(Callable { streamBody.use { it.readBytes() } })
+            mockMvc.perform(
+                delete("/sessions/current/participants/${member.first}")
+                    .header("Authorization", "Bearer ${fixture.token}"),
+            ).andExpect(status().isOk)
+
+            streamClosed.get(10, TimeUnit.SECONDS)
+        } finally {
+            streamBody.close()
+            reader.shutdownNow()
+        }
     }
 
     @Test
