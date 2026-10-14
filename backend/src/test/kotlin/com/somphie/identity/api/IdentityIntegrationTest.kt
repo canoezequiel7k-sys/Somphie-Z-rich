@@ -16,6 +16,8 @@ import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
@@ -35,6 +37,12 @@ import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import com.somphie.events.DomainEvent
+import com.somphie.events.DomainEventType
+import com.somphie.events.EventAggregateType
+import com.somphie.events.EventOutboxService
+import com.somphie.events.EventVersion
+import com.somphie.events.StoredDomainEvent
 
 @SpringBootTest(properties = ["DEMO_MODE=true"])
 @AutoConfigureMockMvc
@@ -49,6 +57,12 @@ class IdentityIntegrationTest {
 
     @Autowired
     private lateinit var passwordEncoder: PasswordEncoder
+
+    @Autowired
+    private lateinit var eventOutbox: EventOutboxService
+
+    @Autowired
+    private lateinit var transactionManager: PlatformTransactionManager
 
     @BeforeEach
     fun seedAccount() {
@@ -71,6 +85,14 @@ class IdentityIntegrationTest {
             "Test Waiter",
         )
         jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'WAITER')", USER_ID)
+        jdbc.update(
+            "UPDATE product SET available = TRUE WHERE id = ?",
+            UUID.fromString("9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7"),
+        )
+        jdbc.update(
+            "UPDATE product_option SET available = TRUE WHERE id = ?",
+            UUID.fromString("e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7081"),
+        )
     }
 
     @Test
@@ -2810,12 +2832,13 @@ class IdentityIntegrationTest {
             productId,
         )!!
         val total = basePrice + 140_000
+        val idempotencyKey = UUID.randomUUID().toString()
         val request = """{"items":[{"productId":"$productId","quantity":1,"optionIds":["$largeOptionId","$oatOptionId"]}],"acknowledgedTotalMinor":$total}"""
 
         val response = mockMvc.perform(
             post("/sessions/current/orders")
                 .header("Authorization", "Bearer ${fixture.token}")
-                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(request),
         ).andExpect(status().isCreated)
@@ -2824,6 +2847,30 @@ class IdentityIntegrationTest {
             .andExpect(jsonPath("$.items[0].options.length()").value(2))
             .andReturn().response.contentAsString
         val orderId = UUID.fromString(json(response, "$.id"))
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE aggregate_id = ? AND type = 'order.created'",
+                Int::class.java,
+                orderId,
+            ),
+        )
+        mockMvc.perform(
+            post("/sessions/current/orders")
+                .header("Authorization", "Bearer ${fixture.token}")
+                .header("Idempotency-Key", idempotencyKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request),
+        ).andExpect(status().isCreated)
+            .andExpect(header().string("Idempotent-Replayed", "true"))
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE aggregate_id = ? AND type = 'order.created'",
+                Int::class.java,
+                orderId,
+            ),
+        )
         val savedSnapshot = jdbc.queryForObject(
             "SELECT options_snapshot::text FROM order_item WHERE order_id = ?",
             String::class.java,
@@ -3581,6 +3628,311 @@ class IdentityIntegrationTest {
     )
 
     private fun json(body: String, path: String): String = JsonPath.read(body, path)
+
+    @Test
+    fun `staff table board keeps occupied state and signed balance for negative account`() {
+        val fixture = createOverpaidSession(amountMinor = 200)
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val response = mockMvc.perform(
+            get("/staff/tables").header("Authorization", "Bearer $token"),
+        ).andExpect(status().isOk)
+            .andReturn().response.contentAsString
+        val table = JsonPath.read<List<Map<String, Any>>>(response, "$.items")
+            .single { it["sessionId"] == fixture.sessionId }
+
+        assertEquals("OCCUPIED", table["displayStatus"])
+        assertEquals(-200L, (table["balanceMinor"] as Number).toLong())
+    }
+
+    @Test
+    fun `staff availability changes version and outbox once for products and options`() {
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val restaurantId = RESTAURANT_ID
+        val productId = UUID.fromString("9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7")
+        val optionId = UUID.fromString("e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7081")
+        jdbc.update("UPDATE product SET available = TRUE WHERE id = ?", productId)
+        jdbc.update("UPDATE product_option SET available = TRUE WHERE id = ?", optionId)
+        val initialVersion = jdbc.queryForObject(
+            "SELECT catalog_version FROM restaurant WHERE id = ?",
+            Long::class.java,
+            restaurantId,
+        )!!
+        val initialEventCount = jdbc.queryForObject(
+            "SELECT count(*) FROM event_log WHERE restaurant_id = ? AND type = 'catalog.updated'",
+            Int::class.java,
+            restaurantId,
+        )!!
+
+        val productRoute = "/staff/products/$productId/availability"
+        repeat(2) {
+            mockMvc.perform(
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(productRoute)
+                    .header("Authorization", "Bearer $token")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"available":false}"""),
+            ).andExpect(status().isOk)
+                .andExpect(jsonPath("$.id").value(productId.toString()))
+                .andExpect(jsonPath("$.available").value(false))
+        }
+        assertEquals(
+            initialVersion + 1,
+            jdbc.queryForObject("SELECT catalog_version FROM restaurant WHERE id = ?", Long::class.java, restaurantId),
+        )
+        assertEquals(
+            initialEventCount + 1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE restaurant_id = ? AND type = 'catalog.updated'",
+                Int::class.java,
+                restaurantId,
+            ),
+        )
+
+        mockMvc.perform(
+            org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/staff/options/$optionId/availability")
+                .header("Authorization", "Bearer $token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"available":false}"""),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.available").value(false))
+
+        val finalVersion = initialVersion + 2
+        assertEquals(
+            finalVersion,
+            jdbc.queryForObject("SELECT catalog_version FROM restaurant WHERE id = ?", Long::class.java, restaurantId),
+        )
+        assertEquals(
+            listOf(initialVersion + 1, finalVersion),
+            jdbc.query(
+                "SELECT version FROM event_log WHERE restaurant_id = ? AND type = 'catalog.updated' AND version > ? ORDER BY version",
+                { result, _ -> result.getLong("version") },
+                // El estado previo de esta prueba puede incluir eventos de otras pruebas del tenant.
+                restaurantId,
+                initialVersion,
+            ),
+        )
+        mockMvc.perform(get("/menu"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.catalogVersion").value(finalVersion))
+            .andExpect(header().string("ETag", "W/\"$finalVersion-es-AR\""))
+    }
+
+    @Test
+    fun `staff availability serializes concurrent requests and rejects missing permission or foreign tenant`() {
+        val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val productId = UUID.fromString("9a2b4c6d-8e0f-4a1b-b3c5-d7e9f1a3b5c7")
+        val route = "/staff/products/$productId/availability"
+        jdbc.update("UPDATE product SET available = TRUE WHERE id = ?", productId)
+        val before = jdbc.queryForObject(
+            "SELECT catalog_version FROM restaurant WHERE id = ?",
+            Long::class.java,
+            RESTAURANT_ID,
+        )!!
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val attempts = (1..2).map {
+                executor.submit<Int> {
+                    ready.countDown()
+                    check(start.await(5, TimeUnit.SECONDS))
+                    mockMvc.perform(
+                        org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(route)
+                            .header("Authorization", "Bearer $token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""{"available":false}"""),
+                    ).andReturn().response.status
+                }
+            }
+            assertTrue(ready.await(5, TimeUnit.SECONDS))
+            start.countDown()
+            assertEquals(listOf(200, 200), attempts.map { it.get(15, TimeUnit.SECONDS) }.sorted())
+        } finally {
+            executor.shutdownNow()
+        }
+        assertEquals(
+            before + 1,
+            jdbc.queryForObject("SELECT catalog_version FROM restaurant WHERE id = ?", Long::class.java, RESTAURANT_ID),
+        )
+
+        jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
+        jdbc.update("INSERT INTO role (code) VALUES ('NO_AVAILABILITY_TEST') ON CONFLICT (code) DO NOTHING")
+        jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'NO_AVAILABILITY_TEST')", USER_ID)
+        val restrictedToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        mockMvc.perform(
+            org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(route)
+                .header("Authorization", "Bearer $restrictedToken")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"available":true}"""),
+        ).andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+
+        jdbc.update("DELETE FROM user_role WHERE user_id = ?", USER_ID)
+        jdbc.update("INSERT INTO user_role (user_id, role_code) VALUES (?, 'WAITER')", USER_ID)
+        val foreignRestaurant = UUID.randomUUID()
+        val foreignStation = UUID.randomUUID()
+        val foreignCategory = UUID.randomUUID()
+        val foreignSubcategory = UUID.randomUUID()
+        val foreignProduct = UUID.randomUUID()
+        jdbc.update(
+            "INSERT INTO restaurant (id, name, timezone, currency) VALUES (?, 'Other tenant', 'UTC', 'CHF')",
+            foreignRestaurant,
+        )
+        try {
+            jdbc.update(
+                "INSERT INTO station (id, restaurant_id, code, name) VALUES (?, ?, 'BAR', 'Other bar')",
+                foreignStation,
+                foreignRestaurant,
+            )
+            jdbc.update(
+                "INSERT INTO category (id, restaurant_id, name) VALUES (?, ?, 'Other category')",
+                foreignCategory,
+                foreignRestaurant,
+            )
+            jdbc.update(
+                "INSERT INTO subcategory (id, category_id, name) VALUES (?, ?, 'Other subcategory')",
+                foreignSubcategory,
+                foreignCategory,
+            )
+            jdbc.update(
+                """
+                INSERT INTO product (id, subcategory_id, station_id, name, price_minor)
+                VALUES (?, ?, ?, 'Other product', 100)
+                """.trimIndent(),
+                foreignProduct,
+                foreignSubcategory,
+                foreignStation,
+            )
+            val restoredToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+            mockMvc.perform(
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(
+                    "/staff/products/$foreignProduct/availability",
+                )
+                    .header("Authorization", "Bearer $restoredToken")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"available":false}"""),
+            ).andExpect(status().isNotFound)
+        } finally {
+            jdbc.update("DELETE FROM product WHERE id = ?", foreignProduct)
+            jdbc.update("DELETE FROM restaurant WHERE id = ?", foreignRestaurant)
+        }
+    }
+
+    @Test
+    fun `outbox event and aggregate version roll back with the business transaction`() {
+        withEventRestaurant { restaurantId ->
+            val aggregateId = UUID.randomUUID()
+            val transaction = TransactionTemplate(transactionManager)
+            transaction.executeWithoutResult { status ->
+                eventOutbox.append(event(restaurantId, aggregateId, EventVersion.Increment))
+                status.setRollbackOnly()
+            }
+
+            assertEquals(
+                0,
+                jdbc.queryForObject("SELECT count(*) FROM event_log WHERE restaurant_id = ?", Int::class.java, restaurantId),
+            )
+            assertEquals(
+                0,
+                jdbc.queryForObject("SELECT count(*) FROM event_cursor WHERE restaurant_id = ?", Int::class.java, restaurantId),
+            )
+            assertEquals(
+                0,
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM event_aggregate_version WHERE restaurant_id = ? AND aggregate_id = ?",
+                    Int::class.java,
+                    restaurantId,
+                    aggregateId,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `outbox cursor and versions follow commit order under concurrent appends`() {
+        withEventRestaurant { restaurantId ->
+            val aggregateId = UUID.randomUUID()
+            val firstAppended = CountDownLatch(1)
+            val secondCalling = CountDownLatch(1)
+            val releaseFirst = CountDownLatch(1)
+            val executor = Executors.newFixedThreadPool(2)
+            try {
+                val first = executor.submit<StoredDomainEvent> {
+                    TransactionTemplate(transactionManager).execute {
+                        val stored = eventOutbox.append(event(restaurantId, aggregateId, EventVersion.Increment))
+                        firstAppended.countDown()
+                        check(releaseFirst.await(10, TimeUnit.SECONDS))
+                        stored
+                    }
+                }
+                check(firstAppended.await(10, TimeUnit.SECONDS))
+                val second = executor.submit<StoredDomainEvent> {
+                    secondCalling.countDown()
+                    TransactionTemplate(transactionManager).execute {
+                        eventOutbox.append(event(restaurantId, aggregateId, EventVersion.Increment))
+                    }
+                }
+                check(secondCalling.await(10, TimeUnit.SECONDS))
+                releaseFirst.countDown()
+
+                assertEquals(1L, first.get(15, TimeUnit.SECONDS).eventId)
+                assertEquals(2L, second.get(15, TimeUnit.SECONDS).eventId)
+                assertEquals(
+                    listOf(1L, 2L),
+                    jdbc.query(
+                        "SELECT version FROM event_log WHERE restaurant_id = ? ORDER BY id",
+                        { result, _ -> result.getLong("version") },
+                        restaurantId,
+                    ),
+                )
+            } finally {
+                releaseFirst.countDown()
+                executor.shutdownNow()
+            }
+        }
+    }
+
+    @Test
+    fun `outbox rejects a persisted aggregate version replay without adding an event`() {
+        withEventRestaurant { restaurantId ->
+            val aggregateId = UUID.randomUUID()
+            val transaction = TransactionTemplate(transactionManager)
+            transaction.executeWithoutResult {
+                eventOutbox.append(event(restaurantId, aggregateId, EventVersion.Persisted(3)))
+            }
+
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException::class.java) {
+                transaction.executeWithoutResult {
+                    eventOutbox.append(event(restaurantId, aggregateId, EventVersion.Persisted(3)))
+                }
+            }
+            assertEquals(
+                1,
+                jdbc.queryForObject("SELECT count(*) FROM event_log WHERE restaurant_id = ?", Int::class.java, restaurantId),
+            )
+        }
+    }
+
+    private fun event(restaurantId: UUID, aggregateId: UUID, version: EventVersion) =
+        DomainEvent(
+            restaurantId = restaurantId,
+            type = DomainEventType.ORDER_UPDATED,
+            aggregateType = EventAggregateType.ORDER,
+            aggregateId = aggregateId,
+            version = version,
+        )
+
+    private fun withEventRestaurant(block: (UUID) -> Unit) {
+        val restaurantId = UUID.randomUUID()
+        jdbc.update(
+            "INSERT INTO restaurant (id, name, timezone, currency) VALUES (?, 'Outbox test', 'UTC', 'CHF')",
+            restaurantId,
+        )
+        try {
+            block(restaurantId)
+        } finally {
+            jdbc.update("DELETE FROM restaurant WHERE id = ?", restaurantId)
+        }
+    }
 
     private companion object {
         const val EMAIL = "identity-test@somphie.demo"

@@ -113,6 +113,11 @@ class IdentitySecurityConfiguration {
                     .hasAuthority("item.prepare")
                 it.requestMatchers(HttpMethod.GET, "/staff/tables")
                     .hasAuthority("table.read")
+                it.requestMatchers(
+                    HttpMethod.PATCH,
+                    "/staff/products/*/availability",
+                    "/staff/options/*/availability",
+                ).authenticated()
                 it.requestMatchers(HttpMethod.GET, "/staff/waiter-calls")
                     .hasAuthority("waiter_call.handle")
                 it.requestMatchers(

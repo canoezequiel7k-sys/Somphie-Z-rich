@@ -1,10 +1,10 @@
 # Tiempo real (Fase 6)
 
-> Decisión base: **SSE** con eventos "pista" (ADR-0006). Se confirma al iniciar la fase. Hasta entonces, **polling**.
+> Decisión base: **SSE** con eventos "pista" (ADR-0006), aprobada por D-160. Mientras WP-BE-60 no esté implementada, los consumidores siguen con polling.
 >
-> Estado al 2026-10-14: ADR-0006 contiene la propuesta del spike WP-ARQ-60, pero sigue sin aprobación. No hay todavía `event_log`, publisher ni endpoint SSE; la sección de flujo siguiente es diseño objetivo, no infraestructura desplegada.
+> Estado al 2026-10-14: WP-ARQ-60 está aprobada; `event_log`, productores transaccionales y endpoint SSE todavía están pendientes de implementación y validación. El flujo siguiente es diseño objetivo, no infraestructura desplegada.
 
-La propuesta es usar PostgreSQL como log durable/outbox transaccional y como fuente de replay SSE; el aviso post-commit en memoria sería solo optimización. El cursor debe ordenar commits visibles dentro del restaurante; un `bigserial` solo no garantiza ese orden concurrente. Ver alternativas, costos, pruebas y decisiones abiertas en [ADR-0006](../00-gobierno/adr/ADR-0006-tiempo-real-sse.md). No implementar antes de la aprobación.
+Se usa PostgreSQL como log durable/outbox transaccional y fuente de replay SSE; un aviso post-commit en memoria solo optimiza el despertar de lectores. El cursor se asigna con contador bloqueado por restaurante hasta commit para ordenar los eventos visibles. Ver costos, pruebas y límites en [ADR-0006](../00-gobierno/adr/ADR-0006-tiempo-real-sse.md).
 
 ## 1. Estrategia por fases
 | Fase | Mecanismo |

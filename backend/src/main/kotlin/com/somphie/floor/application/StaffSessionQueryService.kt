@@ -59,6 +59,7 @@ class StaffSessionQueryService(
                     sessionId == null -> "FREE"
                     pendingOrdersCount > 0 -> "PENDING_ORDERS"
                     activity?.hasItemsInService == true -> "IN_SERVICE"
+                    bill != null && bill.balanceMinor < 0 -> "OCCUPIED"
                     bill?.chargesMinor == 0L -> "READY_TO_CLOSE"
                     bill?.balanceMinor == 0L -> "READY_TO_CLOSE"
                     bill != null && bill.balanceMinor > 0 -> "AWAITING_PAYMENT"

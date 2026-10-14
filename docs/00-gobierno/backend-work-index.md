@@ -1,6 +1,20 @@
 # Índice de trabajo del backend
 
-**Estado:** plan de ejecución; el estado de cada paquete figura en la tabla. **Última revisión:** rama `feat/backend-preparation`, HEAD `abb8576`; llamados persistidos y tablero staff integrados; spike WP-ARQ-60 propuesto en ADR-0006, aún sin aprobación.
+**Estado:** ejecución activa; rama `feat/backend-preparation`, HEAD `03d2b3b` (worktree sin commit). **Revisión:** 2026-10-14.
+
+### Actualización D-160 (estado vigente)
+
+| Bloque | Estado ahora |
+|---|---|
+| Q-26/27/31/32/33/34 y Fase 9 | Alcance aprobado por el dueño; ver [decisiones](./decisiones.md). Fórmulas Q-26 y contratos de identidad Fase 9 no se inventan. |
+| WP-ARQ-60 | ADR-0006 aprobada: PostgreSQL outbox + SSE; implementación aún en curso. |
+| WP-BE-60 | Parcial: V15, outbox transaccional, cursor/versión y productores de pedido cliente/catálogo; faltan endpoint SSE, retención y otros productores. |
+| WP-BE-52 | Parcial: V16, disponibilidad de producto/opción, ETag persistente, auditoría y `catalog.updated` atómicos. |
+| WP-BE-51-T01 | Parcial: Q-31 resuelta; faltan eventos de flujos restantes y validación final de tablero. |
+| WP-BE-71-T01 / WP-BE-72 / WP-BE-80/81/82 / WP-BE-90/91 | Aprobaciones remueven bloqueos de decisión; implementación y contratos específicos siguen pendientes. |
+| Validación (2026-10-14) | `check jacocoTestReport --no-daemon`: 371 tests, 0 fallos/errores/omitidos, 94,44 % (5010/5305 líneas); Markdownlint 9 docs y `git diff --check` pasan. OpenAPI no cambió. |
+
+El mapa detallado que sigue es una foto histórica previa a D-160; sus bloqueos por aprobación ya no están vigentes.
 
 ## Cómo usar este plan
 
@@ -40,27 +54,27 @@ Los estados reflejan la presencia y brechas observadas, no una aprobación de Do
 | WP-BE-80 → 82; WP-BE-81 | Contratos admin/reportes pendientes (Q-26); BE-81 requiere BE-71; export PDF requiere Q-32; BE-82 requiere BE-80. | Solo propuesta documental hasta acordar contratos. | Definir rutas, filtros, permisos, fórmulas, timezone y exportación antes de implementación. |
 | Validación final | BE-50…82 requeridos cerrados y contratos/documentos sincronizados. | No; es una puerta integradora. | No esconder fallas por cambios de umbral/exclusiones. |
 
-Dependencias de fase y entregables se citan en [`roadmap-fases.md`](../08-agentes/roadmap-fases.md); se sincronizó allí el avance parcial de BE-70/73. BE-51 sigue bloqueada hasta que pagos, reembolsos, ajustes y el puerto de saldo estén completos y validados.
+Dependencias de fase y entregables se citan en [`roadmap-fases.md`](../08-agentes/roadmap-fases.md). La tabla de actualización D-160 al inicio refleja el estado vigente; esta sección conserva decisiones históricas.
 
 ## Frontend: inicio e integración progresiva
 
 - Web/Android pueden avanzar **ahora** con OpenAPI, Prism/MSW o repositorios fake: el roadmap no exige esperar a completar el backend. Los directorios `web/` y `android/` existen, pero en esta tarea no se inspeccionó su madurez interna; confirmarla antes de asignar implementación.
 - Integrar funcionalidad por endpoint cuando pase contrato (`swagger-request-validator`), autorización/aislamiento y pruebas de integración aplicables. No considerar una ruta “lista” por existir en OpenAPI o en un controlador.
 - Puertas iniciales: pedidos/cola tras BE-50; tablero tras BE-51; disponibilidad tras BE-52; cuenta tras BE-70; SSE tras BE-60; administración/reportes tras Q-26 y BE-80/81/82.
-- Fase 9 (BE-90/91/92) queda separada como extras seleccionados/condicionados del roadmap; Q-07 está resuelta. BE-92 limita retiro por mostrador a “si se mantiene”. No bloquea el inicio de frontend ni la puerta central de BE-50…82.
+- Fase 9 (BE-90/91) está seleccionada por D-160; su implementación queda sujeta a reglas/contratos concretos. El retiro por mostrador de BE-92 sigue opcional.
 - Despliegue/portfolio de Fase 10 es una salida posterior distinta de que los contratos locales estén listos para integración.
 
-## Fase 9 — Extras condicionados (fuera del conteo obligatorio)
+## Fase 9 — Extras seleccionados (implementación condicionada a contratos)
 
 | Paquete | Alcance de roadmap | Estado de planificación / dependencia |
 |---|---|---|
-| WP-BE-90 | Registro/verificación/login de cliente, vincular participante y email | Condicionado a seleccionar extras F9; Q-07 resuelta. Verificar contrato/estado antes de asignar. |
-| WP-BE-91 | Email de comprobante y encuesta | Condicionado; depende de BE-90. No incluir en BE-50…82. |
-| WP-BE-92 | Llamar al mozo; retiro por mostrador solo si se mantiene | Condicionado a D-138 y D-025; llamada adelantable tras BE-60 según roadmap. Confirmar qué alcance sigue seleccionado. |
+| WP-BE-90 | Registro/verificación/login de cliente, vincular participante y email | Fase 9 seleccionada por D-160; definir contrato y procesos de identidad según reglas aprobadas, sin inventar proveedor/estados. |
+| WP-BE-91 | Email de comprobante y encuesta | Seleccionado dentro de Fase 9; depende de BE-90 y de configuración/integración de correo definida. |
+| WP-BE-92 | Llamar al mozo; retiro por mostrador solo si se mantiene | Llamados ya tienen rutas/persistencia; falta productor durable `waiter.*` en WP-BE-60. El retiro por mostrador sigue opcional. |
 
-## Primera tarea habilitada
+## Siguiente paso (foto histórica anterior a D-160)
 
-**Siguiente:** resolver/implementar el almacenamiento contractual de llamados al mozo para completar el tablero WP-BE-51-T01; luego terminar recibo/reportes de propinas según sus fichas. WP-BE-52 sigue bloqueada por Q-27.
+La secuencia histórica de abajo quedó superada. Próximo trabajo vigente: completar WP-BE-60 (SSE, retención, permisos y productores restantes), después terminar los paquetes dependientes y avanzar Fase 9 solo con reglas/contratos concretos.
 
 ## Documentos fuente
 

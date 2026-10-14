@@ -1,6 +1,11 @@
 package com.somphie.orders.api
 
 import com.somphie.audit.AuditService
+import com.somphie.events.DomainEvent
+import com.somphie.events.DomainEventType
+import com.somphie.events.EventAggregateType
+import com.somphie.events.EventOutboxService
+import com.somphie.events.EventVersion
 import com.somphie.orders.domain.CreateOrderRequest
 import com.somphie.orders.domain.ItemSnapshot
 import com.somphie.orders.domain.Order
@@ -35,6 +40,7 @@ class OrdersController(
     private val jdbc: NamedParameterJdbcTemplate,
     private val idempotencyService: IdempotencyService,
     private val auditService: AuditService,
+    private val eventOutbox: EventOutboxService,
     private val clock: Clock,
     private val objectMapper: ObjectMapper,
 ) {
@@ -173,6 +179,16 @@ class OrdersController(
                 targetType = "ORDER",
                 targetId = order.id.toString(),
                 afterSummary = "{\"status\":\"${order.status.name}\",\"totalMinor\":$totalMinor}"
+            )
+            eventOutbox.append(
+                DomainEvent(
+                    restaurantId = UUID.fromString(restaurantId),
+                    type = DomainEventType.ORDER_CREATED,
+                    aggregateType = EventAggregateType.ORDER,
+                    aggregateId = order.id,
+                    version = EventVersion.Persisted(order.version),
+                    sessionId = UUID.fromString(sessionId),
+                ),
             )
 
             val responseBody = linkedMapOf<String, Any>(

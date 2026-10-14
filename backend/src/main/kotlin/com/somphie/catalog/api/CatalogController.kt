@@ -13,6 +13,8 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.transaction.annotation.Isolation
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestHeader
@@ -29,6 +31,8 @@ class CatalogController(
     private val jsonParser = JsonParserFactory.getJsonParser()
 
     @GetMapping("/menu")
+    // La misma instantánea evita responder con datos de menú y ETag de commits distintos.
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun getMenu(
         @RequestParam(required = false) restaurantId: String?,
         @RequestParam(required = false) lang: String?,
@@ -55,7 +59,11 @@ class CatalogController(
             String::class.java
         ) ?: "ARS"
 
-        val catalogVersion = 2L
+        val catalogVersion = jdbc.queryForObject(
+            "SELECT catalog_version FROM restaurant WHERE id = CAST(:id AS UUID)",
+            mapOf("id" to targetRestaurantId),
+            Long::class.javaObjectType,
+        ) ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Restaurant not found")
         val etag = "W/\"$catalogVersion-$effectiveLocale\""
 
         if (ifNoneMatch != null && ifNoneMatch.replace("W/", "") == etag.replace("W/", "")) {

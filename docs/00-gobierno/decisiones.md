@@ -93,9 +93,9 @@ Todas quedaron 🟢 **aceptadas** (D-101 a D-128), salvo **D-121**, que no traí
 | D-140 | **i18n en la web cliente**: es-AR + en desde el diseño; alemán después. Panel admin y app Android solo es-AR. Catálogo con traducciones por idioma | Q-13 | 🟢 (idiomas 🟡) |
 | D-141 | **Multi-sucursal simulada**: `restaurant_id` en todo y pruebas de aislamiento con dos restaurantes; sin UI multi-local | Q-14 | 🟢 |
 
-## 3.2 Decisiones tomadas por delegación del dueño (D-142 … D-159)
+## 3.2 Decisiones tomadas por delegación o aprobación explícita (D-142 … D-160)
 
-El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable y bueno"*. Las toma el Arquitecto y el dueño puede **revocar cualquiera**. El detalle (alternativas descartadas y qué estudiar) está en `00-gobierno/advances.md` §2. Estado 🟢 (delegada) = tomada por delegación, revocable.
+Las D-142…D-159 se tomaron por delegación y son revocables. D-160 registra una aprobación explícita del dueño, no una delegación.
 
 | ID | Decisión | Origen | Estado |
 |---|---|---|---|
@@ -117,6 +117,7 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | D-157 | **Consolidar la documentación ("v0.3")** antes de la Fase 2: integrar en el cuerpo las secciones "v0.2" apendadas | H-06 | 🟢 (delegada) |
 | D-158 | **Pago mínimo con saldo chico**: el monto principal debe cumplir `min(minPaymentMinor, balance) ≤ amount ≤ balance`. Si el saldo es menor al mínimo, se paga **exactamente el saldo**. Así siempre se puede saldar la cuenta | H-13 | 🟢 (delegada) |
 | D-159 | **Cierre forzado con saldo negativo**: en la misma transacción, tras cancelar ítems, si `balance < 0` el sistema registra un **reembolso simulado automático** por el exceso (no incluye propinas), auditado con el actor y la marca "automático por cierre forzado". Si `balance > 0` queda como **saldo no cobrado** en auditoría y comprobante. Los pagos y propinas ya registrados se conservan | H-14 | 🟢 (delegada) |
+| D-160 | Aprobación explícita del dueño (2026-10-14): Q-26 lectura con fórmulas respaldadas; Q-27 disponibilidad, versión, auditoría y evento atómicos para productos/opciones; Q-31 opción A (`OCCUPIED` y saldo firmado); Q-32 PDF bajo demanda sin persistencia, biblioteca JVM por evaluar; Q-33 PostgreSQL outbox + SSE; Q-34 opción C (participante opcional y actor staff persistido); incorporar BE-90/91 a Fase 9 sin inventar semántica ausente | Aprobación del dueño | ✅ (alcance autorizado; límites abajo) |
 
 ## 4. Preguntas
 
@@ -166,6 +167,20 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 | Q-32 | 2026-10-13 | BE → ARQ/dueño | WP-BE-72 requiere `PdfRenderer`, pero el repositorio no tiene ADR de renderer y la ficha cita ADR-0009, que en realidad es Monorepo/Git. ¿Se aprueba un renderer JVM local detrás del puerto existente, generado bajo demanda, o se elige otra alternativa? | Abierta; bloquea implementación del comprobante y exportación PDF de WP-BE-81 | RN-BIL-09/D-136 ya fijan contenido y carácter no fiscal; no decidir librería ni cambiar esos datos. Propuesta: adaptador local detrás de `PdfRenderer`, sin servicio externo ni persistencia del PDF; aprobar motor/licencia/fuentes y confirmar generación bajo demanda, nombre/headers y tratamiento de caché antes de sumar dependencia. Si se elige otro ciclo de vida/formato, actualizar ficha/contrato antes de codificar. |
 | Q-33 | 2026-10-13 | BE → ARQ | WP-ARQ-60: ¿se aprueba la propuesta de ADR-0006 de PostgreSQL como log durable transaccional consultado por SSE, con notificación post-commit solo como optimización? ¿Se acepta serializar asignación de cursor por restaurante, y qué versión/controles aplicar a agregados sin `version` y credenciales revocadas en streams largos? | Abierta; bloquea WP-BE-60 y aporta dependencia a Q-27/WP-BE-52 y WP-BE-51 | Revisar alternativas, costo de contención y pruebas descritas en ADR-0006. No tratar `audit_event`/Spring AFTER_COMMIT/NOTIFY como log durable. Aprobación/reemplazo explícito de ADR antes de migración, publisher o endpoint. |
 | Q-34 | 2026-10-13 | BE → ARQ/dueño | `POST /staff/sessions/{sessionId}/orders` crea pedidos en nombre del cliente, pero `CreateStaffOrderRequest` no identifica participante; `customer_order.participant_id` es obligatorio y una sesión abierta manualmente puede no tener ninguno. ¿A quién se atribuye el pedido y cómo debe funcionar sin HOST? | Abierta; bloquea endpoint staff de WP-BE-71-T01 | Elegir explícitamente: (A) exigir `participantId` existente de esa sesión y actualizar OpenAPI; (B) usar el HOST actual y rechazar si no existe, aceptando que no cubre sesiones manuales sin HOST; o (C) admitir pedido sin participante y guardar por separado `created_by_user_id`, con decisión de dominio, migración y contrato. Definir también quién lo ve en el historial de sesión. No crear un participante ficticio ni inferir la identidad. |
+
+### Resolución explícita del dueño — D-160 (2026-10-14)
+
+Estas resoluciones prevalecen sobre las etiquetas «abierta» de Q-26/27/31/32/33/34 en la tabla histórica anterior:
+
+| Consulta | Resolución y límite |
+|---|---|
+| Q-26 | Aprobadas lecturas administrativas/reporting, tenant y permisos desde identidad autenticada, datos persistidos y fórmulas documentadas/reconciliables. No se aprueba ninguna fórmula no respaldada; cada métrica queda fuera hasta contar con fuente y fórmula de dominio. |
+| Q-27 | Productos y opciones comparten versionado persistente; sus cambios de disponibilidad escriben auditoría y `catalog.updated` en la transacción. Evento tras mutación efectiva solamente. Depende de la base WP-BE-60. |
+| Q-31 | Opción A: saldo firmado, incluso negativo, y estado `OCCUPIED`; no se agrega estado de dominio ni saldo paralelo. |
+| Q-32 | PDF generado bajo demanda, sin persistencia del archivo. Evaluar compatibilidad/licencia JVM (PDFBox candidato) antes de agregar dependencia; el contenido no fiscal vigente no cambia. |
+| Q-33 | PostgreSQL outbox + SSE aprobados; cursor asignado bajo lock por restaurante para ordenar commits; versión persistida monotónica por agregado; filtros por tenant/estación y revalidación de autorización durante el stream. `AFTER_COMMIT`/notificaciones solo optimizan despertar lectores, no garantizan entrega. Sin broker externo. |
+| Q-34 | Opción C: `participant_id` nullable; `created_by_user_id` se deriva del staff autenticado y no se acepta como identidad del cliente. Participante, si existe, debe corresponder a la sesión/tenant; el historial expone ambas atribuciones. |
+| Fase 9 | Se incorpora BE-90/91 al alcance. Esta selección no autoriza inventar reglas de vinculación, autenticación, recuperación, verificación, estados legales ni proveedor de correo; esos puntos siguen sujetos a las reglas vigentes y a definición contractual. |
 
 ### Q-24 — evidencia y decisión final
 

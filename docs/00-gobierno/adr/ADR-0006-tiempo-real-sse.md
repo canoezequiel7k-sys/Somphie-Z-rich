@@ -1,5 +1,5 @@
 # ADR-0006: Tiempo real con SSE
-**Estado:** propuesta técnica para revisión WP-ARQ-60 (2026-10-14); no aprobada.
+**Estado:** aprobada por el dueño (D-160, 2026-10-14); implementación WP-BE-60 pendiente.
 
 ## Contexto
 Los eventos fluyen servidor → cliente. Las acciones del cliente ya usan REST.
@@ -23,15 +23,15 @@ REST sigue siendo la fuente de verdad, pero las pantallas abiertas necesitan ent
 | PostgreSQL `LISTEN/NOTIFY` más `event_log` | Despierta lectores con baja latencia y el log permite replay | `NOTIFY` no es durable y requiere conexiones dedicadas; debe conservarse polling de recuperación y el costo de conexión |
 | Broker externo | Escala y desacopla consumidores | Fuera del alcance MVP; añade servicio, operación, reintentos y configuración |
 
-### Recomendación para aprobar
+### Arquitectura aprobada
 Mantener PostgreSQL como única infraestructura: insertar cada evento pista en `event_log` dentro de la misma transacción del cambio; que los streams consulten el log por `id > Last-Event-ID`, con filtro SQL de tenant/sesión/permisos y heartbeat contractual. Un aviso local `AFTER_COMMIT` solo podría despertar antes la consulta; nunca sería fuente ni garantía de entrega. No incorporar `LISTEN/NOTIFY` hasta medir que el polling incumple el presupuesto de conexiones/carga.
 
 La fila de negocio y el evento se confirman o revierten juntos. La difusión SSE ocurre después del commit y puede repetirse; el consumidor deduplica por `eventId`. El fallo de un stream no revierte el cambio ni requiere reintentar una operación de negocio. La recuperación consulta el log desde el cursor y, tras 48 h o cursor fuera de retención, devuelve el 410 contractual para refresco REST.
 
 ### Cursor, orden e idempotencia — condición técnica
-`bigserial` por sí solo no garantiza orden de commit: una transacción puede reservar un ID menor y confirmar después de otra transacción con ID mayor, haciendo que `Last-Event-ID` avance y saltee la tardía. Para preservar replay sin pérdidas, probar en el spike una asignación serializada por restaurante (contador/fila bloqueada hasta commit) y secuencias sin huecos semánticos; huecos por rollback son válidos. Esto serializa escritores de eventos del mismo restaurante y debe medirse. Si no es aceptable, hace falta diseñar otro cursor y revisar el contrato antes de implementar.
+`bigserial` por sí solo no garantiza orden de commit. La aprobación fija un contador transaccional bloqueado por restaurante hasta commit; eso ordena eventos visibles dentro de cada stream. Un rollback puede dejar sin consumir el valor tentativo, pero no publicar un evento. El costo de serializar escritores por restaurante debe medirse con las pruebas de concurrencia y carga.
 
-La clave idempotente de negocio y sus transiciones evitan crear un segundo evento en replay sin mutación. No agregar una unicidad genérica sobre payload: dos eventos iguales pueden representar mutaciones intencionales distintas. Para eventos con agregado versionado, emitir la versión persistida por la mutación; agregados sin `version` actualmente definida (sesión, mesa, cuenta y llamado) requieren resolver cómo satisface el envelope contractual, sin inventar campos. El log permite reintento/replay; no hace falta estado de evento fallido ni worker de reintentos para la entrega SSE.
+La clave idempotente de negocio y sus transiciones evitan crear un segundo evento en replay sin mutación. No agregar una unicidad genérica sobre payload: dos eventos iguales pueden representar mutaciones intencionales distintas. Cada agregado tiene una versión persistida monotónica que aumenta en la misma transacción que la mutación y el evento, incluso si el modelo de dominio no exponía antes un campo `version`.
 
 ### Seguridad, operación y pruebas del spike
 - Reautorizar cada consulta/entrega: `scope=session` queda limitado al `sessionId` del guest token; `scope=staff` al `restaurantId` y permisos (y estación cuando el evento lo requiere). Nunca confiar en IDs del cliente ni filtrar solo después de leer payloads.
@@ -39,8 +39,8 @@ La clave idempotente de negocio y sus transiciones evitan crear un segundo event
 - Migración aditiva: tabla `event_log`, índices por cursor y scope, y borrado por lotes con `created_at < now() - interval '48 hours'`. Revisar `EXPLAIN`, índices/volumen, conexiones SSE y política de backpressure; heartbeat 25 s.
 - Pruebas PostgreSQL: rollback del negocio no deja evento; commit sí; replay de Idempotency-Key no duplica; mutaciones concurrentes no rompen cursor/orden; reanudación y límite 48 h; filtrado de tenant/sesión/estación y permiso. Luego probar desconexión, heartbeat, 50 streams y caída/reinicio en integración.
 
-### Aprobación requerida (WP-ARQ-60)
-Confirmar SSE y la opción PostgreSQL propuesta; aceptar serialización de IDs por restaurante como costo para ordenar commits, o pedir rediseño del cursor; fijar cómo obtener `version` para aggregates hoy sin versión; confirmar filtro de estación y ciclo de revalidación/revocación de credenciales en streams largos. Hasta entonces el ADR permanece propuesto y WP-BE-60 no implementa tabla, publisher ni endpoint.
+### Seguridad y límites aprobados (D-160)
+El stream se filtra en la consulta SQL por restaurante y por sesión o estación según el alcance; los permisos se vuelven a validar al leer/entregar eventos y durante el heartbeat para detectar revocaciones. No se exponen payloads sensibles. El ADR aprueba la arquitectura, no declara WP-BE-60 implementada: hacen falta migración, productores transaccionales, endpoint, retención, pruebas de seguridad/cursor/reconexión y validación operativa.
 
 ## Alternativas
 WebSocket/STOMP (bidireccional innecesario, más complejidad para un principiante), long polling (más carga), push FCM (solo para app cerrada, fase posterior).

@@ -110,8 +110,8 @@ gantt
 **Salida:** cambios reflejados en interfaces abiertas; recuperación de desconexiones.
 | WP | Agente | Descripción | Dep. | DoD |
 |---|---|---|---|---|
-| WP-ARQ-60 | ARQ | Confirmar ADR-0006 (SSE) tras spike | WP-BE-50 | ADR aceptada o reemplazada |
-| WP-BE-60 | BE | `event_log`, publicación AFTER_COMMIT, endpoint SSE con alcance, heartbeat, `Last-Event-ID`, `410` | WP-ARQ-60 | RN-RT-01…06 |
+| WP-ARQ-60 | ARQ | Aprobada por D-160: ADR-0006 adopta PostgreSQL outbox + SSE, cursor por restaurante, versión monotónica por agregado y revalidación | WP-BE-50 | ✅ Resolución aprobada; implementación corresponde a WP-BE-60 |
+| WP-BE-60 | BE | Parcial en worktree: V15 `event_log`/cursor/versiones y productores transaccionales de pedido cliente/catálogo; falta endpoint SSE, retención y productores restantes | WP-ARQ-60 | RN-RT-01…06 |
 | WP-WEB-60 | WEB | Cliente SSE (fetch stream), reconexión con backoff, dedupe, fallback a polling | WP-BE-60 | CL-140…143 |
 | WP-AND-60 | AND | OkHttp-SSE, reconexión, dedupe, sonido/vibración opcional | WP-BE-60 | CL-140…144 |
 | WP-QA-60 | QA | Reconexión, duplicados, desorden, 50 conexiones, concurrencia ampliada | WP-BE-60 | Verde |
@@ -146,11 +146,11 @@ gantt
 | WP-WEB-81 | WEB | Admin de opciones y traducciones; reportes de propinas y descuentos | WP-BE-82 | CU-43/46 |
 | WP-QA-80 | QA | Permisos admin, `OPTIMISTIC_LOCK_FAILED`, E2E-10, regenerar QR | WP-WEB-80 | Verde |
 
-## Fase 9 — Extras seleccionados (cada uno justificado)
+## Fase 9 — Extras seleccionados por D-160 (cada uno justificado)
 | WP | Agente | Descripción | Dep. |
 |---|---|---|---|
-| WP-BE-90 | BE | Registro/verificación/login de cliente, vincular participante, `EmailSender` (Mailpit→proveedor) | Q-07 |
-| WP-BE-91 | BE | Email de comprobante, encuesta (`feedback`) | WP-BE-90 |
+| WP-BE-90 | BE | Registro/verificación/login de cliente y vinculación conforme a reglas/contrato por definir; `EmailSender` con configuración por entorno, sin proveedor inventado | Q-07 |
+| WP-BE-91 | BE | Email de comprobante y encuesta (`feedback`) después de BE-90 y de definir el envío según reglas aprobadas | WP-BE-90 |
 | WP-BE-92 | BE | **Llamar al mozo** (adelantable tras F6), retiro por mostrador (si se mantiene) | D-138, D-025 |
 | WP-WEB-90 | WEB | Login/registro, historial, encuesta, llamar al mozo | WP-BE-90/91/92 |
 | WP-AND-90 | AND | Notificación de "llamado al mozo"; FCM opcional | WP-BE-92 |
