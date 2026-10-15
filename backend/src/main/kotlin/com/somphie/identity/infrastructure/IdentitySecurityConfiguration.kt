@@ -174,6 +174,7 @@ class IdentitySecurityConfiguration {
                     "/sessions/current/orders",
                     "/sessions/current/bill",
                     "/sessions/current/payments",
+                    "/sessions/current/receipt.pdf",
                     "/sessions/current/waiter-calls",
                     "/orders/*",
                 )

@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
+import java.io.IOException
 import java.time.Clock
 import java.time.Duration
 import java.util.concurrent.ScheduledExecutorService
@@ -65,6 +66,10 @@ class EventStreamController(
                         emitter.send(SseEmitter.event().comment("heartbeat"))
                         lastHeartbeat.set(clock.instant())
                     }
+                } catch (exception: IOException) {
+                    logger.debug("Closing disconnected event stream", exception)
+                    emitter.complete()
+                    future.get()?.cancel(false)
                 } catch (exception: DomainException) {
                     logger.info("Closing event stream after authorization or cursor failure: {}", exception.code)
                     emitter.complete()

@@ -1,6 +1,11 @@
 package com.somphie.floor.api
 
 import com.somphie.audit.AuditService
+import com.somphie.events.DomainEvent
+import com.somphie.events.DomainEventType
+import com.somphie.events.EventAggregateType
+import com.somphie.events.EventOutboxService
+import com.somphie.events.EventVersion
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
@@ -14,6 +19,7 @@ import java.util.UUID
 class ExpireEmptySessionsJob(
     private val jdbc: NamedParameterJdbcTemplate,
     private val auditService: AuditService,
+    private val eventOutbox: EventOutboxService,
     private val clock: Clock,
 ) {
     @Scheduled(fixedDelayString = "\${somphie.floor.expiry-interval-ms:60000}")
@@ -47,13 +53,17 @@ class ExpireEmptySessionsJob(
                   WHERE oi.session_id = ts.id
                     AND oi.status NOT IN ('CANCELLED', 'EXCLUDED')
               )
-            RETURNING ts.id, ts.restaurant_id
+            RETURNING ts.id, ts.restaurant_id, ts.table_id
             """.trimIndent(),
             mapOf("now" to Timestamp.from(now)),
         ) { rs, _ ->
-            rs.getObject("id", UUID::class.java) to rs.getObject("restaurant_id", UUID::class.java)
+            Triple(
+                rs.getObject("id", UUID::class.java),
+                rs.getObject("restaurant_id", UUID::class.java),
+                rs.getObject("table_id", UUID::class.java),
+            )
         }
-        expired.forEach { (sessionId, restaurantId) ->
+        expired.forEach { (sessionId, restaurantId, tableId) ->
             auditService.record(
                 restaurantId = restaurantId.toString(),
                 actorType = "SYSTEM",
@@ -62,6 +72,26 @@ class ExpireEmptySessionsJob(
                 targetType = "SESSION",
                 targetId = sessionId.toString(),
                 afterSummary = """{"closeReason":"EXPIRED_EMPTY"}""",
+            )
+            eventOutbox.append(
+                DomainEvent(
+                    restaurantId = restaurantId,
+                    type = DomainEventType.SESSION_CLOSED,
+                    aggregateType = EventAggregateType.SESSION,
+                    aggregateId = sessionId,
+                    version = EventVersion.Increment,
+                    sessionId = sessionId,
+                ),
+            )
+            eventOutbox.append(
+                DomainEvent(
+                    restaurantId = restaurantId,
+                    type = DomainEventType.TABLE_UPDATED,
+                    aggregateType = EventAggregateType.TABLE,
+                    aggregateId = tableId,
+                    version = EventVersion.Increment,
+                    sessionId = sessionId,
+                ),
             )
         }
         return expired.size

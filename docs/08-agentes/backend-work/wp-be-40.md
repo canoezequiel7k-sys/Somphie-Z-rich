@@ -16,7 +16,7 @@ Fuente de alcance: [roadmap Fase 4](../roadmap-fases.md), [RN-SES-08](../../02-d
 
 ## Implementación y motivos
 
-- `ExpireEmptySessionsJob` corre cada 60 segundos por defecto. Una actualización condicional en PostgreSQL consulta el TTL del restaurante y cierra solo sesiones `OPEN` sin pedidos pendientes/facturables; la misma transacción registra `SESSION_EXPIRED`. Si hay varias instancias, solo la que actualiza la fila puede auditarla.
+- `ExpireEmptySessionsJob` corre cada 60 segundos por defecto. Una actualización condicional en PostgreSQL consulta el TTL del restaurante y cierra solo sesiones `OPEN` sin pedidos pendientes/facturables; la misma transacción registra `SESSION_EXPIRED` y los eventos outbox `session.closed`/`table.updated`. Si hay varias instancias, solo la que actualiza la fila puede auditarla y publicar eventos.
 - Las operaciones que necesitan sesión y pedido adquieren locks en orden **sesión → pedido → ítems**. La limpieza de intentos vencidos corre en una transacción separada, bloquea candidatos con `SKIP LOCKED` y no toca sesiones; así no invierte el orden empleado por el join, que bloquea intento y luego sesión.
 - V12 agrega el índice de actividad abierta y `join_code_attempt`, con hash SHA-256 de la IP y `table_id`; no almacena la IP en claro. Este hash **no anonimiza** la IP: el espacio IPv4 es enumerable y permite ataques por diccionario. La elección evita persistir la IP directa sin introducir una clave cuya gestión no está definida. Una futura HMAC requeriría decidir almacenamiento/rotación del secreto y cómo tratar intentos tras rotarlo.
 - `SELECT ... FOR UPDATE` serializa intentos para el mismo par mesa/IP. El quinto fallo activa el bloqueo, que vence al cumplirse su instante límite.

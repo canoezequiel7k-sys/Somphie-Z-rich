@@ -154,6 +154,7 @@ class ApiExceptionHandler {
         ErrorCode.SESSION_HAS_PENDING_ORDERS,
         ErrorCode.SESSION_HAS_ACTIVE_ITEMS,
         ErrorCode.SESSION_BALANCE_PENDING,
+        ErrorCode.RECEIPT_NOT_AVAILABLE,
         ErrorCode.HOST_CANNOT_BE_REVOKED,
         ErrorCode.PAYMENT_EXCEEDS_BALANCE,
         ErrorCode.PAYMENT_NOTHING_TO_PAY,

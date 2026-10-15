@@ -17,6 +17,30 @@ data class PendingOrderSummary(
     val totalMinor: Long,
 )
 
+data class ReceiptOrderOption(
+    val groupName: String,
+    val optionName: String,
+    val priceDeltaMinor: Long,
+)
+
+data class ReceiptOrderLine(
+    val orderCode: String,
+    val productName: String,
+    val quantity: Int,
+    val basePriceMinor: Long,
+    val unitPriceMinor: Long,
+    val lineTotalMinor: Long,
+    val options: List<ReceiptOrderOption>,
+)
+
+data class OrderOptionSnapshot(
+    val groupId: String,
+    val optionId: String,
+    val groupName: String,
+    val optionName: String,
+    val priceDeltaMinor: Long,
+)
+
 data class CourtesyOrderItem(
     val id: UUID,
     val lineTotalMinor: Long,
@@ -31,6 +55,8 @@ interface OrderChargesPort {
     fun billableLinesBySession(sessionIds: List<UUID>, restaurantId: UUID): Map<UUID, List<BillableOrderLine>>
 
     fun pendingOrders(sessionId: UUID, restaurantId: UUID): List<PendingOrderSummary>
+
+    fun receiptLines(sessionId: UUID, restaurantId: UUID): List<ReceiptOrderLine>
 
     fun courtesyItems(sessionId: UUID, restaurantId: UUID): List<CourtesyOrderItem>
 }

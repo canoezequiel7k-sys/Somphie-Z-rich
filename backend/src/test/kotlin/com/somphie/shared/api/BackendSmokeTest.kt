@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.testcontainers.containers.PostgreSQLContainer
@@ -165,6 +166,27 @@ class BackendSmokeTest {
             .andExpect(jsonPath("$.optionGroups[0].name").value("Size"))
             .andExpect(jsonPath("$.optionGroups[0].options[1].name").value("Large"))
             .andExpect(jsonPath("$.optionGroups[0].options[1].priceDeltaMinor").value(80000))
+    }
+
+    @Test
+    fun `menu honors weak list and wildcard if-none-match validators`() {
+        val etag = mockMvc.perform(get("/menu").param("lang", "en"))
+            .andExpect(status().isOk)
+            .andReturn().response.getHeader(HttpHeaders.ETAG)!!
+
+        listOf(
+            "W/\"stale,tag\", $etag",
+            etag.removePrefix("W/"),
+            "*",
+        ).forEach { validator ->
+            mockMvc.perform(
+                get("/menu").param("lang", "en").header(HttpHeaders.IF_NONE_MATCH, validator),
+            )
+                .andExpect(status().isNotModified)
+                .andExpect(content().string(""))
+                .andExpect(header().string(HttpHeaders.ETAG, etag))
+                .andExpect(header().string(HttpHeaders.VARY, HttpHeaders.ACCEPT_LANGUAGE))
+        }
     }
 
     @Test
@@ -371,6 +393,34 @@ class BackendSmokeTest {
         assertEquals("CLOSED", sessionStatus(exactBoundary.sessionId))
         assertEquals("EXPIRED_EMPTY", closeReason(exactBoundary.sessionId))
         assertEquals(
+            listOf("table.updated", "session.closed"),
+            jdbcTemplate.queryForList(
+                """
+                SELECT type FROM event_log
+                WHERE session_id = ? AND type IN ('session.closed', 'table.updated')
+                ORDER BY id DESC LIMIT 2
+                """.trimIndent(),
+                String::class.java,
+                exactBoundary.sessionId,
+            ),
+        )
+        assertEquals(
+            jdbcTemplate.queryForObject(
+                "SELECT id FROM dining_table WHERE table_code = ?",
+                UUID::class.java,
+                shortTtlTable,
+            ),
+            jdbcTemplate.queryForObject(
+                """
+                SELECT aggregate_id FROM event_log
+                WHERE session_id = ? AND type = 'table.updated'
+                ORDER BY id DESC LIMIT 1
+                """.trimIndent(),
+                UUID::class.java,
+                exactBoundary.sessionId,
+            ),
+        )
+        assertEquals(
             1,
             jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM audit_event WHERE action = 'SESSION_EXPIRED' AND target_id = ?",
@@ -410,6 +460,22 @@ class BackendSmokeTest {
 
         assertEquals(1, closedCounts.sum())
         assertEquals("CLOSED", sessionStatus(opened.sessionId))
+        assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM event_log WHERE session_id = ? AND type = 'session.closed'",
+                Int::class.java,
+                opened.sessionId,
+            ),
+        )
+        assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM event_log WHERE session_id = ? AND type = 'table.updated'",
+                Int::class.java,
+                opened.sessionId,
+            ),
+        )
     }
 
     @Test

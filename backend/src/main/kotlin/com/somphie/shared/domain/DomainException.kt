@@ -78,6 +78,7 @@ enum class ErrorCode {
     // --- Anulación y reembolso de pagos (catálogo §5) ---
     PAYMENT_NOT_VOIDABLE,
     REFUND_EXCEEDS_PAID,
+    RECEIPT_NOT_AVAILABLE,
 
     // --- Genérico (catálogo §1): falta de permiso o de alcance sobre el recurso ---
     FORBIDDEN,

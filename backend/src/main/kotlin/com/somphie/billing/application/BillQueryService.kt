@@ -12,6 +12,7 @@ import com.somphie.floor.application.SessionBillPort
 import com.somphie.floor.application.SessionBillSummary
 import com.somphie.orders.application.BillableOrderLine
 import com.somphie.orders.application.OrderChargesPort
+import com.somphie.orders.application.ReceiptOrderLine
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
 import com.somphie.shared.domain.Money
@@ -23,8 +24,29 @@ import org.springframework.transaction.annotation.Transactional
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
+import java.time.ZoneId
 import java.util.HexFormat
 import java.util.UUID
+
+data class SessionReceipt(
+    val sessionId: UUID,
+    val restaurantName: String,
+    val tableLabel: String,
+    val timezone: String,
+    val openedAt: Instant,
+    val closedAt: Instant,
+    val closeReason: String,
+    val receiptLegend: String,
+    val currency: String,
+    val lines: List<ReceiptOrderLine>,
+    val adjustments: List<Map<String, Any>>,
+    val payments: List<Map<String, Any>>,
+    val chargesMinor: Long,
+    val adjustmentsMinor: Long,
+    val paidMinor: Long,
+    val balanceMinor: Long,
+    val tipsMinor: Long,
+)
 
 @Service
 class BillQueryService(
@@ -35,6 +57,74 @@ class BillQueryService(
     // La fila de sesión bloqueada serializa esta lectura con todos los escritores de la cuenta.
     @Transactional(isolation = Isolation.READ_COMMITTED)
     fun getCurrentBill(authorization: String?): Map<String, Any> {
+        val access = guestAccess(authorization)
+        if (access.revoked) {
+            throw DomainException(ErrorCode.SESSION_ACCESS_REVOKED, "Guest access was revoked")
+        }
+        return billForSession(access.sessionId, access.restaurantId)
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    fun getCurrentReceipt(authorization: String?): SessionReceipt {
+        val access = guestAccess(authorization)
+        if (access.revoked) {
+            throw DomainException(ErrorCode.SESSION_ACCESS_REVOKED, "Guest access was revoked")
+        }
+        val bill = billForSession(access.sessionId, access.restaurantId)
+        val session = jdbc.query(
+            """
+            SELECT ts.status, ts.opened_at, ts.closed_at, ts.close_reason, dt.label,
+                   r.name AS restaurant_name, r.timezone, r.currency, rs.receipt_legend
+            FROM table_session ts
+            JOIN dining_table dt ON dt.id = ts.table_id AND dt.restaurant_id = ts.restaurant_id
+            JOIN restaurant r ON r.id = ts.restaurant_id
+            JOIN restaurant_settings rs ON rs.restaurant_id = ts.restaurant_id
+            WHERE ts.id = :sessionId AND ts.restaurant_id = :restaurantId
+            FOR UPDATE OF ts
+            """.trimIndent(),
+            mapOf("sessionId" to access.sessionId, "restaurantId" to access.restaurantId),
+        ) { rs, _ ->
+            ReceiptSessionRow(
+                status = rs.getString("status"),
+                openedAt = rs.getTimestamp("opened_at").toInstant(),
+                closedAt = rs.getTimestamp("closed_at")?.toInstant(),
+                closeReason = rs.getString("close_reason"),
+                tableLabel = rs.getString("label"),
+                restaurantName = rs.getString("restaurant_name"),
+                timezone = rs.getString("timezone"),
+                currency = rs.getString("currency").trim(),
+                receiptLegend = rs.getString("receipt_legend"),
+            )
+        }.firstOrNull() ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Session not found")
+        if (session.status != "CLOSED") {
+            throw DomainException(ErrorCode.RECEIPT_NOT_AVAILABLE, "Receipt is available after session closure")
+        }
+        val closedAt = session.closedAt
+            ?: throw DomainException(ErrorCode.SESSION_CLOSED, "Closed session timestamp is missing")
+        val adjustments = receiptRows(bill, "adjustments")
+        val payments = receiptRows(bill, "payments")
+        return SessionReceipt(
+            sessionId = access.sessionId,
+            restaurantName = session.restaurantName,
+            tableLabel = session.tableLabel,
+            timezone = session.timezone,
+            openedAt = session.openedAt,
+            closedAt = closedAt,
+            closeReason = session.closeReason ?: "",
+            receiptLegend = session.receiptLegend?.takeIf(String::isNotBlank) ?: DEFAULT_RECEIPT_LEGEND,
+            currency = session.currency,
+            lines = orderCharges.receiptLines(access.sessionId, access.restaurantId),
+            adjustments = adjustments,
+            payments = payments,
+            chargesMinor = (bill.getValue("chargesMinor") as Number).toLong(),
+            adjustmentsMinor = (bill.getValue("adjustmentsMinor") as Number).toLong(),
+            paidMinor = (bill.getValue("paidMinor") as Number).toLong(),
+            balanceMinor = (bill.getValue("balanceMinor") as Number).toLong(),
+            tipsMinor = (bill.getValue("tipsMinor") as Number).toLong(),
+        )
+    }
+
+    private fun guestAccess(authorization: String?): SessionBillAccess {
         val token = authorization
             ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
             ?.substringAfter(' ')
@@ -43,13 +133,11 @@ class BillQueryService(
         val tokenHash = HexFormat.of().formatHex(
             MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8)),
         )
-        val access = jdbc.query(
+        return jdbc.query(
             """
-            SELECT ts.id AS session_id, ts.restaurant_id, ts.status, ts.closed_at, sp.revoked_at,
-                   r.currency
+            SELECT ts.id AS session_id, ts.restaurant_id, sp.revoked_at
             FROM session_participant sp
             JOIN table_session ts ON ts.id = sp.session_id
-            JOIN restaurant r ON r.id = ts.restaurant_id
             WHERE sp.token_hash = :tokenHash
             """.trimIndent(),
             mapOf("tokenHash" to tokenHash),
@@ -57,18 +145,14 @@ class BillQueryService(
             SessionBillAccess(
                 sessionId = rs.getObject("session_id", UUID::class.java),
                 restaurantId = rs.getObject("restaurant_id", UUID::class.java),
-                status = rs.getString("status"),
-                closedAt = rs.getTimestamp("closed_at")?.toInstant(),
                 revoked = rs.getTimestamp("revoked_at") != null,
-                currency = rs.getString("currency").trim(),
             )
         }.firstOrNull() ?: throw DomainException(ErrorCode.UNAUTHENTICATED, "Invalid guest token")
-
-        if (access.revoked) {
-            throw DomainException(ErrorCode.SESSION_ACCESS_REVOKED, "Guest access was revoked")
-        }
-        return billForSession(access.sessionId, access.restaurantId)
     }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun receiptRows(bill: Map<String, Any>, key: String): List<Map<String, Any>> =
+        bill.getValue(key) as List<Map<String, Any>>
 
     @Transactional(propagation = Propagation.MANDATORY)
     override fun billForSession(sessionId: UUID, restaurantId: UUID): Map<String, Any> {
@@ -240,13 +324,23 @@ class BillQueryService(
     private data class SessionBillAccess(
         val sessionId: UUID,
         val restaurantId: UUID,
-        val status: String,
-        val closedAt: Instant?,
         val revoked: Boolean,
+    )
+
+    private data class ReceiptSessionRow(
+        val status: String,
+        val openedAt: Instant,
+        val closedAt: Instant?,
+        val closeReason: String?,
+        val tableLabel: String,
+        val restaurantName: String,
+        val timezone: String,
         val currency: String,
+        val receiptLegend: String?,
     )
 
     private companion object {
         const val CLOSED_SESSION_READ_SECONDS = 24 * 60 * 60L
+        const val DEFAULT_RECEIPT_LEGEND = "Comprobante no fiscal — no válido como factura"
     }
 }

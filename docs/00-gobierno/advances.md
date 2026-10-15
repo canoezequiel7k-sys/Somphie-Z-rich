@@ -33,16 +33,16 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Horario del restaurante | ✅ Recibido; zona horaria pendiente de confirmar antes de persistirlo | Apertura y cierre semanal |
 
 ### 1.2 Qué falta o requiere seguimiento
-- **WP-BE-60 (2026-10-14):** la integración PostgreSQL/HTTP confirma que revocar un participante cierra su stream SSE activo. Siguen pendientes heartbeat, reconexión HTTP y carga de 50 streams; no se cierra el paquete.
+- **WP-BE-52 completada en el alcance contratado (2026-10-14):** `If-None-Match` de `/menu` acepta listas, comparación débil y `*`; PostgreSQL verifica que el ETag previo se invalida tras una mutación. CRUD extra requiere contrato aprobado.
 - **Decisiones D-160 aprobadas (2026-10-13):** Q-26/27/31/32/33/34 y selección Fase 9 registradas en `decisiones.md`; la aprobación no equivale a implementación ni cierra fórmulas o contratos no respaldados.
-- **Bloque WP-BE-70/73 y WP-BE-51 (2026-10-13):** suite completa con 365 tests, 0 fallos/errores/omitidos y 94,29 % de cobertura (4826/5118 líneas). WP-BE-70-T01/T02/T03 completadas localmente; WP-BE-51-T01 sigue parcial por Q-31 y la publicación de eventos pendiente en WP-BE-60. WP-BE-73-T01 conserva pendiente recibo/reportes.
-- WP-BE-51 🔄: T02 completada; T01 parcial. Q-31 está aplicada (`OCCUPIED` con saldo firmado); llamados al mozo y cambios de sesión/mesa emiten eventos durables, pero falta validar el recorrido completo del tablero por SSE.
+- **Bloque WP-BE-70/73 y WP-BE-51 (2026-10-14):** WP-BE-51-T01/T02 y WP-BE-70-T01/T02/T03 completadas localmente. WP-BE-73-T01 incluye pagos/propinas y el recibo PDF local; reporting sigue bloqueado por contrato y fórmulas no definidas.
+- WP-BE-51 ✅ local: T01/T02 implementadas. HTTP SSE valida el ciclo de llamados y el refresco del tablero; Q-31 conserva `OCCUPIED` con saldo firmado.
 - WP-BE-70-T01 ✅ local: `GET /sessions/current/bill` y `SessionBillPort` derivan el mismo resumen completo. `BillableChargesPort` sigue exponiendo solo cargos; no hay saldo duplicado.
 - WP-BE-70-T03 ✅ local: reembolso y anulación validados en PostgreSQL; estados fallidos/anulados no son anulables, replay no duplica movimientos/auditoría y reembolsos concurrentes no exceden principal neto.
 - WP-BE-70-T02 ✅ local (2026-10-13): pagos online simulados y efectivo, idempotencia, declinación y propina sola; ADR-0010 enlaza fuentes aprobadas sin reglas nuevas. T03/reembolsos quedó validada localmente en el bloque PostgreSQL posterior.
 - WP-BE-73-T02 ✅ local: persistencia, aplicación/anulación idempotente y reversión de cortesía integradas; PostgreSQL confirma permiso de personal, aislamiento tenant y aplicación concurrente dentro del límite acumulado.
-- **Estado del bloque (2026-10-13):** persistencia y rutas contractuales de llamados, expiración, autorización tenant, integración del tablero y pruebas PostgreSQL implementadas. Outbox emite eventos para pedidos, Billing, catálogo, preparación, apertura/cierre, unión/revocación de participantes y llamados; WP-BE-60 sigue parcial por cancelación/expiración de pedidos y pruebas del ciclo de vida SSE.
-- **Bloque backend activo:** WP-ARQ-60 aprobada en D-160. V15/V17 y `/events/stream` incluyen replay, reautorización y retención; V16 mantiene disponibilidad/versionado/auditoría/outbox de catálogo. WP-BE-52 sigue parcial por cobertura administrativa de versión/ETag.
+- **Estado del bloque (2026-10-14):** persistencia, autorización tenant, tablero y pruebas PostgreSQL implementados. Outbox cubre las mutaciones persistidas actuales; SSE HTTP prueba replay, heartbeat, revocación y 50 streams. WP-BE-60 sigue parcial por revisión final de productores/límites; no hay evento de expiración sin mutación persistida.
+- **Bloque backend activo:** WP-ARQ-60 aprobada en D-160. V15/V17 y `/events/stream` incluyen replay, reautorización y retención; V16 mantiene disponibilidad/versionado/auditoría/outbox de catálogo. WP-BE-52 cubre el versionado/ETag contratado.
 - **Trabajo reciente:** V17/SSE y V18/Q-34: pedido staff atribuye al empleado autenticado, permite sesión sin participante y valida la asociación opcional. OpenAPI/changelog 0.4.1 documentan ambas atribuciones; pruebas PostgreSQL verifican sesión con/sin participante, historial, idempotencia, permiso y tenant.
 - **WP-BE-71-T01 ✅ local:** cierres normal/forzado y pedidos staff completos; V18 mantiene datos históricos. Integración PostgreSQL y suite global pasaron; falta completar los demás paquetes antes de la validación final del backend.
 - WP-BE-40 ✅ (2026-10-13): job transaccional de expiración por TTL de restaurante, rate limit persistente por mesa/IP, error contractual y actividad registrada al unirse, crear pedido y ejecutar acciones de staff; ver sección 6 y ficha [`wp-be-40.md`](../08-agentes/backend-work/wp-be-40.md).
@@ -819,6 +819,49 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Validación:** `.\backend\gradlew.bat -p backend test --tests "com.somphie.identity.api.IdentityIntegrationTest.revoking a participant closes their active event stream" --no-daemon` pasó. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó: 380 pruebas, 0 fallos/errores/omitidas; 5538/5903 líneas (93,82 %). Markdownlint de los 3 documentos relacionados: 0 issues; `git diff --check` pasó.
 - **Qué estudiar:** ciclo de vida de `SseEmitter`, reautorización periódica y cierre de la respuesta HTTP.
 - **Archivos tocados:** `backend/src/test/kotlin/com/somphie/identity/api/IdentityIntegrationTest.kt`, `docs/08-agentes/backend-work/wp-be-60.md`, `docs/00-gobierno/backend-work-index.md` y este archivo. Sin cambios de OpenAPI. No hice commit/push; HEAD avanzó durante la validación a `14b26a5` y se preservó.
+
+- **Qué:** pruebas HTTP SSE cubren replay, heartbeat a 25 s, revocación y 50 streams HTTP/1.1 simultáneos. Los 50 reciben el mismo evento persistido; tras revocar el participante, el scheduler no conserva tareas sobre la línea base. Apertura staff/cierre cubren `table.updated` sin duplicados. La sincronización no depende de que streams ajenos al ensayo sigan activos.
+- **Por qué:** validar transporte/reanudación y carga concurrente funcional en PostgreSQL real, además del cierre y limpieza de recursos.
+- **Validación:** prueba focalizada de 50 streams y `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasaron: 386 pruebas, 0 fallos/errores/omitidas; 5770/6128 líneas (94,16 %). Es validación de integración/Testcontainers, no benchmark de capacidad sostenida en producción.
+- **Qué estudiar:** SSE `id`/`Last-Event-ID`, comentarios heartbeat, concurrencia y cancelación de tareas periódicas.
+- **Archivos tocados:** configuración/controlador SSE, `IdentityIntegrationTest`, ficha WP-BE-60, índice backend, `docs/03-arquitectura/tiempo-real.md` y esta bitácora. Sin cambios de OpenAPI.
+
+### 2026-10-14 — WP-BE-51-T01: tablero conectado a SSE ✅ local
+- **Qué:** prueba HTTP integra stream staff, creación/atención/resolución de llamado y lecturas REST del tablero; verifica eventos `waiter.called`/`waiter.updated` y el cambio de `waiterCallActive`.
+- **Por qué:** comprobar que el evento durable permite actualizar el tablero sin mover reglas de saldo/estado al cliente.
+- **Validación:** la prueba focalizada `.\backend\gradlew.bat -p backend test --tests "com.somphie.identity.api.IdentityIntegrationTest.staff board can refresh after receiving a waiter call event" --no-daemon` pasó. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó: 383 pruebas, 0 fallos/errores/omitidas; 5558/5903 líneas (94,16 %).
+- **Qué estudiar:** consumir SSE como señal de invalidación/refresco; la respuesta REST sigue siendo la fuente de verdad.
+- **Archivos tocados:** `backend/src/test/kotlin/com/somphie/identity/api/IdentityIntegrationTest.kt`, ficha WP-BE-51/52, índice backend y este archivo. Sin cambios de OpenAPI ni commit/push.
+- **Bloqueo aislado WP-BE-52:** OpenAPI solo define cambios de disponibilidad de producto/opción, ya cubiertos con ETag/versionado; no se agrega una ruta ni se amplía contrato para simular otros cambios administrativos.
+
+### 2026-10-14 — WP-BE-72: recibo PDF bajo demanda ✅ local
+- **Qué:** `GET /sessions/current/receipt.pdf` genera PDF efímero desde snapshots y resumen financiero existentes. PDFBox 3.0.8 está bajo Apache-2.0; compila bytecode Java 8, compatible con JVM 25.
+- **Por qué:** satisfacer RN-BIL-09/D-136 y D-160 sin persistir PDF ni copiar la lógica de cuenta.
+- **Qué estudiar:** generación PDF en JVM, licencia de biblioteca, snapshot histórico y autorización de sesión cerrada.
+- **Validación:** integración HTTP/PostgreSQL cubre autorización/revocación, sesión abierta/cerrada y TTL de 24 h, snapshots de producto/opción/precios, ajuste, pagos/propina, cierre forzado y saldo no cobrado. Suite global completa: 386 pruebas, 0 fallos/errores/omitidas; cobertura 94,16 %.
+- **Archivos tocados:** Gradle, Billing, Orders, configuración de seguridad, catálogo HTTP de errores, `IdentityIntegrationTest`, ficha WP-BE-70/73, índice y esta bitácora. Sin cambio de OpenAPI/CHANGELOG; sin commit/push.
+
+### 2026-10-14 — Cierre de revisión WP-BE-60/WP-BE-72 🔄
+- **Qué:** corregí el renderer PDF para abrir un solo `PDPageContentStream` por página y cerrarlo con `use` aun si falla el render. El job `ExpireEmptySessionsJob` ahora escribe `session.closed` y `table.updated` por cada sesión realmente cerrada como `EXPIRED_EMPTY`, junto con auditoría y mutación bajo la misma transacción. Agregué verificaciones de esos eventos en expiración concurrente y cierre forzado idempotente. Revisé productores de mesa, permisos, cancelación/error de stream y recursos del scheduler. WP-BE-80/81/82 y BE-90/91 siguen bloqueadas para implementación por contrato OpenAPI, esquemas/métricas/fórmulas o reglas de identidad/correo no definidos; no inventé rutas ni proveedores.
+- **Por qué:** un cambio persistido de estado de mesa debe publicar las pistas contractuales dentro de su transacción; el renderer debe liberar el stream en éxito y error. La prueba de 50 conexiones no mide límites de producción, así que WP-BE-60 permanece parcial.
+- **Validación:** `.\backend\gradlew.bat -p backend test --tests "com.somphie.shared.api.BackendSmokeTest" --no-daemon`, `.\backend\gradlew.bat -p backend test --tests "com.somphie.identity.api.IdentityIntegrationTest" --no-daemon`, el test puntual de cierre forzado con replay y eventos, y `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasaron. Suite global: 386 pruebas, 0 fallos/errores/omitidas; JaCoCo 5791/6149 líneas (94,18 %). Markdownlint (5 documentos) y `git diff --check` pasaron.
+- **Qué estudiar:** outbox transaccional en una mutación ejecutada por job; ciclo de vida de `AutoCloseable`; distinguir cobertura de concurrencia de capacidad sostenida.
+- **Archivos tocados:** `ExpireEmptySessionsJob.kt`, `ReceiptPdfService.kt`, `BackendSmokeTest.kt`, `IdentityIntegrationTest.kt`, ficha WP-BE-40, fichas WP-BE-60 y WP-BE-70/73, índice y bitácora. Sin cambios de OpenAPI/CHANGELOG; sin commit/push.
+
+### 2026-10-14 — WP-BE-60: verificación reproducible de 50 streams
+- **Qué:** la prueba recibe el mismo `eventId` y tipo exactos en cada lector sincronizado y verifica cleanup al revocar el participante hasta la línea base. Se descartó una aserción temporal `baseline + 50`: tareas de otros streams pueden finalizar durante la prueba. Se documentó el funcionamiento observado: 4 workers, poll de 1 s por conexión y cola sin límite de admisión.
+- **Por qué:** afirmar entrega exacta y cleanup sin acoplar la prueba a cambios concurrentes en el scheduler.
+- **Validación inicial:** la primera suite global falló solo en la aserción añadida `baseline + 50`; tareas SSE de otros tests podían finalizar durante la medición. Se retiró ese requisito temporal, manteniendo entrega exacta y limpieza hasta la línea base.
+- **Validación final:** la aserción frágil se retiró; la prueba focalizada y `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasaron: 386 pruebas, 0 fallos/errores/omitidas; 5791/6149 líneas (94,18 %). Markdownlint de 4 documentos: 0 incidencias; `git diff --check` pasó. No cambió OpenAPI.
+- **Qué estudiar:** sincronización de consumidores, cursor durable y diferencia entre prueba funcional y benchmark.
+- **Archivos tocados:** `IdentityIntegrationTest.kt`, ficha WP-BE-60, `backend-work-index.md`, `tiempo-real.md` y esta bitácora. OpenAPI sin cambios.
+
+### 2026-10-14 — WP-BE-52: validadores HTTP del menú ✅
+- **Qué:** corregí `If-None-Match` para listas de entity-tags, comparación débil y wildcard; el parser conserva comas dentro de tags entre comillas. La integración comprueba que el ETag anterior a una mutación de disponibilidad no devuelve `304` para el catálogo actualizado.
+- **Por qué:** cumplir el comportamiento HTTP de validación condicional sin cambiar rutas ni contrato OpenAPI.
+- **Validación:** los dos tests focalizados pasaron. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó: 387 pruebas, 0 fallos/errores/omitidas; 5803/6162 líneas (94,17 %). Markdownlint (3 documentos) y `git diff --check` pasaron. OpenAPI no cambió.
+- **Qué estudiar:** validadores HTTP débiles no son comparaciones byte a byte; `If-None-Match` usa comparación débil y puede contener listas.
+- **Archivos tocados:** `CatalogController.kt`, `BackendSmokeTest.kt`, `IdentityIntegrationTest.kt`, ficha WP-BE-51/52, índice y esta bitácora. OpenAPI sin cambios.
 
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)

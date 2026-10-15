@@ -1,6 +1,8 @@
 package com.somphie.identity.api
 
 import com.jayway.jsonpath.JsonPath
+import org.apache.pdfbox.Loader
+import org.apache.pdfbox.text.PDFTextStripper
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -12,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.hamcrest.Matchers.hasItem
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.crypto.password.PasswordEncoder
@@ -32,6 +35,9 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
+import java.io.BufferedReader
+import java.io.InputStream
+import java.io.InputStreamReader
 import java.security.MessageDigest
 import java.net.URI
 import java.net.http.HttpClient
@@ -41,9 +47,12 @@ import java.time.Instant
 import java.util.HexFormat
 import java.util.UUID
 import java.util.concurrent.Callable
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.LockSupport
 import com.somphie.events.DomainEvent
 import com.somphie.events.DomainEventType
 import com.somphie.events.EventAggregateType
@@ -66,6 +75,8 @@ class IdentityIntegrationTest {
     @LocalServerPort
     private var port: Int = 0
 
+    private val eventHttpClient: HttpClient = HttpClient.newHttpClient()
+
     @Autowired
     private lateinit var mockMvc: MockMvc
 
@@ -86,6 +97,9 @@ class IdentityIntegrationTest {
 
     @Autowired
     private lateinit var eventRetentionJob: EventRetentionJob
+
+    @Autowired
+    private lateinit var eventStreamScheduler: ScheduledThreadPoolExecutor
 
     @Autowired
     private lateinit var transactionManager: PlatformTransactionManager
@@ -214,6 +228,129 @@ class IdentityIntegrationTest {
         } finally {
             streamBody.close()
             reader.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `event stream replays committed events after reconnecting from last event id`() {
+        val fixture = createGuestSession()
+        val cursor = eventCursor()
+        val disconnected = openSessionEventStream(fixture.token, cursor)
+        disconnected.body().close()
+
+        val expected = appendSessionEvent(UUID.fromString(fixture.sessionId))
+        val reconnected = openSessionEventStream(fixture.token, cursor)
+        try {
+            val message = Executors.newSingleThreadExecutor().use { reader ->
+                reader.submit(Callable { readSseMessage(reconnected.body()) })
+                    .get(10, TimeUnit.SECONDS)
+            }
+            assertTrue(message.contains("id:${expected.eventId}"), "Unexpected replayed SSE message: $message")
+            assertTrue(message.contains("event:${expected.type.wireValue}"))
+        } finally {
+            reconnected.body().close()
+        }
+    }
+
+    @Test
+    fun `event stream sends a heartbeat comment after the idle interval`() {
+        val fixture = createGuestSession()
+        val response = openSessionEventStream(fixture.token, eventCursor())
+        val reader = Executors.newSingleThreadExecutor()
+        try {
+            val message = reader.submit(Callable { readSseMessage(response.body()) })
+                .get(35, TimeUnit.SECONDS)
+            assertEquals(":heartbeat", message)
+        } finally {
+            response.body().close()
+            reader.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `fifty concurrent event streams receive one committed event and release resources on close`() {
+        val fixture = createGuestSession()
+        val member = createMemberFixture(fixture)
+        val cursor = eventCursor()
+        val sessionId = UUID.fromString(fixture.sessionId)
+        val baselineTasks = scheduledStreamCount()
+        val requests = (1..CONCURRENT_SSE_CONNECTIONS).map {
+            HttpRequest.newBuilder(URI("http://localhost:$port/events/stream?scope=session"))
+                .header("Authorization", listOf("Bearer", member.second).joinToString(" "))
+                .header("Last-Event-ID", cursor.toString())
+                .GET()
+                .build()
+        }
+        val clientExecutor = Executors.newFixedThreadPool(CONCURRENT_SSE_CONNECTIONS)
+        val client = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .executor(clientExecutor)
+            .build()
+        val openings = requests.map {
+            client.sendAsync(it, HttpResponse.BodyHandlers.ofInputStream())
+        }
+        val responses = mutableListOf<HttpResponse<InputStream>>()
+        val readers = Executors.newFixedThreadPool(CONCURRENT_SSE_CONNECTIONS)
+        try {
+            CompletableFuture.allOf(*openings.toTypedArray()).get(30, TimeUnit.SECONDS)
+            responses.addAll(openings.map { it.join() })
+            assertTrue(responses.all { it.statusCode() == 200 }, "All 50 SSE connections must be accepted")
+
+            val readersReady = CountDownLatch(CONCURRENT_SSE_CONNECTIONS)
+            val deliveredEvents = responses.map { response ->
+                readers.submit(Callable {
+                    readersReady.countDown()
+                    readSseEvent(
+                        BufferedReader(InputStreamReader(response.body(), Charsets.UTF_8)),
+                        "session.updated",
+                    )
+                })
+            }
+            assertTrue(readersReady.await(10, TimeUnit.SECONDS), "All SSE readers must be waiting before publish")
+
+            val expected = appendSessionEvent(sessionId)
+            assertEquals(
+                1,
+                jdbc.queryForObject(
+                    """
+                    SELECT count(*) FROM event_log
+                    WHERE restaurant_id = ? AND id > ? AND type = 'session.updated' AND session_id = ?
+                    """.trimIndent(),
+                    Int::class.java,
+                    RESTAURANT_ID,
+                    cursor,
+                    sessionId,
+                ),
+            )
+            deliveredEvents.forEach { delivered ->
+                val message = delivered.get(30, TimeUnit.SECONDS)
+                assertTrue(message.lineSequence().any { it == "id:${expected.eventId}" })
+                assertTrue(message.lineSequence().any { it == "event:${expected.type.wireValue}" })
+            }
+        } finally {
+            openings.forEach { opening ->
+                if (opening.isDone && !opening.isCompletedExceptionally && !opening.isCancelled) {
+                    opening.getNow(null)?.let { response ->
+                        if (responses.none { it === response }) responses += response
+                    }
+                } else {
+                    opening.cancel(true)
+                }
+            }
+            try {
+                mockMvc.perform(
+                    delete("/sessions/current/participants/${member.first}")
+                        .header("Authorization", listOf("Bearer", fixture.token).joinToString(" ")),
+                ).andExpect(status().isOk)
+                awaitScheduledStreamCountAtMost(baselineTasks, 10)
+            } finally {
+                responses.forEach { it.body().close() }
+                client.shutdownNow()
+                clientExecutor.shutdownNow()
+                assertTrue(clientExecutor.awaitTermination(10, TimeUnit.SECONDS), "HTTP client executor must stop")
+                readers.shutdownNow()
+                assertTrue(readers.awaitTermination(10, TimeUnit.SECONDS), "SSE reader threads must stop after close")
+            }
         }
     }
 
@@ -354,6 +491,7 @@ class IdentityIntegrationTest {
     @Test
     fun `staff closes an empty session once and retries return the closed session`() {
         val fixture = createGuestSession()
+        val cursorBeforeClose = eventCursor()
         val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
         val route = "/staff/sessions/${fixture.sessionId}/close"
 
@@ -365,6 +503,21 @@ class IdentityIntegrationTest {
                 .andExpect(jsonPath("$.readOnly").value(true))
         }
 
+        assertEquals(
+            listOf(DomainEventType.SESSION_CLOSED.wireValue, DomainEventType.TABLE_UPDATED.wireValue),
+            jdbc.queryForList(
+                """
+                SELECT type FROM event_log
+                WHERE restaurant_id = ? AND session_id = ? AND id > ?
+                  AND type IN ('session.closed', 'table.updated')
+                ORDER BY id
+                """.trimIndent(),
+                String::class.java,
+                RESTAURANT_ID,
+                UUID.fromString(fixture.sessionId),
+                cursorBeforeClose,
+            ),
+        )
         assertEquals(
             1,
             jdbc.queryForObject(
@@ -541,6 +694,7 @@ class IdentityIntegrationTest {
         val key = UUID.randomUUID().toString()
         val route = "/staff/sessions/${fixture.sessionId}/force-close"
         val body = """{"reason":"Customer left before service"}"""
+        val cursorBeforeClose = eventCursor()
         mockMvc.perform(
             post(route)
                 .header("Authorization", "Bearer $ownerToken")
@@ -560,6 +714,21 @@ class IdentityIntegrationTest {
         ).andExpect(status().isOk)
             .andExpect(header().string("Idempotent-Replayed", "true"))
 
+        assertEquals(
+            listOf("session.closed", "table.updated"),
+            jdbc.queryForList(
+                """
+                SELECT type FROM event_log
+                WHERE restaurant_id = ? AND session_id = ? AND id > ?
+                  AND type IN ('session.closed', 'table.updated')
+                ORDER BY id
+                """.trimIndent(),
+                String::class.java,
+                RESTAURANT_ID,
+                UUID.fromString(fixture.sessionId),
+                cursorBeforeClose,
+            ),
+        )
         assertEquals(
             "CANCELLED",
             jdbc.queryForObject("SELECT status FROM customer_order WHERE id = ?", String::class.java, pendingOrderId),
@@ -1503,6 +1672,70 @@ class IdentityIntegrationTest {
     }
 
     @Test
+    fun `staff board can refresh after receiving a waiter call event`() {
+        val fixture = createGuestSession()
+        val cursor = eventCursor()
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val response = openStaffEventStream(staffToken, cursor)
+        val reader = Executors.newSingleThreadExecutor()
+        try {
+            val streamReader = BufferedReader(InputStreamReader(response.body(), Charsets.UTF_8))
+            val message = reader.submit(Callable {
+                readSseEvent(streamReader, "waiter.called")
+            })
+            val created = mockMvc.perform(
+                post("/sessions/current/waiter-calls")
+                    .header("Authorization", listOf("Bearer", fixture.token).joinToString(" "))
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"reason":"BILL"}"""),
+            ).andExpect(status().isCreated)
+                .andReturn().response.contentAsString
+            val callId = json(created, "$.id")
+
+            assertTrue(message.get(10, TimeUnit.SECONDS).contains("event:waiter.called"))
+
+            val tableId = jdbc.queryForObject(
+                "SELECT table_id FROM table_session WHERE id = ?",
+                UUID::class.java,
+                UUID.fromString(fixture.sessionId),
+            )!!
+            val board = mockMvc.perform(
+                get("/staff/tables")
+                    .header("Authorization", listOf("Bearer", staffToken).joinToString(" ")),
+            ).andExpect(status().isOk)
+                .andReturn().response.contentAsString
+            val tables = JsonPath.read<List<Map<String, Any>>>(board, "$.items")
+            assertEquals(true, tables.single { it["tableId"] == tableId.toString() }["waiterCallActive"])
+
+            val acknowledged = reader.submit(Callable { readSseEvent(streamReader, "waiter.updated") })
+            mockMvc.perform(
+                post("/staff/waiter-calls/$callId/acknowledge")
+                    .header("Authorization", listOf("Bearer", staffToken).joinToString(" ")),
+            ).andExpect(status().isOk)
+            assertTrue(acknowledged.get(10, TimeUnit.SECONDS).contains("event:waiter.updated"))
+
+            val resolved = reader.submit(Callable { readSseEvent(streamReader, "waiter.updated") })
+            mockMvc.perform(
+                post("/staff/waiter-calls/$callId/resolve")
+                    .header("Authorization", listOf("Bearer", staffToken).joinToString(" ")),
+            ).andExpect(status().isOk)
+            assertTrue(resolved.get(10, TimeUnit.SECONDS).contains("event:waiter.updated"))
+
+            val refreshedBoard = mockMvc.perform(
+                get("/staff/tables")
+                    .header("Authorization", listOf("Bearer", staffToken).joinToString(" ")),
+            ).andExpect(status().isOk)
+                .andReturn().response.contentAsString
+            val refreshedTables = JsonPath.read<List<Map<String, Any>>>(refreshedBoard, "$.items")
+            assertEquals(false, refreshedTables.single { it["tableId"] == tableId.toString() }["waiterCallActive"])
+        } finally {
+            response.body().close()
+            reader.shutdownNow()
+        }
+    }
+
+    @Test
     fun `staff table board derives order billing and waiter call status for its tenant`() {
         val fixture = createGuestSession()
         val sessionId = UUID.fromString(fixture.sessionId)
@@ -2121,6 +2354,110 @@ class IdentityIntegrationTest {
     }
 
     @Test
+    fun `receipt requires an authorized closed guest session`() {
+        val fixture = createGuestSession()
+        mockMvc.perform(get("/sessions/current/receipt.pdf"))
+            .andExpect(status().isUnauthorized)
+            .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+
+        val authorization = "Bearer ${fixture.token}"
+        mockMvc.perform(get("/sessions/current/receipt.pdf").header("Authorization", authorization))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("RECEIPT_NOT_AVAILABLE"))
+
+        jdbc.update(
+            "UPDATE session_participant SET revoked_at = CURRENT_TIMESTAMP WHERE id = ?",
+            UUID.fromString(fixture.participantId),
+        )
+        mockMvc.perform(get("/sessions/current/receipt.pdf").header("Authorization", authorization))
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value("SESSION_ACCESS_REVOKED"))
+    }
+
+    @Test
+    fun `receipt renders historical billing snapshots and forced-close balance`() {
+        val fixture = createBillableSession()
+        val sessionId = UUID.fromString(fixture.sessionId)
+        val authorization = "Bearer ${fixture.token}"
+        val orderItemId = jdbc.queryForObject(
+            "SELECT id FROM order_item WHERE session_id = ?",
+            UUID::class.java,
+            sessionId,
+        )!!
+        jdbc.update(
+            """
+            UPDATE order_item
+            SET base_price_minor = 420, options_delta_minor = 80,
+                unit_price_minor = 500, line_total_minor = 500,
+                options_snapshot = ?::jsonb
+            WHERE id = ?
+            """.trimIndent(),
+            """[{"groupId":"group","optionId":"option","groupName":"Tamaño","optionName":"Grande","priceDeltaMinor":80}]""",
+            orderItemId,
+        )
+        mockMvc.perform(
+            post("/sessions/current/payments")
+                .header("Authorization", authorization)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"amountMinor":200,"tipMinor":25,"method":"SIMULATED_ONLINE"}"""),
+        ).andExpect(status().isCreated)
+        jdbc.update(
+            """
+            INSERT INTO bill_adjustment
+                (id, restaurant_id, session_id, kind, status, amount_minor, reason_code, created_by, idempotency_key)
+            VALUES (?, ?, ?, 'MANUAL_ADJUSTMENT', 'APPLIED', 50, 'TEST', ?, ?)
+            """.trimIndent(),
+            UUID.randomUUID(),
+            RESTAURANT_ID,
+            sessionId,
+            USER_ID,
+            UUID.randomUUID().toString(),
+        )
+        jdbc.update(
+            """
+            UPDATE table_session
+            SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, close_reason = 'FORCED', join_code = NULL
+            WHERE id = ?
+            """.trimIndent(),
+            sessionId,
+        )
+
+        val response = mockMvc.perform(
+            get("/sessions/current/receipt.pdf").header("Authorization", authorization),
+        ).andExpect(status().isOk)
+            .andExpect(content().contentType(MediaType.APPLICATION_PDF))
+            .andExpect(header().string("Cache-Control", "no-store"))
+            .andReturn().response.contentAsByteArray
+
+        assertTrue(response.take(4).toByteArray().contentEquals("%PDF".toByteArray()))
+        val text = Loader.loadPDF(response).use { PDFTextStripper().getText(it) }
+        assertTrue(text.contains("Somphie Zúrich"))
+        assertTrue(text.contains("Comprobante no fiscal"))
+        assertTrue(text.contains(fixture.sessionId))
+        assertTrue(text.contains("Security ${fixture.tableCode}"))
+        assertTrue(text.contains("Security test item"))
+        assertTrue(text.contains("Tamaño: Grande"))
+        assertTrue(text.contains("base ARS 4.20"))
+        assertTrue(text.contains("Descuento: ARS 0.50"))
+        assertTrue(text.contains("ARS 5.00"))
+        assertTrue(text.contains("ARS 2.00"))
+        assertTrue(text.contains("Ajustes aplicados: ARS 0.50"))
+        assertTrue(text.contains("Propina"))
+        assertTrue(text.contains("ARS 0.25"))
+        assertTrue(text.contains("Cierre forzado"))
+        assertTrue(text.contains("Saldo no cobrado: ARS 2.50"))
+
+        jdbc.update(
+            "UPDATE table_session SET closed_at = CURRENT_TIMESTAMP - INTERVAL '25 hours' WHERE id = ?",
+            sessionId,
+        )
+        mockMvc.perform(get("/sessions/current/receipt.pdf").header("Authorization", authorization))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("SESSION_CLOSED"))
+    }
+
+    @Test
     fun `staff opens a session without host and idempotent replay returns same code`() {
         val tableId = UUID.randomUUID()
         val tableCode = "STAFF-${UUID.randomUUID()}"
@@ -2132,6 +2469,7 @@ class IdentityIntegrationTest {
             tableLabel,
             tableCode,
         )
+        val cursorBeforeOpen = eventCursor()
         val token = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
         val key = UUID.randomUUID().toString()
 
@@ -2182,6 +2520,32 @@ class IdentityIntegrationTest {
             .andExpect(header().string("Idempotent-Replayed", "true"))
             .andExpect(jsonPath("$.session.id").value(sessionId))
             .andExpect(jsonPath("$.joinCode").value(joinCode))
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                """
+                SELECT count(*) FROM event_log
+                WHERE restaurant_id = ? AND id > ? AND type = 'session.updated' AND aggregate_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                RESTAURANT_ID,
+                cursorBeforeOpen,
+                UUID.fromString(sessionId),
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                """
+                SELECT count(*) FROM event_log
+                WHERE restaurant_id = ? AND id > ? AND type = 'table.updated' AND aggregate_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                RESTAURANT_ID,
+                cursorBeforeOpen,
+                tableId,
+            ),
+        )
     }
 
     @Test
@@ -3906,6 +4270,92 @@ class IdentityIntegrationTest {
 
     private fun loginRequest(password: String) = loginRequest(EMAIL, password)
 
+    private fun eventCursor(): Long =
+        jdbc.queryForObject(
+            "SELECT COALESCE(MAX(id), 0) FROM event_log WHERE restaurant_id = ?",
+            Long::class.java,
+            RESTAURANT_ID,
+        ) ?: 0L
+
+    private fun scheduledStreamCount(): Int = eventStreamScheduler.activeCount + eventStreamScheduler.queue.size
+
+    private fun awaitScheduledStreamCountAtMost(maximum: Int, timeoutSeconds: Long) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
+        while (scheduledStreamCount() > maximum && System.nanoTime() < deadline) {
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10))
+        }
+        assertTrue(scheduledStreamCount() <= maximum, "SSE scheduler retained tasks after all responses closed")
+    }
+
+    private fun openSessionEventStream(
+        token: String,
+        cursor: Long,
+        client: HttpClient = eventHttpClient,
+    ): HttpResponse<InputStream> {
+        val response = client.send(
+            HttpRequest.newBuilder(URI("http://localhost:$port/events/stream?scope=session"))
+                .header("Authorization", "Bearer $token")
+                .header("Last-Event-ID", cursor.toString())
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofInputStream(),
+        )
+        assertEquals(200, response.statusCode())
+        return response
+    }
+
+    private fun openStaffEventStream(token: String, cursor: Long): HttpResponse<InputStream> {
+        val authorization = listOf("Bearer", token).joinToString(" ")
+        val response = eventHttpClient.send(
+            HttpRequest.newBuilder(URI("http://localhost:$port/events/stream?scope=staff"))
+                .header("Authorization", authorization)
+                .header("Last-Event-ID", cursor.toString())
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofInputStream(),
+        )
+        assertEquals(200, response.statusCode())
+        return response
+    }
+
+    private fun appendSessionEvent(sessionId: UUID): StoredDomainEvent =
+        requireNotNull(
+            TransactionTemplate(transactionManager).execute {
+                eventOutbox.append(
+                    DomainEvent(
+                        restaurantId = RESTAURANT_ID,
+                        type = DomainEventType.SESSION_UPDATED,
+                        aggregateType = EventAggregateType.SESSION,
+                        aggregateId = sessionId,
+                        version = EventVersion.Increment,
+                        sessionId = sessionId,
+                    ),
+                )
+            },
+        )
+
+    private fun readSseMessage(stream: InputStream): String =
+        readSseMessage(BufferedReader(InputStreamReader(stream, Charsets.UTF_8)))
+
+    private fun readSseMessage(reader: BufferedReader): String {
+        val lines = mutableListOf<String>()
+        while (true) {
+            val line = reader.readLine() ?: return lines.joinToString("\n")
+            if (line.isEmpty()) {
+                if (lines.isNotEmpty()) return lines.joinToString("\n")
+            } else {
+                lines += line
+            }
+        }
+    }
+
+    private fun readSseEvent(reader: BufferedReader, type: String): String {
+        while (true) {
+            val message = readSseMessage(reader)
+            if (message.contains("event:$type")) return message
+        }
+    }
+
     private fun createGuestSession(restaurantId: UUID = RESTAURANT_ID): GuestFixture {
         val tableId = UUID.randomUUID()
         val tableCode = "SEC-${UUID.randomUUID()}"
@@ -4146,6 +4596,9 @@ class IdentityIntegrationTest {
             Int::class.java,
             restaurantId,
         )!!
+        val previousMenuEtag = mockMvc.perform(get("/menu"))
+            .andExpect(status().isOk)
+            .andReturn().response.getHeader(HttpHeaders.ETAG)!!
 
         val productRoute = "/staff/products/$productId/availability"
         repeat(2) {
@@ -4195,6 +4648,10 @@ class IdentityIntegrationTest {
             ),
         )
         mockMvc.perform(get("/menu"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.catalogVersion").value(finalVersion))
+            .andExpect(header().string("ETag", "W/\"$finalVersion-es-AR\""))
+        mockMvc.perform(get("/menu").header(HttpHeaders.IF_NONE_MATCH, previousMenuEtag))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.catalogVersion").value(finalVersion))
             .andExpect(header().string("ETag", "W/\"$finalVersion-es-AR\""))
@@ -4419,6 +4876,7 @@ class IdentityIntegrationTest {
     }
 
     private companion object {
+        const val CONCURRENT_SSE_CONNECTIONS = 50
         const val EMAIL = "identity-test@somphie.demo"
         const val OLD_PASSWORD = "old-password-123"
         const val NEW_PASSWORD = "new-password-456"

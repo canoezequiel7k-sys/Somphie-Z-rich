@@ -66,7 +66,7 @@ class CatalogController(
         ) ?: throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Restaurant not found")
         val etag = "W/\"$catalogVersion-$effectiveLocale\""
 
-        if (ifNoneMatch != null && ifNoneMatch.replace("W/", "") == etag.replace("W/", "")) {
+        if (ifNoneMatch != null && matchesIfNoneMatch(ifNoneMatch, etag)) {
             return ResponseEntity.status(HttpStatus.NOT_MODIFIED)
                 .header(HttpHeaders.ETAG, etag)
                 .header(HttpHeaders.VARY, HttpHeaders.ACCEPT_LANGUAGE)
@@ -87,6 +87,28 @@ class CatalogController(
             .header(HttpHeaders.ETAG, etag)
             .header(HttpHeaders.VARY, HttpHeaders.ACCEPT_LANGUAGE)
             .body(response)
+    }
+
+    private fun matchesIfNoneMatch(header: String, etag: String): Boolean {
+        val currentTag = etag.removePrefix("W/")
+        var start = 0
+        var inQuotes = false
+        for (index in header.indices) {
+            when (header[index]) {
+                '"' -> inQuotes = !inQuotes
+                ',' -> if (!inQuotes && matchesTag(header.substring(start, index), currentTag)) return true
+            }
+            if (index == header.lastIndex) {
+                return matchesTag(header.substring(start), currentTag)
+            }
+            if (header[index] == ',' && !inQuotes) start = index + 1
+        }
+        return false
+    }
+
+    private fun matchesTag(candidate: String, currentTag: String): Boolean {
+        val trimmed = candidate.trim()
+        return trimmed == "*" || trimmed.removePrefix("W/") == currentTag
     }
 
     @GetMapping("/products/{productId}")

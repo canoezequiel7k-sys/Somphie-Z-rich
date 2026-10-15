@@ -2,7 +2,7 @@
 
 > Decisión base: **SSE** con eventos "pista" (ADR-0006), aprobada por D-160. WP-BE-60 está parcialmente implementada; los consumidores mantienen polling como fallback.
 >
-> Estado al 2026-10-14: V15/V17, endpoint SSE, cursor/reanudación, filtro tenant/sesión/estación y retención están implementados y probados en PostgreSQL. Faltan productores de varios flujos, pruebas de heartbeat/revocación durante una conexión y medición de 50 streams; no declarar WP-BE-60 cerrada.
+> Estado al 2026-10-14: V15/V17, endpoint SSE, cursor/reanudación, filtro tenant/sesión/estación y retención están implementados y probados en PostgreSQL. Pruebas HTTP reales cubren heartbeat a 25 s, replay, revocación y 50 streams HTTP/1.1 simultáneos con entrega común; tras revocación, las tareas del scheduler no superan la línea base y los executors cliente se cierran. La prueba no representa capacidad sostenida de producción; revisar productores restantes antes de cerrar WP-BE-60.
 
 Se usa PostgreSQL como log durable/outbox transaccional y fuente de replay SSE; un aviso post-commit en memoria solo optimiza el despertar de lectores. El cursor se asigna con contador bloqueado por restaurante hasta commit para ordenar los eventos visibles. Ver costos, pruebas y límites en [ADR-0006](../00-gobierno/adr/ADR-0006-tiempo-real-sse.md).
 
@@ -47,11 +47,11 @@ La retención borra en lotes los eventos de más de 48 horas y avanza un waterma
 Ver `04-api/eventos.md`.
 
 ## 6. Pruebas obligatorias (QA)
-- Desconexión y reconexión con `Last-Event-ID` (sin perder ni duplicar efectos).
+- Desconexión y reconexión con `Last-Event-ID` (sin perder ni duplicar efectos): prueba HTTP real implementada.
 - Eventos duplicados y desordenados.
 - `EVENT_ID_TOO_OLD` → refresco completo.
 - Un participante **no** recibe eventos de otra sesión (`STREAM_SCOPE_FORBIDDEN`).
-- Rendimiento: 50 conexiones simultáneas estables.
+- Carga: la prueba HTTP abre 50 streams simultáneos y sincroniza los lectores antes de publicar una mutación durable. Verifica el `eventId` y tipo exactos en cada stream; revoca el participante y espera que las tareas no superen la línea base, cerrando cuerpos y executors con límites de espera. Es una prueba funcional/limpieza en Testcontainers, no un benchmark de capacidad sostenida.
 
 ## 7. Límites a recordar
 - SSE actualiza interfaces **abiertas**; no despierta apps cerradas.
