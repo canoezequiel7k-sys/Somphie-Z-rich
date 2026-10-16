@@ -1,20 +1,23 @@
 # Índice de trabajo del backend
 
-**Estado:** ejecución activa; rama `feat/backend-preparation`, HEAD `506adfb94f49f232d0159faa76554e87c4a36a72`; worktree con cambios locales sin commit. **Revisión:** 2026-10-14.
+**Estado:** ejecución activa; rama `feat/backend-preparation`, HEAD `a6a2c8d90fb60b5c7cf762aae4d67ca43965ebcc`, upstream sincronizado. **Revisión:** 2026-10-16.
 
 ### Actualización D-160 (estado vigente)
 
 | Bloque | Estado ahora |
 |---|---|
-| Q-26/27/31/32/33/34 y Fase 9 | Alcance aprobado por el dueño; ver [decisiones](./decisiones.md). Fórmulas Q-26 y contratos de identidad Fase 9 no se inventan. |
+| Q-26/27/31/32/33/34 y selección Fase 9 | Alcance aprobado por el dueño; ver [decisiones](./decisiones.md). Q-26 sigue abierta para operaciones/contratos admin y fórmulas respaldadas; Q-35 define el proceso/contrato de identidad cliente y Q-36 el envío/contrato de correo y encuesta. Q-07 resuelve retención, no estos flujos. |
 | WP-ARQ-60 | ADR-0006 aprobada: PostgreSQL outbox + SSE. |
-| WP-BE-60 | Parcial: productores de mutaciones persistidas revisados, incluidos eventos atómicos de `EXPIRED_EMPTY`; HTTP real cubre autorización, replay, heartbeat, entrega exacta y limpieza tras revocar 50 streams. Sin admisión, el polling crea tarea por conexión (4 workers, cola no acotada); falta definir objetivo/capacidad y medir el despliegue. |
+| Retenciones | Implementadas: idempotencia (24 h), nombres de invitados (12 meses) y llamados (30 días). Pruebas unitarias/PostgreSQL; suite global del 2026-10-16 pasó con 402 pruebas y 94,70 % de líneas. |
+| WP-BE-60 | Parcial: además de filtros/lista/cola y OWNER global, `undo` de preparación valida estación; la regresión HTTP/PostgreSQL confirma rechazo sin mutación para estación ajena. Perfil/capacidad sostenida pendiente; desconexión TCP no reproducida de forma fiable. |
 | WP-BE-52 | Completada para el contrato vigente: mutaciones de disponibilidad, versión/ETag y comparación `If-None-Match` (lista, comparación débil y `*`) cubiertos; no hay otras mutaciones administrativas de catálogo en OpenAPI. |
 | WP-BE-51-T01 | Completada localmente: Q-31 aplicada; PostgreSQL cubre tablero/saldo firmado y HTTP SSE valida llamados, actualizaciones y refresco REST del tablero. |
 | WP-BE-71-T01 | Completada localmente: cierres y Q-34; historial expone creador/participante. Suite global posterior al cambio pasó. |
-| WP-BE-72 | Implementada localmente con PDFBox 3.0.8 (Apache-2.0, bytecode Java 8/JVM 25): bajo demanda, acceso guest/cerrado/24 h, snapshots y cálculo Billing reutilizado; autorización, contenido y errores cubiertos por HTTP/PostgreSQL; renderer cierra un stream por página incluso ante error. |
-| WP-BE-80/81/82 / WP-BE-90/91 | Alcances aprobados; contratos específicos pendientes. Faltan fórmulas respaldadas para algunas métricas e identidad/verificación de cliente conforme a reglas vigentes. |
-| Validación (2026-10-14) | `check jacocoTestReport`: 387 pruebas, 0 fallos/errores/omitidas, 94,17 % (5803/6162 líneas). Markdownlint (3 documentos modificados) y `git diff --check` pasaron. OpenAPI sin cambios. |
+| WP-BE-72 | Validada localmente: PDFBox 3.0.8 (Apache-2.0/JVM 25), bajo demanda, guest/cerrado/24 h, snapshots y Billing compartido; leyenda D-136, saldos, propina de pagos vigentes y nombres largos cubiertos por HTTP/PostgreSQL. Sin persistencia del PDF. |
+| WP-BE-80/82 | Parcial: WP-BE-80-T01 cubre lectura local (límite 1 MB, firmas WebP/JPEG/PNG, contención de rutas), V19 exige alt y una prueba HTTP integra ruta pública, filesystem, tipo/cache y 404. Q-26 debe fijar operaciones, permisos, campos, errores y reglas para catálogo/imágenes, QR, usuarios/settings y grupos/opciones/traducciones; OpenAPI solo define `GET /media/{path}`. |
+| WP-BE-81 | Bloqueada por Q-26: faltan contrato/filtros y fórmulas respaldadas para informes; exportación/auditoría también necesita precisar su contrato y permisos. No inferir métricas desde las pantallas. |
+| WP-BE-90/91 | Bloqueadas por Q-35/Q-36: falta proceso/contrato de autenticación y vinculación de clientes, y política/contrato de correo, destinatarios, feedback y reintentos. D-160 selecciona Fase 9, pero no decide estos detalles. |
+| Validación (2026-10-16) | `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`: 402 pruebas, 0 fallos/errores, 1 omitida por symlink no disponible en Windows; 5951/6284 líneas (94,70 %). Markdownlint focal y `git diff --check` pasaron; el lint global conserva 2 problemas preexistentes. OpenAPI no cambió en esta continuación. |
 
 El mapa detallado que sigue es una foto histórica previa a D-160; sus bloqueos por aprobación ya no están vigentes.
 
@@ -33,12 +36,12 @@ El mapa detallado que sigue es una foto histórica previa a D-160; sus bloqueos 
 | 2 | **WP-BE-50 — Completado (2026-10-13)** | Q-24 resuelta; OpenAPI 0.3.0 define FIFO/SLA por `acceptedAt`, históricos nullable y keyset eventual. `check jacocoTestReport`: 315 tests, 0 fallos; JaCoCo 92,81 %. | [T01–T05](../08-agentes/backend-work/wp-be-50.md); WP-BE-44. Cierre respaldado por validación backend y documental. | WP-BE-51 requiere saldo completo de billing. |
 | 3 | **WP-BE-51 — T01/T02 completadas localmente** | Tablero/detalle y llamados persistidos; autorización tenant, ciclo de vida, expiración y eventos durables. PostgreSQL y HTTP SSE validan saldo firmado, estados y refresco del tablero. | [T01–T02](../08-agentes/backend-work/wp-be-51-52.md); el puerto de saldo de WP-BE-70 ya está validado. | Ninguno dentro del alcance de T01/T02; WP-BE-60 conserva revisión de productores/límites. |
 | 4 | **WP-BE-52 — Completada en alcance contratado (2026-10-14)** | V16 persiste `catalogVersion`; PATCH de disponibilidad de producto/opción, ETag y `If-None-Match` para tags débiles/listas/wildcard; prueba HTTP asegura que un validador anterior no oculte una versión nueva. | [T01](../08-agentes/backend-work/wp-be-51-52.md); WP-BE-30 y D-160. | CRUD adicional requiere contrato aprobado; OpenAPI no define otras mutaciones. |
-| 5 | **WP-BE-60 — Parcial** | Outbox, stream, replay, retención, reautorización y productores de transiciones persistidas cubiertos; expiración de sesión emite eventos atómicos. Prueba HTTP confirma entrega exacta y que el scheduler vuelve como máximo a la línea base tras revocar 50 streams. | [T01](../08-agentes/backend-work/wp-be-60.md); WP-ARQ-60 aprobada y WP-BE-50. | Acordar perfil operativo y medir capacidad sostenida; no hay flujo persistido de expiración de pedidos. |
+| 5 | **WP-BE-60 — Parcial** | Outbox, replay y revocación cubiertos; lista/detalle/replay aplican alcance por roles combinados y mantienen Cocina sola limitada a sus estaciones. Pruebas integradas pasaron en suite global (2026-10-16). | [T01](../08-agentes/backend-work/wp-be-60.md); WP-ARQ-60 aprobada y WP-BE-50. | Acordar capacidad sostenida y reproducir desconexión TCP normal. |
 | 6 | **WP-BE-70 — T01/T02/T03 completadas y validadas en la rama** | PostgreSQL valida cuenta completa, reembolsos, anulaciones e interacción de propinas. `SessionBillPort` entrega el saldo derivado a floor; ADR-0010 referencia fuentes aprobadas. | [T01–T03](../08-agentes/backend-work/wp-be-70-73.md); WP-BE-50 y WP-BE-73-T02. | WP-BE-51-T01/T02 ya validadas end-to-end. |
 | 7 | **WP-BE-71 — T01 completada localmente** | Cierres y pedido staff con participante opcional; actor deriva del JWT; V18 preserva filas históricas y ambas atribuciones aparecen en lecturas. PostgreSQL integra no-participante, participante, replay, permiso, tenant y referencia de sesión; suite global pasó. | [T01](../08-agentes/backend-work/wp-be-70-73.md); WP-BE-70 y D-160. | Sin commit; validación final del backend depende de paquetes pendientes. |
 | 8 | **WP-BE-72 — Implementada localmente** | Contrato existente cubierto con PDFBox: contenido desde snapshots/cuenta, permisos, cierre y TTL; pruebas HTTP PostgreSQL verifican el PDF generado. | [T01](../08-agentes/backend-work/wp-be-70-73.md); WP-BE-71 y WP-UX-70. | Sin cambios de OpenAPI. |
 | 9 | **WP-BE-73 — T01 parcial; T02 completada y validada en la rama** | PostgreSQL valida propinas online/efectivo, tope y configuración, propina sola, atomicidad, replay y saldo; T02 cubre permiso/tenant/concurrencia de ajustes. Recibo implementado localmente. | [T01–T02](../08-agentes/backend-work/wp-be-70-73.md); WP-BE-70 y WP-ARQ-70. | Reporting pendiente de contrato y fórmulas (Q-26; WP-BE-81). |
-| 10 | **WP-BE-80 — Parcial** | Hay lectura de catálogo/media y dominio floor; falta CRUD administrativo. D-160 aprobó el alcance de lectura, pero el contrato de administración sigue sin definir rutas/esquemas. | [T01–T03](../08-agentes/backend-work/wp-be-80-82.md); WP-ARQ-80 y D-160. | Definir contrato OpenAPI y `CHANGELOG.md` antes de implementar rutas nuevas. |
+| 10 | **WP-BE-80 — Parcial** | El adaptador local limita a 1 MB, valida firmas y contiene symlinks; V19 exige alt y prueba HTTP integra lectura pública, tipo/cache y 404. Falta procesamiento/upload y CRUD; OpenAPI solo define `GET /media/{path}`. | [T01–T03](../08-agentes/backend-work/wp-be-80-82.md); WP-ARQ-80 y D-160. | Definir contrato OpenAPI y `CHANGELOG.md` antes de implementar rutas nuevas. |
 | 11 | **WP-BE-81 — Contrato y fórmulas pendientes** | Roadmap/UX enumeran informes; RN-TIP-08 fija propinas separadas y sin atribución laboral. Faltan operaciones, filtros, permisos y fórmulas respaldadas; renderer PDF ya está disponible. | [T01–T02](../08-agentes/backend-work/wp-be-80-82.md); WP-BE-71 y D-160. | Excluir las métricas sin fórmula validada; completar primero contrato de lectura. |
 | 12 | **WP-BE-82 — Parcial (catálogo base)** | Opciones/traducciones se leen en catálogo, pero falta API administrativa; D-160 habilita seguir definiendo el contrato. | [T01](../08-agentes/backend-work/wp-be-80-82.md); WP-BE-80. | Contratar CRUD y probar integridad de asignaciones antes de integrar. |
 | — | **Validación final — Pendiente** | Ninguna validación final acumulada para el conjunto 40–82. La validación de WP-BE-40/50 es específica de esos paquetes. | [T01](../08-agentes/backend-work/final-validation.md); todos los paquetes requeridos cerrados. | Habilita declarar backend central listo; Fase 9 no se presume obligatoria. |
@@ -70,13 +73,13 @@ Dependencias de fase y entregables se citan en [`roadmap-fases.md`](../08-agente
 
 | Paquete | Alcance de roadmap | Estado de planificación / dependencia |
 |---|---|---|
-| WP-BE-90 | Registro/verificación/login de cliente, vincular participante y email | Fase 9 seleccionada por D-160; definir contrato y procesos de identidad según reglas aprobadas, sin inventar proveedor/estados. |
-| WP-BE-91 | Email de comprobante y encuesta | Seleccionado dentro de Fase 9; depende de BE-90 y de configuración/integración de correo definida. |
-| WP-BE-92 | Llamar al mozo; retiro por mostrador solo si se mantiene | Llamados ya tienen rutas/persistencia; falta productor durable `waiter.*` en WP-BE-60. El retiro por mostrador sigue opcional. |
+| WP-BE-90 | Registro/verificación/login de cliente, vincular participante y email | Fase 9 seleccionada por D-160; Q-35 precisa reglas/contrato de identidad y vinculación; Q-36 define el transporte de verificación sin inventar proveedor. |
+| WP-BE-91 | Email de comprobante y encuesta | Seleccionado dentro de Fase 9; depende de BE-90 y Q-36 (destinatarios, disparadores, feedback, transporte/configuración, deduplicación y reintentos). |
+| WP-BE-92 | Llamar al mozo; retiro por mostrador solo si se mantiene | Llamados y productores `waiter.*` están implementados/probados; retiro por mostrador sigue opcional según D-025. |
 
-## Siguiente paso (foto histórica anterior a D-160)
+## Siguiente paso
 
-La secuencia histórica de abajo quedó superada. Próximo trabajo vigente: completar WP-BE-60 (SSE, retención, permisos y productores restantes), después terminar los paquetes dependientes y avanzar Fase 9 solo con reglas/contratos concretos.
+La secuencia histórica de abajo quedó superada. WP-BE-60 conserva solo la definición/medición del perfil de capacidad y la reproducción de FIN/reset TCP; WP-BE-80/81/82 requieren resolver Q-26, y BE-90/91 requieren Q-35/Q-36 y los contratos asociados antes de implementar sus superficies.
 
 ## Documentos fuente
 

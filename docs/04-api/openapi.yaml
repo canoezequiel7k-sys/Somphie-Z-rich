@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Somphie Zúrich API
-  version: 0.4.1
+  version: 0.4.3
   summary: Contrato REST del backend de Somphie Zúrich (pedidos por QR, operación del personal, cuenta y pagos simulados).
   description: |
     Fuente de verdad del contrato (ADR-0008). Todo cambio se hace **primero aquí** y en `CHANGELOG.md`.
@@ -790,6 +790,7 @@ paths:
       description: |
         Para la cola de entrantes: `status=PENDING_REVIEW`, ordenados por antigüedad.
         Cocina solo recibe pedidos con ítems de sus estaciones, **con esos ítems únicamente** y sin datos de participantes.
+        Los ítems se limitan a `QUEUED`, `IN_PREPARATION`, `READY` y `DELIVERED`; Cocina no recibe nota general ni precios/totales de cuenta (esos campos se omiten).
       security: [{staffJwt: []}]
       x-permission: order.read
       parameters:
@@ -820,6 +821,7 @@ paths:
       tags: [StaffOrders]
       operationId: getStaffOrder
       summary: Detalle de un pedido (con disponibilidad actual por ítem)
+      description: Cocina solo accede si el pedido tiene ítems aceptados de sus estaciones; recibe únicamente esos ítems y no recibe nota general ni datos de cuenta.
       security: [{staffJwt: []}]
       x-permission: order.read
       parameters:
@@ -1086,7 +1088,10 @@ paths:
       tags: [Preparation]
       operationId: undoItem
       summary: Revertir un paso de estado
-      description: Deshacer `DELIVERED -> READY` solo dentro de `deliveredUndoWindowMin` (`ITEM_UNDO_WINDOW_EXPIRED`).
+      description: |
+        Deshacer `DELIVERED -> READY` solo dentro de `deliveredUndoWindowMin` (`ITEM_UNDO_WINDOW_EXPIRED`).
+        Al revertir una transición de preparación (`IN_PREPARATION` o `READY`), se requiere estar asignado a la estación del ítem (`ITEM_STATION_FORBIDDEN`).
+        Para revertir una entrega se requieren `item.undo` y `item.deliver`.
       security: [{staffJwt: []}]
       x-permission: item.undo
       parameters:
@@ -1703,7 +1708,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/VersionInfo'}
-              example: {build: 0.1.0, contractVersion: 0.4.1}
+              example: {build: 0.1.0, contractVersion: 0.4.3}
         '500': {$ref: '#/components/responses/InternalError'}
   /media/{path}:
     get:
@@ -2335,16 +2340,18 @@ components:
         acknowledgedTotalMinor: {$ref: '#/components/schemas/MoneyMinor'}
     OrderItemOption:
       type: object
-      required: [groupId, optionId, groupName, optionName, priceDeltaMinor]
+      required: [groupId, optionId, groupName, optionName]
       properties:
         groupId: {$ref: '#/components/schemas/Uuid'}
         optionId: {$ref: '#/components/schemas/Uuid'}
         groupName: {type: string}
         optionName: {type: string}
-        priceDeltaMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        priceDeltaMinor:
+          allOf: [{$ref: '#/components/schemas/MoneyMinor'}]
+          description: Omitido para Cocina.
     OrderItem:
       type: object
-      required: [id, productId, productName, basePriceMinor, optionsDeltaMinor, unitPriceMinor, quantity, lineTotalMinor, station, status]
+      required: [id, productId, productName, quantity, station, status]
       properties:
         id: {$ref: '#/components/schemas/Uuid'}
         productId: {$ref: '#/components/schemas/Uuid'}
@@ -2353,14 +2360,22 @@ components:
           type: object
           additionalProperties: {type: string}
           description: Nombre por idioma (snapshot) para que el cliente vea su historial en su idioma.
-        basePriceMinor: {$ref: '#/components/schemas/MoneyMinor'}
-        optionsDeltaMinor: {$ref: '#/components/schemas/MoneyMinor'}
-        unitPriceMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        basePriceMinor:
+          allOf: [{$ref: '#/components/schemas/MoneyMinor'}]
+          description: Omitido para Cocina.
+        optionsDeltaMinor:
+          allOf: [{$ref: '#/components/schemas/MoneyMinor'}]
+          description: Omitido para Cocina.
+        unitPriceMinor:
+          allOf: [{$ref: '#/components/schemas/MoneyMinor'}]
+          description: Omitido para Cocina.
         quantity: {type: integer, minimum: 1}
-        lineTotalMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        lineTotalMinor:
+          allOf: [{$ref: '#/components/schemas/MoneyMinor'}]
+          description: Omitido para Cocina.
         station: {type: string}
         status: {$ref: '#/components/schemas/ItemStatus'}
-        note: {type: string}
+        note: {type: string, description: Nota por ítem; se conserva para Cocina.}
         queuedAt: {$ref: '#/components/schemas/Timestamp'}
         startedAt: {$ref: '#/components/schemas/Timestamp'}
         readyAt: {$ref: '#/components/schemas/Timestamp'}
@@ -2371,7 +2386,7 @@ components:
           items: {$ref: '#/components/schemas/OrderItemOption'}
     Order:
       type: object
-      required: [id, displayCode, status, version, createdAt, items, totalMinor]
+      required: [id, displayCode, status, version, createdAt, items]
       properties:
         id: {$ref: '#/components/schemas/Uuid'}
         displayCode: {type: string, description: "Código corto secuencial por día de negocio (por ejemplo `#042`)."}
@@ -2395,7 +2410,7 @@ components:
             participantId: {$ref: '#/components/schemas/Uuid'}
             displayName: {type: string}
         createdAt: {$ref: '#/components/schemas/Timestamp'}
-        note: {type: string}
+        note: {type: string, description: Nota general omitida para Cocina; las notas por ítem se conservan.}
         rejection:
           type: object
           description: "Motivo visible; aparece solo en pedidos rechazados (D-145)."
@@ -2406,7 +2421,9 @@ components:
         items:
           type: array
           items: {$ref: '#/components/schemas/OrderItem'}
-        totalMinor: {$ref: '#/components/schemas/MoneyMinor'}
+        totalMinor:
+          allOf: [{$ref: '#/components/schemas/MoneyMinor'}]
+          description: Omitido para Cocina.
     OrderPage:
       type: object
       required: [items, nextCursor]

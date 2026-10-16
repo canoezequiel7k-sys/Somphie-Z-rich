@@ -29,6 +29,8 @@ import org.testcontainers.junit.jupiter.Testcontainers
 import com.jayway.jsonpath.JsonPath
 import com.somphie.floor.api.ExpireEmptySessionsJob
 import java.security.MessageDigest
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -70,6 +72,40 @@ class BackendSmokeTest {
         createdRestaurantIds.clear()
     }
 
+    @Test
+    fun `media endpoint serves nested supported image publicly and returns not found for missing image`() {
+        val mediaRoot = Path.of("media").toAbsolutePath().normalize()
+        val rootExisted = Files.exists(mediaRoot)
+        val testDirectory = mediaRoot.resolve("smoke-${UUID.randomUUID()}")
+        val image = testDirectory.resolve("fixture.png")
+        val bytes = byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x01, 0x02, 0x03, 0x04,
+        )
+        Files.createDirectories(testDirectory)
+        try {
+            Files.write(image, bytes)
+
+            mockMvc.perform(get("/media/${testDirectory.fileName}/fixture.png"))
+                .andExpect(status().isOk)
+                .andExpect(content().contentTypeCompatibleWith("image/png"))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "public, max-age=86400"))
+                .andExpect(content().bytes(bytes))
+
+            mockMvc.perform(get("/media/${testDirectory.fileName}/missing.png"))
+                .andExpect(status().isNotFound)
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+        } finally {
+            Files.deleteIfExists(image)
+            Files.deleteIfExists(testDirectory)
+            if (!rootExisted && Files.isDirectory(mediaRoot) &&
+                Files.list(mediaRoot).use { !it.findAny().isPresent }
+            ) {
+                Files.deleteIfExists(mediaRoot)
+            }
+        }
+    }
+
     /** Verifica que la versión publicada coincida con los metadatos del build y el contrato. */
     @Test
     fun `version endpoint returns build and contract metadata`() {
@@ -77,7 +113,7 @@ class BackendSmokeTest {
             .andExpect(status().isOk)
             .andExpect(content().contentTypeCompatibleWith("application/json"))
             .andExpect(jsonPath("$.build").value("0.0.1-SNAPSHOT"))
-            .andExpect(jsonPath("$.contractVersion").value("0.4.1"))
+            .andExpect(jsonPath("$.contractVersion").value("0.4.3"))
     }
 
     /** Confirma que Actuator exponga salud sin detalles internos en el perfil de pruebas. */

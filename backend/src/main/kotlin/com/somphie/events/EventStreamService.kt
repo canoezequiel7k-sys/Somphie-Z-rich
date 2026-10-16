@@ -1,6 +1,7 @@
 package com.somphie.events
 
 import com.somphie.identity.application.IdentityService
+import com.somphie.identity.domain.StaffReadScope
 import com.somphie.identity.domain.StaffProfile
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
@@ -33,6 +34,19 @@ class EventStreamService(
         }
 
     fun ensureCursor(access: EventStreamAccess, cursor: Long) {
+        val latestCursor = jdbc.queryForObject(
+            """
+            SELECT COALESCE(
+                (SELECT last_event_id FROM event_cursor WHERE restaurant_id = :restaurantId),
+                0
+            )
+            """.trimIndent(),
+            mapOf("restaurantId" to access.restaurantId),
+            Long::class.java,
+        ) ?: 0L
+        if (cursor > latestCursor) {
+            throw DomainException(ErrorCode.VALIDATION_FAILED, "Event cursor is ahead of the restaurant stream")
+        }
         val lastDeleted = jdbc.queryForObject(
             """
             SELECT COALESCE(
@@ -76,29 +90,38 @@ class EventStreamService(
             }
             parameters["types"] = types
             var filter = "e.type IN (:types)"
-            val stationIds = if (staff.roles.any { it in setOf("KITCHEN", "BAR") }) {
+            val stationScoped = StaffReadScope.isKitchenOnly(staff.roles)
+            val stationIds = if (stationScoped) {
                 staff.stations.map { it.id }
             } else {
                 emptyList()
             }
-            if (stationIds.isNotEmpty()) {
-                parameters["stationIds"] = stationIds
-                filter += """
-                    AND (
-                        e.station_id IN (:stationIds)
-                        OR (
-                            e.station_id IS NULL
-                            AND (
-                                e.aggregate_type != 'ORDER'
-                                OR EXISTS (
-                                    SELECT 1 FROM order_item oi
-                                    WHERE oi.order_id = e.aggregate_id
-                                      AND oi.station_id IN (:stationIds)
+            if (stationScoped) {
+                if (stationIds.isEmpty()) {
+                    filter += " AND e.aggregate_type = 'CATALOG'"
+                } else {
+                    parameters["stationIds"] = stationIds
+                    filter += """
+                        AND (
+                            e.station_id IN (:stationIds)
+                            OR (
+                                e.station_id IS NULL
+                                AND (
+                                    e.aggregate_type = 'CATALOG'
+                                    OR (
+                                        e.aggregate_type = 'ORDER'
+                                        AND EXISTS (
+                                        SELECT 1 FROM order_item oi
+                                        WHERE oi.order_id = e.aggregate_id
+                                          AND oi.station_id IN (:stationIds)
+                                          AND oi.status IN ('QUEUED', 'IN_PREPARATION', 'READY', 'DELIVERED')
+                                        )
+                                    )
                                 )
                             )
                         )
-                    )
-                """.trimIndent()
+                    """.trimIndent()
+                }
             }
             filter
         }

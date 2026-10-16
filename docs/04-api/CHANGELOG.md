@@ -7,6 +7,19 @@ Reglas (D-150):
 - Versiones `0.x` = borrador. `1.0.0` = contrato congelado al cerrar la Fase 1.
 - Las fechas anteriores al 2026-10-11 no se registraron en su momento (el historial de Git empieza ese día): se marcan "fecha no registrada" en vez de inventarlas.
 
+## [0.4.3] — 2026-10-15 — limitar deshacer preparación por estación
+Corrección de autorización para alinear `undo` con el alcance de la transición revertida, sin cambiar rutas ni esquemas.
+- fixed: `POST /staff/order-items/{itemId}/undo` exige asignación a la estación del ítem cuando revierte `IN_PREPARATION` o `READY`; para revertir una entrega requiere además `item.deliver`.
+- changed: `info.version` y el ejemplo de `GET /version` (`contractVersion`) = `0.4.3`.
+- Impacto: **Web y Android** reciben `403 ITEM_STATION_FORBIDDEN` si intentan revertir preparación desde otra estación; **Backend** impide que el permiso general `item.undo` saltee el alcance por recurso.
+
+## [0.4.2] — 2026-10-15 — limitar datos de pedidos visibles para Cocina
+Cambio de respuesta por rol, alineado con `actores-y-roles.md`: Cocina solo recibe ítems aceptados de sus estaciones; no recibe nota general ni importes del pedido, ítem u opciones.
+- fixed: `GET /staff/orders` deja de incluir ítems fuera de `QUEUED`, `IN_PREPARATION`, `READY` y `DELIVERED` para Cocina.
+- changed: campos de importe de `Order`, `OrderItem` y `OrderItemOption` son opcionales y se omiten para Cocina; la nota general también se omite, sin afectar notas por ítem.
+- changed: `info.version` y el ejemplo de `GET /version` (`contractVersion`) = `0.4.2`.
+- Impacto: **Web y Android** deben admitir los campos de importe opcionales para Cocina; **Backend** aplica el mismo alcance en lista, detalle y cola de estación.
+
 ## [0.4.1] — 2026-10-13 — atribuir pedidos creados por el personal (Q-34)
 Cambio compatible: el endpoint de pedidos en nombre del cliente acepta un participante asociado opcional y deriva el empleado creador del JWT autenticado.
 - added: `CreateStaffOrderRequest.participantId` es opcional; el servidor valida que el participante pertenezca a la sesión.

@@ -84,13 +84,14 @@ ALTER TABLE order_item ADD CONSTRAINT ck_item_status CHECK (status IN
 
 > **Cargos facturables** (SQL conceptual): ítems con `status <> 'CANCELLED'` cuyo pedido está en `('ACCEPTED','IN_PREPARATION','READY','DELIVERED')`. Esto se encapsula en **una sola** consulta/función (`billableChargesForSession`) usada por cuenta, pagos y cierre, para que nunca haya dos definiciones distintas.
 
-## 5. Retención de datos (🟡 Q-07)
-| Dato | Propuesta |
+## 5. Retención de datos (D-135)
+| Dato | Regla |
 |---|---|
 | `idempotency_record` | 24 h |
 | `event_log` | 48 h |
 | Tokens de invitado | Hasta 24 h post-cierre; luego se pueden purgar |
-| Participantes invitados (nombres) | Conservar con la sesión (historial); anonimizar tras N meses (a definir) |
+| `session_participant.display_name` de invitados | Conservar con el historial y reemplazar por `Anónimo` al cumplir 12 meses desde `joined_at`; no modificar participantes vinculados a una cuenta |
+| `waiter_call` | Eliminar registros a los 30 días desde `created_at` |
 | `audit_event` | Indefinido en demo; política a definir |
 | Emails de clientes registrados | Mientras la cuenta exista; borrado a pedido |
 
@@ -122,7 +123,7 @@ ALTER TABLE order_item ADD CONSTRAINT ck_item_status CHECK (status IN
 `billableChargesForSession` sigue siendo **la única** definición de cargos. La cuenta deriva los ajustes `APPLIED`, pagos y reembolsos `SUCCEEDED` de sus tablas persistidas: `paidNet = pagos − reembolsos`; `balance = charges − ajustes − paidNet`. Las propinas solo suman desde pagos exitosos y no cambian el saldo. `limit_exempt` conserva si el ajuste fue aplicado con `adjustment.apply_any`, para que no consuma el límite acumulado del Mozo.
 
 ### 7.4 Retención (D-135)
-Nombres de invitados: anonimizar a los 12 meses (🟡). `waiter_call`: 30 días. El resto sin cambios.
+Nombres de invitados: anonimizar a los 12 meses (D-135). `waiter_call`: conservar por 30 días y luego eliminar. El resto sin cambios.
 
 ### 7.5 Cambios del Paso 3 (2026-10-11)
 

@@ -1,5 +1,6 @@
 package com.somphie.preparation.application
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
 import org.springframework.stereotype.Service
@@ -49,6 +50,15 @@ data class QueueOption(
     val priceDeltaMinor: Long,
 )
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class QueueOptionResponse(
+    val groupId: UUID,
+    val optionId: UUID,
+    val groupName: String,
+    val optionName: String,
+    val priceDeltaMinor: Long?,
+)
+
 interface StationQueueRepository {
     fun stationBelongsToRestaurant(stationId: UUID, restaurantId: UUID): Boolean
 
@@ -75,7 +85,7 @@ data class StationQueueItemResponse(
     val queuedAt: Instant?,
     val delayed: Boolean?,
     val optionsSummary: String,
-    val options: List<QueueOption>,
+    val options: List<QueueOptionResponse>,
 )
 
 data class StationQueueResponse(
@@ -136,6 +146,7 @@ class GetStationQueue(
             limit = limit + 1,
         )
         val pageRows = rows.take(limit)
+        val isKitchen = "KITCHEN" in access.roles && "OWNER" !in access.roles
         val page = pageRows.map { row ->
             StationQueueItemResponse(
                 itemId = row.itemId,
@@ -152,7 +163,15 @@ class GetStationQueue(
                     Duration.between(it, clock.instant()) > Duration.ofMinutes(row.delayedSlaMinutes)
                 },
                 optionsSummary = row.options.joinToString(" · ") { it.optionName },
-                options = row.options,
+                options = row.options.map { option ->
+                    QueueOptionResponse(
+                        groupId = option.groupId,
+                        optionId = option.optionId,
+                        groupName = option.groupName,
+                        optionName = option.optionName,
+                        priceDeltaMinor = option.priceDeltaMinor.takeUnless { isKitchen },
+                    )
+                },
             )
         }
         val nextCursor = if (rows.size > limit) {

@@ -86,6 +86,7 @@
 | `report.read` / `report.export` / `audit.read` | — | — | — | — | — | ✔ |
 
 **Nota Cocina:** ve nombre de mesa y notas de los ítems de su estación, **no** datos de participantes ni cuenta.
+Si una cuenta tiene varios roles, se combinan sus permisos y para lectura rige el alcance más amplio concedido; las acciones de preparación siguen limitadas a las estaciones asignadas.
 
 ## 4. Reglas de alcance (cómo se valida cada permiso)
 

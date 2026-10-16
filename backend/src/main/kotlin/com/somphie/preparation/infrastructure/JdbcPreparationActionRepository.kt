@@ -8,6 +8,7 @@ import com.somphie.orders.domain.OrderItem
 import com.somphie.orders.domain.OrderStatus
 import com.somphie.orders.domain.Rejection
 import com.somphie.orders.domain.RejectionReason
+import com.somphie.identity.domain.StaffReadScope
 import com.somphie.preparation.application.LockedPreparationOrder
 import com.somphie.preparation.application.PreparationActionRepository
 import com.somphie.preparation.application.PreparationAccess
@@ -225,21 +226,29 @@ class JdbcPreparationActionRepository(
     }
 
     override fun staffOrder(access: PreparationAccess, orderId: UUID): Map<String, Any> {
-        if ("KITCHEN" in access.roles && access.stationIds.isEmpty()) {
+        val isKitchen = StaffReadScope.isKitchenOnly(access.roles)
+        if (isKitchen && access.stationIds.isEmpty()) {
             throw DomainException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found")
         }
-        val stationFilter = if ("KITCHEN" in access.roles) {
-            "AND EXISTS (SELECT 1 FROM order_item scoped WHERE scoped.order_id = o.id AND scoped.station_id IN (:stationIds))"
+        val stationFilter = if (isKitchen) {
+            """
+            AND EXISTS (
+                SELECT 1 FROM order_item scoped
+                WHERE scoped.order_id = o.id
+                  AND scoped.station_id IN (:stationIds)
+                  AND scoped.status IN ('QUEUED', 'IN_PREPARATION', 'READY', 'DELIVERED')
+            )
+            """.trimIndent()
         } else {
             ""
         }
-        val itemStationFilter = if ("KITCHEN" in access.roles) {
-            "AND oi.station_id IN (:stationIds)"
+        val itemStationFilter = if (isKitchen) {
+            "AND oi.station_id IN (:stationIds) AND oi.status IN ('QUEUED', 'IN_PREPARATION', 'READY', 'DELIVERED')"
         } else {
             ""
         }
         val orderParams = mutableMapOf<String, Any>("orderId" to orderId, "restaurantId" to access.restaurantId)
-        if ("KITCHEN" in access.roles) orderParams["stationIds"] = access.stationIds
+        if (isKitchen) orderParams["stationIds"] = access.stationIds
         val orderRow = jdbc.query(
             """
             SELECT o.id, o.session_id, o.status, o.display_code, o.total_minor, o.note, o.created_at,
@@ -266,9 +275,9 @@ class JdbcPreparationActionRepository(
                 "displayCode" to rs.getString("display_code"),
                 "version" to rs.getLong("version"),
                 "createdAt" to rs.getTimestamp("created_at").toInstant().toString(),
-                "totalMinor" to rs.getLong("total_minor"),
             ).apply {
-                if ("KITCHEN" !in access.roles) {
+                if (!isKitchen) {
+                    put("totalMinor", rs.getLong("total_minor"))
                     if (rs.getObject("creator_user_id", UUID::class.java) != null) {
                         put("createdBy", mapOf(
                             "userId" to rs.getString("creator_user_id"),
@@ -285,7 +294,7 @@ class JdbcPreparationActionRepository(
                 rs.getObject("decided_by", UUID::class.java)?.let {
                     put("decidedBy", mapOf("userId" to it.toString(), "displayName" to rs.getString("decider_name")))
                 }
-                rs.getString("note")?.let { put("note", it) }
+                if (!isKitchen) rs.getString("note")?.let { put("note", it) }
                 rs.getString("rejection_reason")?.let {
                     put("rejection", mapOf("reasonCode" to it, "reasonText" to rs.getString("rejection_text")))
                 }
@@ -312,21 +321,24 @@ class JdbcPreparationActionRepository(
             orderParams,
         ) { rs, _ ->
             val optionList = objectMapper.readValue(rs.getString("options_snapshot") ?: "[]", optionListType)
+                .map { option -> if (isKitchen) option - "priceDeltaMinor" else option }
             linkedMapOf<String, Any>(
                 "id" to rs.getString("id"),
                 "productId" to rs.getString("product_id"),
                 "productName" to rs.getString("product_name"),
                 "productNameI18n" to objectMapper.readValue(rs.getString("product_name_i18n") ?: "{}", mapType),
-                "basePriceMinor" to rs.getLong("base_price_minor"),
-                "optionsDeltaMinor" to rs.getLong("options_delta_minor"),
-                "unitPriceMinor" to rs.getLong("unit_price_minor"),
                 "quantity" to rs.getInt("quantity"),
-                "lineTotalMinor" to rs.getLong("line_total_minor"),
                 "station" to rs.getString("station_code"),
                 "status" to rs.getString("status"),
                 "options" to optionList,
                 "productCurrentlyAvailable" to rs.getBoolean("product_currently_available"),
             ).apply {
+                if (!isKitchen) {
+                    put("basePriceMinor", rs.getLong("base_price_minor"))
+                    put("optionsDeltaMinor", rs.getLong("options_delta_minor"))
+                    put("unitPriceMinor", rs.getLong("unit_price_minor"))
+                    put("lineTotalMinor", rs.getLong("line_total_minor"))
+                }
                 rs.getString("note")?.let { put("note", it) }
                 rs.getTimestamp("queued_at")?.toInstant()?.toString()?.let { put("queuedAt", it) }
                 rs.getTimestamp("started_at")?.toInstant()?.toString()?.let { put("startedAt", it) }
