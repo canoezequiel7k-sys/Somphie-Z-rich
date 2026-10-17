@@ -149,8 +149,8 @@ gantt
 ## Fase 9 — Extras seleccionados por D-160 (cada uno justificado)
 | WP | Agente | Descripción | Dep. |
 |---|---|---|---|
-| WP-BE-90 | BE | Registro/verificación/login de cliente y vinculación conforme a reglas/contrato por definir; `EmailSender` con configuración por entorno, sin proveedor inventado | Q-07 |
-| WP-BE-91 | BE | Email de comprobante y encuesta (`feedback`) después de BE-90 y de definir el envío según reglas aprobadas | WP-BE-90 |
+| WP-BE-90 | BE | Registro/verificación/login de cliente y vinculación conforme a reglas/contrato por definir; `EmailSender` con configuración por entorno, sin proveedor inventado | Q-35, Q-36 |
+| WP-BE-91 | BE | Email de comprobante y encuesta (`feedback`) después de BE-90 y de definir el envío según reglas aprobadas | WP-BE-90, Q-36 |
 | WP-BE-92 | BE | **Llamar al mozo** (adelantable tras F6), retiro por mostrador (si se mantiene) | D-138, D-025 |
 | WP-WEB-90 | WEB | Login/registro, historial, encuesta, llamar al mozo | WP-BE-90/91/92 |
 | WP-AND-90 | AND | Notificación de "llamado al mozo"; FCM opcional | WP-BE-92 |

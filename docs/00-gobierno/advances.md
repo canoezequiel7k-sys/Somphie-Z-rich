@@ -7,9 +7,9 @@
 Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 bloqueado
 
 ---
-## 1. Estado actual (snapshot actualizado el 2026-10-14)
+## 1. Estado actual (snapshot actualizado el 2026-10-15)
 
-### 1.1 Qué existe
+### 1.1 Qué existe (snapshot actualizado el 2026-10-15)
 | Pieza | Estado | Dónde |
 |---|---|---|
 | Plan maestro original | ✅ | `Plan_Maestro_Sistema_Cafeteria.md/.pdf` |
@@ -17,7 +17,7 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Documentación v0.2 (opciones de producto, propina, ajustes, i18n, llamados al mozo, imágenes en carpeta, multi-sucursal simulada) | ✅ | secciones "v0.2" dentro de cada doc |
 | Decisiones D-101…D-160; Q-26/27/31/32/33/34 resueltas en alcance por aprobación explícita; Q-21 sigue abierta y Q-26 conserva métricas sin fórmula respaldada | ✅ | `docs/00-gobierno/decisiones.md` |
 | ADRs 0001–0010 (estado individual) | ✅ | `docs/00-gobierno/adr/` |
-| Contrato `openapi.yaml` **0.4.1** | ✅ Atribución Q-34: pedido staff permite participante opcional y expone creador autenticado | `docs/04-api/openapi.yaml` |
+| Contrato `openapi.yaml` **0.4.3** | ✅ Redacción de datos de cuenta para Cocina según roles; permisos de `undo` según estación/transición; Q-34 conserva atribución staff | `docs/04-api/openapi.yaml` |
 | Config de lint `redocly.yaml` | ✅ (clave corregida, H-09) | raíz |
 | `CHANGELOG.md` del contrato hasta 0.4.0 | ✅ Validado junto con OpenAPI por Redocly 2.62.1 | `docs/04-api/CHANGELOG.md` |
 | Estructura de carpetas y `AGENTS.md` por carpeta | ✅ | `backend/`, `web/`, `android/` |
@@ -33,8 +33,27 @@ Leyenda: ✅ hecho · 🔄 en curso · ⬜ pendiente · 🟡 propuesto · 🔴 b
 | Horario del restaurante | ✅ Recibido; zona horaria pendiente de confirmar antes de persistirlo | Apertura y cierre semanal |
 
 ### 1.2 Qué falta o requiere seguimiento
+- **✅ WP-WEB-41 — carrito, envío y seguimiento cliente:** implementado sobre `/t/:tableCode`. El carrito persistido se separa por `session.id`, valida opciones según `RN-OPT-03`, calcula estimaciones en centavos enteros y envía solo los campos del contrato. Ante `PRICE_CHANGED` exige confirmar el total del servidor; los errores ambiguos conservan cuerpo y clave de idempotencia, y la lista de pedidos con sus estados se consulta por REST con polling cada 8 segundos mientras la sesión está abierta. Validado con MSW, `pnpm run check` y pruebas backend HTTP/PostgreSQL focalizadas; el recorrido del navegador contra el backend real queda pendiente. **Qué estudiar:** por qué una respuesta ambigua exige reusar cuerpo y clave, y por qué el precio local es una estimación en lugar de una verdad comercial.
+- **✅ WP-WEB-42 — conexión real y avance integral MVP:** la aplicación backend publica sus rutas bajo `/api/v1`, configura CORS mediante `CORS_ALLOWED_ORIGINS` y expone `GET /sessions/current` según el contrato para recuperar la sesión HOST/MEMBER. La Web ya no bloquea operaciones por `navigator.onLine`; los errores de red identifican una falla de conexión al servicio. El recorrido QR, restauración de sesión, menú, opciones, carrito, envío y seguimiento se completó en navegador con backend/PostgreSQL real. `pnpm run check` pasó con 18 pruebas; suite backend global: 408 pruebas, 0 fallos/errores y 1 omitida; cobertura 6093/6430 líneas (94,76 %). **Qué estudiar:** CORS/preflight, diferencia entre `navigator.onLine` y disponibilidad de API, recuperación segura de sesión y cierre de streams HTTP en pruebas.
+- **✅ Primer bloque Web (WP-WEB-20 parcial; inicio de WP-WEB-30/40):** base Vite/React/TypeScript y recorrido móvil `/t/:tableCode` con resolución QR, menú y apertura/unión/retoma de sesión, probado contra MSW. La integración HTTP real queda pendiente: Docker no inicia y el backend local no respondió en el smoke browser.
+- **✅ CU-02 — idempotencia segura al abrir sesión QR (2026-10-17):** `POST /public/tables/{tableCode}/sessions` exige UUID v4, valida la clave por mesa, reproduce exactamente la sesión/token original y rechaza reutilizarla con otro cuerpo. `IdempotencyService` cifra el guest token AES-GCM en la respuesta persistida; la tabla de participantes conserva solo SHA-256. Pruebas unitarias pasan; HTTP/PostgreSQL y suite global no pudieron completar porque Docker no está disponible. Ver detalle en sección 6.
+- **✅ WP-BE-92 — persistir expiración al competir con acción del personal (2026-10-16):** `acknowledge`/`resolve` conservan el 409 `STATE_CONFLICT`, pero ahora confirman `EXPIRED` y `waiter.updated` en esa transacción. Regresión PostgreSQL/HTTP para llamadas `OPEN` y `ACKNOWLEDGED` vencidas; suite global 403 pruebas, 0 fallos/errores, 1 omitida.
+- **✅ Continuación backend (2026-10-16):** no quedó otro bloque funcional completo con contrato/reglas aprobados. Q-26 ahora enumera decisiones de CRUD/admin y fórmulas/reportes; Q-35 registra definiciones de identidad/vinculación de cliente y Q-36 las de correo/encuesta. Se corrigió la dependencia obsoleta de Q-07 (retención) en Fase 9. No se cambió código ni OpenAPI porque faltan esas aprobaciones. Ver entrada de cierre al final de la sección 6.
+- **✅ Retención de idempotencia (2026-10-16):** servicio/job elimina automáticamente `idempotency_record` desde las 24 horas según `idempotencia-concurrencia.md` §1.2 y `modelo-datos.md` §5; pruebas unitarias, PostgreSQL y suite completa pasaron.
+- **✅ Retenciones con plazo definido (2026-10-16):** jobs diarios eliminan `idempotency_record` tras 24 h, anonimizan `display_name` de invitados a los 12 meses desde `joined_at` y eliminan `waiter_call` tras 30 días desde `created_at`. No modifican participantes vinculados a usuarios, órdenes, pagos ni auditoría. Pruebas unitarias y PostgreSQL pasaron.
+- **✅ WP-BE-60 — alcance de lectura en roles combinados (2026-10-15):** lista/detalle staff y replay SSE respetan el alcance más amplio de los roles combinados; Cocina sola conserva el filtro por estación. Regresiones HTTP/PostgreSQL/SSE ejecutadas dentro de la suite global del 2026-10-16.
+- **✅ WP-BE-80-T01 — texto alternativo obligatorio:** V19 impone `image_alt` no nulo/no vacío cuando hay imagen; PostgreSQL prueba rechazo de `NULL`/whitespace y `GET /products/{id}` prueba la respuesta. El upload/CRUD sigue pendiente porque OpenAPI solo define `GET /media/{path}`. Archivos: migración V19, `IdentityIntegrationTest.kt`, ficha WP-BE-80/82, índice y esta bitácora.
+- **✅ WP-BE-60 — alinear acceso de Cocina a pedido aceptado:** detalle `/staff/orders/{id}` y replay SSE por estación ahora excluyen `PENDING_REVIEW`; el pedido se hace visible al aceptar los ítems. Pruebas PostgreSQL de detalle y replay pasaron; suite final abajo. Archivos: `JdbcPreparationActionRepository.kt`, `EventStreamService.kt`, `IdentityIntegrationTest.kt`, ficha WP-BE-60, índice y esta bitácora.
+- **✅ WP-BE-60 — cerrar bypass de eventos ITEM sin estación:** PostgreSQL reprodujo que KITCHEN recibía `item.updated` nulo por la condición `aggregate_type != ORDER`; corregí la consulta y el test confirma que se excluye, junto con estación ajena, y conserva catálogo y pedido aceptado propio. Archivos: `EventStreamService.kt`, `IdentityIntegrationTest.kt`, ficha WP-BE-60, índice y esta bitácora.
 - **WP-BE-52 completada en el alcance contratado (2026-10-14):** `If-None-Match` de `/menu` acepta listas, comparación débil y `*`; PostgreSQL verifica que el ETag previo se invalida tras una mutación. CRUD extra requiere contrato aprobado.
 - **Decisiones D-160 aprobadas (2026-10-13):** Q-26/27/31/32/33/34 y selección Fase 9 registradas en `decisiones.md`; la aprobación no equivale a implementación ni cierra fórmulas o contratos no respaldados.
+- **WP-BE-72 validada localmente (2026-10-15):** PDF efímero y datos financieros consistentes con Billing/RN-TIP-05; incluye leyenda D-136 y ajuste de nombres largos.
+- **WP-BE-60 parcial (2026-10-15):** cursores, replay, heartbeat, revocación, cleanup por revocación y filtros de Cocina a estados aceptados probados. Falta perfil/capacidad sostenida aprobados y reproducir FIN/reset real para verificar cleanup TCP.
+- **WP-BE-60: cleanup por revocación probado; desconexión TCP del cliente pendiente (2026-10-15):** cerrar el stream y forzar `HttpClient.shutdownNow()` tampoco demostró la cancelación del polling dentro de 10 s tras publicar un evento. La prueba exploratoria fue retirada; no se atribuye aún a un defecto del controlador. Hace falta un cliente que confirme el FIN/reset que recibe el servidor antes de alterar producción.
+- **WP-BE-60: no priorizada en esta continuación (2026-10-16):** hay prueba funcional de 50 streams, pero no objetivo/perfil de capacidad sostenida ni política de sobrecarga aprobados; la cancelación ante FIN/reset TCP tampoco está reproducida con cliente que confirme la desconexión. No se inventan umbrales ni se cambia el lifecycle de producción. Antes de volver: acordar concurrencia/latencia/duración/carga de reconexión y límites de recursos/DB; para TCP, demostrar FIN/reset y cancelación de polling de forma reproducible.
+- **WP-BE-80-T01 parcial (2026-10-15):** lectura máxima de 1.000.000 bytes, firmas WebP/JPEG/PNG, contención de rutas y alt obligatorio en DB/API están probados. Upload/CRUD siguen sin rutas/esquemas en OpenAPI.
+- **WP-BE-60: filtro SSE sin bypass por estaciones vacías ✅ (2026-10-15):** un rol KITCHEN/BAR sin estaciones no debe recibir eventos de pedidos/ítems por omitirse el filtro SQL; conserva solo eventos CATALOG autorizados. Prueba con cero y una estación asignada.
+- **✅ WP-BE-60 — alinear permisos y respuestas de Cocina:** lista/detalle/cola solo incluyen ítems aceptados de estaciones asignadas y omiten importes, deltas y nota general; OWNER combinado mantiene alcance global en pedidos, cola y SSE. Pruebas PostgreSQL/HTTP y Redocly pasaron. Archivos: `EventStreamService.kt`, `StaffOrdersController.kt`, `JdbcPreparationActionRepository.kt`, `StationQueue.kt`, `IdentityIntegrationTest.kt`, OpenAPI/CHANGELOG y seguimiento backend.
 - **Bloque WP-BE-70/73 y WP-BE-51 (2026-10-14):** WP-BE-51-T01/T02 y WP-BE-70-T01/T02/T03 completadas localmente. WP-BE-73-T01 incluye pagos/propinas y el recibo PDF local; reporting sigue bloqueado por contrato y fórmulas no definidas.
 - WP-BE-51 ✅ local: T01/T02 implementadas. HTTP SSE valida el ciclo de llamados y el refresco del tablero; Q-31 conserva `OCCUPIED` con saldo firmado.
 - WP-BE-70-T01 ✅ local: `GET /sessions/current/bill` y `SessionBillPort` derivan el mismo resumen completo. `BillableChargesPort` sigue exponiendo solo cargos; no hay saldo duplicado.
@@ -862,6 +881,159 @@ El dueño delegó: *"toma las mejores decisiones posibles para que sea escalable
 - **Validación:** los dos tests focalizados pasaron. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó: 387 pruebas, 0 fallos/errores/omitidas; 5803/6162 líneas (94,17 %). Markdownlint (3 documentos) y `git diff --check` pasaron. OpenAPI no cambió.
 - **Qué estudiar:** validadores HTTP débiles no son comparaciones byte a byte; `If-None-Match` usa comparación débil y puede contener listas.
 - **Archivos tocados:** `CatalogController.kt`, `BackendSmokeTest.kt`, `IdentityIntegrationTest.kt`, ficha WP-BE-51/52, índice y esta bitácora. OpenAPI sin cambios.
+
+### 2026-10-15 — WP-BE-72: ajuste del PDF y revisión financiera ✅
+- **Qué:** separé nombres largos sin espacios al ancho imprimible, comprobé la leyenda exacta D-136 y corregí la propina individual: solo se imprime para pagos `SUCCEEDED` tipo `PAYMENT`, alineada con Billing/RN-TIP-05. PostgreSQL prueba un pago anulado con propina sin sumarla al recibo. La revisión confirmó además los bloqueos restantes: WP-BE-80/82 carecen de rutas/esquemas CRUD en OpenAPI; WP-BE-81 carece de contrato y fórmulas reconciliables (D-160/Q-26); BE-90/91 carecen de reglas/contrato para identidad y correo (D-160/Fase 9); WP-BE-60 requiere definir y medir capacidad operativa, no una nueva función.
+- **Por qué:** evitar desbordes con nombres válidos y continuar solo donde contrato y reglas autorizan implementación, sin inventar API, fórmula o proveedor.
+- **Validación:** `.\backend\gradlew.bat -p backend test --tests "com.somphie.identity.api.IdentityIntegrationTest.receipt renders historical billing snapshots and forced-close balance" --no-daemon` pasó. Suite `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`: 387 pruebas, 0 fallos/errores/omitidas; 5823/6180 líneas (94,22 %). Markdownlint (3 documentos) y `git diff --check` pasaron.
+- **Qué estudiar:** medida tipográfica PDFBox; diferencia entre disponibilidad del dato y autorización contractual para publicarlo.
+- **Archivos tocados:** `ReceiptPdfService.kt`, `IdentityIntegrationTest.kt`, ficha WP-BE-70/73, índice y esta bitácora. OpenAPI no cambia.
+
+### 2026-10-15 — WP-BE-60: cursor SSE futuro ✅
+- **Qué:** `Last-Event-ID` mayor al último cursor durable del restaurante ahora falla con `VALIDATION_FAILED`; antes el stream lo aceptaba y el cliente podía omitir eventos hasta alcanzar ese valor. Agregué prueba HTTP PostgreSQL.
+- **Por qué:** reconectar solo desde un evento realmente emitido por ese log; cursores vencidos mantienen 410 y los malformados el error contractual existente.
+- **Validación:** test focalizado y `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasaron: 388 pruebas, 0 fallos/errores/omitidas; 5829/6187 líneas (94,21 %). Markdownlint (4 documentos) y `git diff --check` pasaron.
+- **Qué estudiar:** el cursor es por restaurante y solo puede confirmar hasta el máximo durable asignado.
+- **Archivos tocados:** `EventStreamService.kt`, `IdentityIntegrationTest.kt`, ficha WP-BE-60, `tiempo-real.md`, índice y esta bitácora. OpenAPI sin cambios.
+
+### 2026-10-15 — WP-BE-60: investigar desconexión de cliente
+- **Qué:** intenté probar cleanup al cerrar el cuerpo HTTP y al ejecutar `HttpClient.shutdownNow()`; el scheduler conservó tareas después de publicar un evento. Un intento con socket TCP no completó lectura estable de headers, y el servidor registró `AsyncRequestTimeoutException` tras fallar el test y cerrarse Testcontainers. Retiré las pruebas exploratorias y no cambié producción.
+- **Por qué:** `SseEmitter` notifica lifecycle del lado servidor, pero el test no acredita un FIN/reset visto por Tomcat; sin eso no se puede concluir si falta cleanup productiva o si el cliente de prueba no aborta realmente la conexión.
+- **Validación:** test exploratorio de `shutdownNow()` falló y no cuenta como validación. Los tests existentes de heartbeat, revocación y 50 streams pasaron; la suite completa vigente sigue siendo 388 pruebas, 0 fallos/errores/omitidas, 5829/6187 líneas (94,21 %). Markdownlint y `git diff --check` pasaron; la desconexión TCP normal sigue pendiente.
+- **Qué estudiar:** ciclo de vida de `SseEmitter`, semántica de abortar respuesta de `java.net.http.HttpClient`, y detección de FIN/reset en Tomcat.
+- **Archivos:** investigación en `IdentityIntegrationTest.kt`, ficha WP-BE-60 e índice; no se modificó producción ni OpenAPI.
+
+### 2026-10-15 — WP-BE-80-T01: endurecer almacenamiento local de imágenes ✅ parcial
+- **Qué:** `FolderImageStorageAdapter` limita lecturas a 1.000.000 bytes, reconoce solo firmas PNG/JPEG/WebP permitidas por RN-CAT-07, rechaza extensión/tipo no soportado y comprueba la ruta canónica para bloquear enlaces simbólicos fuera de `media/`. Pruebas cubren formato, firma, límite exacto/exceso y rutas; Windows omitió el caso de symlink al no permitir crearlo.
+- **Por qué:** el adaptador servía bytes sin límite y confiaba en extensión, y la contención léxica no detectaba enlaces simbólicos. Se cierra el endurecimiento de la lectura ya existente, no se inventa el CRUD/upload ni el contrato para alt.
+- **Validación:** pruebas focalizadas de `FolderImageStorageAdapterTest` y `MediaControllerTest` pasaron; el caso symlink quedó omitido por restricción de plataforma. La primera suite global falló en el test de limpieza de 50 streams; su ejecución focalizada y la segunda suite completa pasaron sin modificar/bajar la aserción. Resultado final `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`: 391 pruebas, 0 fallos/errores, 1 omitida; 5851/6212 líneas (94,19 %). Markdownlint (3 documentos) y `git diff --check` pasaron.
+- **Qué estudiar:** firmas binarias de formatos, límite de lectura antes de asignar memoria y diferencia entre ruta léxica y ruta canónica.
+- **Archivos:** `FolderImageStorageAdapter.kt`, `FolderImageStorageAdapterTest.kt`, ficha WP-BE-80/82, `backend-work-index.md` y esta bitácora. Sin OpenAPI/CHANGELOG.
+
+### 2026-10-15 — WP-BE-60: aislar eventos SSE por estación ✅
+- **Qué:** corregí un bypass en `EventStreamService`: para KITCHEN/BAR sin estaciones, la consulta no aplicaba el predicado y podía retornar pedidos/ítems de todo el restaurante. Ahora esos perfiles ven solo eventos de catálogo permitidos; con estación asignada, la consulta conserva el filtro por IDs. PostgreSQL prueba el caso sin asignaciones, catálogo autorizado y aislamiento entre KITCHEN y BAR.
+- **Por qué:** una lista de estaciones vacía no debe convertirse en acceso irrestricto; actor-y-roles.md limita Cocina/Barra por estación.
+- **Validación:** test focalizado pasó. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`: 392 pruebas, 0 fallos/errores, 1 omitida por symlink no disponible en Windows; 5857/6215 líneas (94,24 %). Markdownlint (3 documentos) y `git diff --check` pasaron.
+- **Qué estudiar:** autorización multi-tenant y por recurso; en SQL, una lista vacía debe restringir el conjunto, no omitir el filtro.
+- **Archivos:** `EventStreamService.kt`, `IdentityIntegrationTest.kt`, ficha WP-BE-60, `backend-work-index.md` y esta bitácora. Sin cambio de contrato.
+
+### 2026-10-15 — WP-BE-60: revocación de permisos en stream activo ✅
+- **Qué:** agregué una prueba HTTP PostgreSQL que abre SSE con JWT válido, elimina los roles del personal mientras el stream está activo y verifica que el cuerpo termina y el scheduler vuelve a la línea base.
+- **Por qué:** la revocación durante la conexión estaba demostrada para participantes, pero no para permisos del personal; el controlador debe revalidar el perfil en cada consulta.
+- **Validación:** prueba focalizada `IdentityIntegrationTest.removing staff permissions closes their active event stream`: pasó. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`: 393 pruebas, 0 fallos/errores, 1 omitida (symlink no disponible en Windows), 5857/6215 líneas (94,24 %). Markdownlint de los 3 documentos modificados y `git diff --check` pasaron.
+- **Qué estudiar:** revalidación de autorización durante streams largos y liberación de tareas del scheduler.
+- **Archivos:** `IdentityIntegrationTest.kt`, ficha WP-BE-60, `backend-work-index.md` y esta bitácora. Sin cambio de producción ni OpenAPI.
+
+### 2026-10-15 — WP-BE-80-T01: exigir alt para imágenes ✅ parcial
+- **Qué:** agregué V19 con un constraint que exige `image_alt` no nulo y no vacío si `image_path` está definido. La prueba PostgreSQL verifica rechazo de `NULL`/whitespace sin perder el alt válido, y HTTP confirma que `GET /products/{id}` lo devuelve.
+- **Por qué:** RN-CAT-07 y `ProductImage` ya requieren texto alternativo, pero la base permitía guardar y exponer imágenes sin él.
+- **Validación:** prueba focalizada `IdentityIntegrationTest.catalog image alt is required by persistence and returned by product API`: pasó. Suite final: 394 pruebas, 0 fallos/errores, 1 omitida por symlink no disponible en Windows; 5858/6215 líneas (94,26 %).
+- **Qué estudiar:** constraints SQL para reforzar una regla existente sin cambiar el contrato.
+- **Archivos:** migración V19, `IdentityIntegrationTest.kt`, ficha WP-BE-80/82, `backend-work-index.md` y esta bitácora. OpenAPI no cambia.
+
+### 2026-10-15 — WP-BE-60: exponer a Cocina solo pedidos aceptados ✅
+- **Qué:** `/staff/orders/{id}` ahora requiere al menos un ítem asignado a estación del usuario en `QUEUED`, `IN_PREPARATION`, `READY` o `DELIVERED`, y devuelve solo esos ítems. El replay SSE aplica la misma condición a `ORDER` de estaciones.
+- **Por qué:** el contrato de roles limita `order.read` de Cocina a ítems aceptados; la lista ya cumplía, pero el detalle y SSE podían revelar pedidos `PENDING_REVIEW` conocidos por ID/cursores.
+- **Validación:** pruebas focalizadas de detalle/tenant, replay por estación y alt de imagen pasaron. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`: 394 pruebas, 0 fallos/errores, 1 omitida por symlink no disponible en Windows; 5858/6215 líneas (94,26 %). Markdownlint en 4 documentos y `git diff --check` pasaron.
+- **Qué estudiar:** aplicar el mismo predicado de autorización en detalle, colección y eventos pista.
+- **Archivos:** `JdbcPreparationActionRepository.kt`, `EventStreamService.kt`, `IdentityIntegrationTest.kt`, ficha WP-BE-60, índice y esta bitácora. Sin OpenAPI.
+
+### 2026-10-15 — WP-BE-60: bloquear replay de ítems sin estación ✅
+- **Qué:** el replay station-scoped ahora permite eventos sin `station_id` solo para catálogo o para pedidos cuyo agregado tiene ítems aceptados en estaciones asignadas; rechaza ITEM sin estación.
+- **Por qué:** la condición previa permitía todo agregado distinto de ORDER y el test PostgreSQL reprodujo una entrega `item.updated` sin asignación de estación.
+- **Validación:** test focalizado pasado. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`: 394 pruebas, 0 fallos/errores, 1 omitida (symlink no disponible en Windows), 5857/6215 líneas (94,24 %). Markdownlint de 3 documentos y `git diff --check` pasaron.
+- **Qué estudiar:** validar alcance por estación según tipo de agregado, no solo según ausencia de un campo.
+- **Archivos:** `EventStreamService.kt`, `IdentityIntegrationTest.kt`, ficha WP-BE-60, `backend-work-index.md` y esta bitácora. Sin OpenAPI.
+
+### 2026-10-15 — WP-BE-60: limitar datos y preservar alcance OWNER ✅ parcial
+- **Qué:** lista, detalle y cola de Cocina omiten los datos monetarios y la nota general, y solo incluyen ítems de estación en `QUEUED`, `IN_PREPARATION`, `READY` o `DELIVERED`. OWNER conserva el alcance global aun combinado con KITCHEN, también en SSE.
+- **Por qué:** actores-y-roles limita Cocina a ítems aceptados de su estación y excluye datos de cuenta; D-021 trata los roles como paquetes de permisos y OWNER tiene alcance global.
+- **Validación:** pruebas focalizadas de lista/detalle/cola, SSE y `/version` pasaron; Redocly 2.62.1 validó OpenAPI 0.4.2. Primera suite global falló solo en cleanup de 50 streams; el test aislado pasó y la suite repetida quedó verde: `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`, 394 pruebas, 0 fallos/errores, 1 omitida (symlink no disponible en Windows), 5892/6237 líneas (94,47 %). `git diff --check` pasó.
+- **Qué estudiar:** omisión de campos según rol, precedencia de permisos y consistencia entre lista, detalle, cola y stream.
+- **Archivos:** `EventStreamService.kt`, `StaffOrdersController.kt`, `JdbcPreparationActionRepository.kt`, `StationQueue.kt`, `IdentityIntegrationTest.kt`, `BackendSmokeTest.kt`, `application.yml`, OpenAPI/CHANGELOG y seguimiento.
+
+### 2026-10-15 — WP-BE-80: validar lectura HTTP integrada de imágenes ✅ parcial
+- **Qué:** la prueba de aplicación completa confirma que `GET /media/{path}` resuelve paths anidados con el adaptador real, es público, responde imagen/tipo/cache correctos y devuelve 404 `RESOURCE_NOT_FOUND` cuando falta el archivo. No se agregaron endpoints ni producción.
+- **Por qué:** la cobertura anterior probaba el controlador y almacenamiento por separado; faltaba integrar ruta, seguridad, filesystem y error.
+- **Validación:** `.\backend\gradlew.bat -p backend test --tests "com.somphie.shared.api.BackendSmokeTest.media endpoint serves nested supported image publicly and returns not found for missing image" --no-daemon` pasó.
+- **Suite final:** `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó: 395 pruebas, 0 fallos, 0 errores, 1 omitida (symlink no disponible en Windows); cobertura 5892/6237 líneas (94,47 %). Markdownlint y `git diff --check` pasaron.
+- **Qué estudiar:** contrato OpenAPI, mapeo `"/media/**"`, permisos públicos, validación de firma y contención de rutas.
+- **Archivos:** `BackendSmokeTest.kt`, ficha WP-BE-80/82, `backend-work-index.md` y esta bitácora. Upload/CRUD no implementados: falta contrato.
+
+### 2026-10-15 — WP-BE-60: autorización de deshacer por estación y transición ✅
+- **Qué:** `undo` de `IN_PREPARATION`/`READY` requiere asignación a la estación del ítem; revertir `DELIVERED` requiere además `item.deliver`. Regresión PostgreSQL/HTTP verifica estación ajena sin mutación, transición propia permitida y entrega no revertible por KITCHEN.
+- **Por qué:** `item.undo` antes validaba solo el permiso global; la regla de dominio exige el mismo alcance que la transición original.
+- **Validación:** test PostgreSQL/HTTP focalizado pasó; Redocly 2.62.1 validó OpenAPI 0.4.3. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`: 395 pruebas, 0 fallos/errores, 1 omitida por symlink no disponible en Windows; cobertura 5910/6243 líneas (94,67 %). Markdownlint y `git diff --check` pasaron.
+- **Qué estudiar:** `RN-PRE-02/09`, `actores-y-roles.md`, permiso y estación según transición.
+- **Archivos:** `ApplyItemAction.kt`, `IdentityIntegrationTest.kt`, `BackendSmokeTest.kt`, `application.yml`, OpenAPI/CHANGELOG, ficha WP-BE-60, índice y esta bitácora.
+- **Qué estudiar:** autorización por acción y recurso, con alcance derivado de la transición que se revierte.
+- **Archivos:** `ApplyItemAction.kt`, `IdentityIntegrationTest.kt`, `BackendSmokeTest.kt`, `application.yml`, OpenAPI/CHANGELOG, ficha WP-BE-60, índice y esta bitácora.
+
+### 2026-10-15 — WP-BE-60: combinar alcance de lectura por roles ✅ parcial
+- **Qué:** los perfiles KITCHEN+BAR/WAITER reciben en lista, detalle y SSE el alcance de lectura de restaurante que aporta BAR/WAITER; KITCHEN sin esos roles sigue limitado a estaciones asignadas.
+- **Por qué:** D-021 define roles como paquetes de permisos y `actores-y-roles.md` da a Barra/Mozo lectura de restaurante, mientras Cocina tiene lectura restringida.
+- **Validación:** compilación y subconjunto sin Testcontainers pasaron: 293 pruebas, 0 fallos/errores, 1 omitida (symlink no disponible en Windows). Markdownlint focalizado y `git diff --check` pasaron. No se ejecutaron las regresiones HTTP/SSE PostgreSQL ni la suite completa: Docker Desktop informó que no pudo iniciar.
+- **Qué estudiar:** unión de permisos de roles y alcance más amplio frente al límite por estación.
+- **Archivos:** `StaffReadScope.kt`, `StaffReadScopeTest.kt`, `StaffOrdersController.kt`, `JdbcPreparationActionRepository.kt`, `EventStreamService.kt`, `IdentityIntegrationTest.kt`, `actores-y-roles.md`, ficha WP-BE-60, índice y esta bitácora.
+- **Qué estudiar:** autorización por acción y recurso, con alcance derivado de la transición que se revierte.
+- **Archivos:** `ApplyItemAction.kt`, `IdentityIntegrationTest.kt`, `BackendSmokeTest.kt`, `application.yml`, OpenAPI/CHANGELOG, ficha WP-BE-60, índice y esta bitácora.
+
+### 2026-10-16 — Aplicar retenciones con plazo definido ✅
+- **Qué:** jobs transaccionales eliminan registros idempotentes al cumplir 24 h, anonimizan nombres de participantes invitados a los 12 meses y eliminan `waiter_call` a los 30 días. Usan las columnas reales (`created_at`, `joined_at`) y `Clock`; no alteran participantes vinculados a cuentas, órdenes, pagos ni auditoría.
+- **Por qué:** `idempotencia-concurrencia.md` y el modelo de datos fijan estos plazos; faltaba aplicarlos automáticamente.
+- **Validación:** pruebas unitarias e integradas PostgreSQL para expiración, límites temporales y conservación de registros recientes; suite global, Markdownlint y `git diff --check` ejecutados.
+- **Suite global (2026-10-16):** `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon` pasó: 402 pruebas, 0 fallos/errores, 1 omitida por symlink no disponible en Windows; 5951/6284 líneas (94,70 %). Markdownlint de documentos tocados pasó; lint global mantiene dos problemas preexistentes en `backend/AGENTS.md` y `docs/05-diseno/mapa-pantallas.md`.
+- **Qué estudiar:** anonimización irreversible, retención mínima, transacciones y `Clock` para probar fechas sin espera.
+- **Archivos:** `GuestDataRetentionService.kt`, `GuestDataRetentionJob.kt`, `GuestDataRetentionServiceTest.kt`, `IdempotencyRetentionService.kt`, `IdempotencyRetentionJob.kt`, `IdempotencyRetentionServiceTest.kt`, `IdentityIntegrationTest.kt`, `modelo-datos.md`, índice y esta bitácora.
+
+### 2026-10-16 — Precisar bloqueos de contratos backend ✅
+- **Qué:** se amplió Q-26 con las operaciones/campos/permisos/errores pendientes de administración de catálogo e imágenes, mesas/QR, personal/settings y opciones/traducciones; también con fórmulas, rangos, zona horaria, fuentes, filtros y permisos de reporting/auditoría. Se agregaron Q-35 para autenticación/verificación/recuperación/vinculación de clientes y Q-36 para disparadores/destinatarios, feedback, transporte/configuración, deduplicación/reintentos y resultado de correo. El roadmap ya depende de Q-35/Q-36, no de Q-07 (retención).
+- **Por qué:** D-160 aprobó alcance y seleccionó Fase 9, pero no aprobó las operaciones de escritura, contratos de reporting ni reglas de identidad/envío que faltan. WP-BE-60 conserva 50 streams funcionales; no existe perfil de carga aprobado ni evidencia TCP FIN/reset reproducible. No es seguro inventar API, reglas, métricas, límites ni proveedor.
+- **Validación focal:** `npx --yes markdownlint-cli2@0.23.3` para los 6 documentos modificados: 0 issues; `git diff --check`: pasó.
+- **Validación global:** `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`: BUILD SUCCESSFUL, 402 pruebas, 0 fallos/errores, 1 omitida por symlink no disponible en Windows; 5951/6284 líneas (94,70 %). `npx --yes markdownlint-cli2@0.23.3 "**/*.md"`: 2 issues preexistentes (`backend/AGENTS.md` MD047 y `docs/05-diseno/mapa-pantallas.md` MD009).
+- **Qué estudiar:** contrato primero; separar la aprobación del alcance de la definición de operaciones; ciclo de verificación/vinculación y entrega de correo idempotente con reintentos acotados.
+- **Archivos:** `decisiones.md`, `matriz-decisiones-backend.md`, `backend-work-index.md`, `roadmap-fases.md`, ficha WP-BE-80/82 y esta bitácora. Sin cambios de código, OpenAPI, CHANGELOG, commit ni push.
+
+### 2026-10-16 — WP-BE-92: conservar expiración de llamados al competir con personal ✅
+- **Qué:** las rutas de tomar y resolver un llamado ahora persisten la transición a `EXPIRED` y publican `waiter.updated` cuando detectan que venció, aunque la acción del personal responda `409 STATE_CONFLICT`. La excepción de dominio no revierte esta transacción acotada; fallos de infraestructura siguen revertiendo. PostgreSQL/HTTP cubre expiración desde `OPEN` al intentar tomar y desde `ACKNOWLEDGED` al intentar resolver.
+- **Por qué:** antes el UPDATE a `EXPIRED` ocurría en la misma transacción que luego lanzaba `STATE_CONFLICT`; el rollback dejaba el llamado activo y sin evento hasta que otro lector/job lo expirara. RN-WCL-03 requiere expiración a los 30 minutos y el outbox debe reflejar cambios persistidos.
+- **Validación focal:** `.\backend\gradlew.bat -p backend test --tests "com.somphie.identity.api.IdentityIntegrationTest.expired waiter calls persist expiry and publish update when staff action conflicts" --no-daemon`: BUILD SUCCESSFUL; prueba PostgreSQL/HTTP pasó.
+- **Validación global:** `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`: BUILD SUCCESSFUL, 403 pruebas, 0 fallos/errores, 1 omitida (symlink no disponible en Windows); 5955/6288 líneas (94,70 %). La prueba integrada preexistente de persistencia/idempotencia/expiración de llamados también pasó dentro de la suite.
+- **Qué estudiar:** semántica de rollback de excepciones de negocio y atomicidad entre estado persistido y outbox; los conflictos pueden necesitar confirmar una expiración válida sin convertirla en transición de éxito.
+- **Archivos:** `WaiterCallService.kt`, `IdentityIntegrationTest.kt`, índice y esta bitácora. Sin cambios de OpenAPI/CHANGELOG ni migración.
+
+### 2026-10-16 — Primera entrega Web: acceso QR, menú y sesión ✅
+- **Qué:** se creó el proyecto Vite + React + TypeScript estricto con navegación, Query Client, tipos generados desde OpenAPI, textos es-AR/en, traducción centralizada de errores, tokens CSS y cliente HTTP. `/t/:tableCode` resuelve la mesa, carga el menú, abre o permite sumarse a una sesión y retoma el acceso desde un token guardado por mesa. La clave UUID v4 de apertura se conserva durante reintentos del mismo cuerpo, y se renueva cuando cambia el cuerpo; el nombre no se guarda en almacenamiento de reintento. Los montos de catálogo se formatean desde centavos enteros, sin cálculo de precio final.
+- **Por qué:** entregar una primera vertical de cliente usando el contrato vigente y avanzar sin esperar decisiones administrativas ni implementación SSE. El personal sigue en Android según el alcance aprobado.
+- **Validación focal:** `Set-Location .\web; corepack pnpm run check`: ESLint y TypeScript pasaron; **8 pruebas** de MSW/Vitest pasaron; build de producción pasó. Bundle inicial: 96,97 kB gzip.
+- **Validación visual:** la ruta `/t/TABLE-7` cargó en el navegador y mostró el error de conexión traducido cuando `localhost:8080` no respondió. Docker confirmó `Docker Desktop is unable to start`; por eso no se ejecutó integración HTTP/PostgreSQL. No se modificaron ni deshabilitaron pruebas del backend.
+- **Alcance pendiente:** el menú y la sesión todavía no incluyen carrito/pedidos; la caché no persiste entre recargas; no se implementaron Web admin ni integración real. El backend debe levantarse para validar CORS, contratos HTTP y la carrera de apertura en PostgreSQL.
+- **Qué estudiar:** generación de tipos desde OpenAPI; estado remoto vs. local; por qué una clave de idempotencia se conserva por intento lógico; representación segura de centavos en JavaScript.
+- **Archivos:** `web/package.json`, `web/pnpm-lock.yaml`, `web/src/`, `web/vite.config.ts`, `web/tsconfig.app.json`, `web/index.html`, `web/.env.example`, `web/README.md` y esta bitácora. Sin cambios de OpenAPI ni CHANGELOG.
+
+### 2026-10-17 — CU-02: idempotencia segura para apertura QR ✅
+- **Qué:** la apertura pública consume `Idempotency-Key`, valida UUID v4 y ejecuta mediante el servicio común con alcance por mesa. Un replay idéntico devuelve el mismo HTTP 201, sesión, participante, join code y token con `Idempotent-Replayed: true`; contenido distinto bajo la misma clave devuelve `IDEMPOTENCY_KEY_REUSED`. Un codec AES-GCM protege el guest token dentro de `idempotency_record.response_body`; los participantes siguen guardando solo SHA-256. Se agregaron pruebas para cifrado/descifrado, validación de clave, replay, ausencia de token en claro, no duplicación de filas/eventos y llamadas concurrentes con la misma clave.
+- **Por qué:** el contrato OpenAPI y CU-02 ya exigían idempotencia en apertura; sin replay, un timeout tras el commit podía dejar al cliente sin la credencial de la sesión que ya había abierto. Persistir sin protección el cuerpo genérico del replay habría expuesto el token.
+- **Validación focal:** `.\backend\gradlew.bat -p backend test --tests 'com.somphie.shared.idempotency.IdempotencyServiceTest' --tests 'com.somphie.shared.idempotency.GuestTokenIdempotencyResponseCodecTest' --tests 'com.somphie.floor.api.FloorControllerTest'`: BUILD SUCCESSFUL; 7 pruebas, 0 fallos.
+- **Validación HTTP/global:** el intento focal con `BackendSmokeTest` no inició porque Testcontainers no encontró Docker. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon`: 299 pruebas completadas, 2 errores de inicialización de clase por falta de Docker (`IdentityIntegrationTest`, `BackendSmokeTest`), 1 omitida; Gradle detuvo el flujo antes de generar JaCoCo. No se debilitó ni quitó ninguna prueba.
+- **Qué estudiar:** orden del replay frente al bloqueo de mesa y a la validación de sesión abierta; AES-GCM autentica el token cifrado, y la clave derivada debe mantenerse estable durante la retención de idempotencia para que los replays sigan disponibles.
+- **Archivos:** `FloorController.kt`, `IdempotencyService.kt`, `IdempotencyResponseCodec.kt`, pruebas del controlador/servicio/codec y PostgreSQL/HTTP, `seguridad.md`, índice y esta bitácora. OpenAPI/CHANGELOG no cambiaron porque el contrato ya declaraba clave y replay. Sin commit ni push.
+
+### 2026-10-17 — WP-WEB-41: carrito, confirmación y seguimiento ✅
+- **Qué:** se completó el recorrido de cliente con carrito local persistido por `session.id`, controles de cantidad y opciones, subtotal estimado en centavos, envío con `Idempotency-Key`, recuperación segura de intentos ambiguos, nueva confirmación ante `PRICE_CHANGED` y consulta REST de pedidos/estados con polling mientras la sesión sigue abierta.
+- **Por qué:** permitir que una persona pase del menú QR a un pedido visible sin inventar operaciones ni estados; el servidor sigue siendo la fuente de precios y estados. La clave se conserva solo para repetir el mismo cuerpo cuando el resultado es incierto.
+- **Validación Web:** `Set-Location .\web; corepack pnpm run test -- src/features/client/cart/cartModel.test.ts src/features/client/cart/cartStore.test.ts src/features/client/orders/OrderFlow.test.tsx src/features/client/table-access/TablePage.test.tsx`: 5 archivos, 17 pruebas pasaron. `Set-Location .\web; corepack pnpm run check`: ESLint, TypeScript, 5 archivos/17 pruebas Vitest y build de producción pasaron.
+- **Validación backend real:** con Docker disponible, las pruebas focalizadas de `BackendSmokeTest` (creación, replay y PRICE_CHANGED) y `IdentityIntegrationTest` (opciones/snapshot y listado paginado) pasaron. La suite global `.\gradlew.bat check jacocoTestReport --no-daemon` ejecutó 406 pruebas: 2 fallaron y 1 se omitió, así que no produjo cobertura. El test SSE falló bajo carga en la suite y pasó al repetirse aislado; `BackendSmokeTest` conserva una expectativa 409 para `IDEMPOTENCY_KEY_REUSED`, aunque OpenAPI 0.4.3 define 422. No se alteró ese trabajo backend preexistente ni se cambió el contrato.
+- **Qué estudiar:** un snapshot de Zustand debe conservar referencias estables mientras no cambie; por eso el carrito vacío usa una constante. En errores ambiguos se recupera el mismo intento, pero `PRICE_CHANGED` es un rechazo definitivo del intento anterior y exige clave nueva después de aceptar el importe actualizado.
+- **Archivos:** `web/src/features/client/cart/`, `web/src/features/client/orders/`, `web/src/features/client/table-access/TablePage.tsx`, `web/src/shared/api/`, `web/src/shared/i18n/`, `web/src/index.css`, pruebas Web, `web/README.md` y esta bitácora. Sin cambios al contrato OpenAPI ni a la implementación backend.
+
+### 2026-10-17 — WP-WEB-42: conexión real y validación de menú ✅
+- **Qué:** se completó el contexto `/api/v1`, CORS por lista explícita de orígenes y `GET /sessions/current` para recuperar sesiones de invitado de acuerdo con OpenAPI. La prueba del fallback de imagen ahora compila y pasa. Las pruebas del menú validan todos los valores de `Vary`: Spring CORS y el catálogo pueden añadir valores como campos repetidos, por lo que consultar solo el primero ocultaba `Accept-Language` aunque la respuesta lo incluyera.
+- **Por qué:** el frontend llamaba al prefijo publicado en OpenAPI mientras el backend servía en `/`, y no podía retomar la sesión porque faltaba la lectura contractual. El fallback permite mostrar productos aunque una imagen de demo no esté instalada localmente.
+- **Validación Web:** `Set-Location .\web; corepack pnpm run check`: lint, typecheck, 18 pruebas en 6 archivos y build de producción pasaron.
+- **Validación backend:** las 3 pruebas focalizadas de CORS y ETag/localización pasaron. `.\backend\gradlew.bat -p backend check jacocoTestReport --no-daemon --max-workers=1`: BUILD SUCCESSFUL; 408 pruebas, 0 fallos, 0 errores, 1 omitida por limitaciones de symlink en Windows; cobertura 6093/6430 líneas (94,76 %).
+- **Qué estudiar:** rutas contextuales de Spring, CORS sin cookies, recuperación de sesiones invitadas mediante hash de token y campos HTTP repetidos como `Vary`.
+- **Archivos:** configuración principal y de test, `IdentitySecurityConfiguration.kt`, `FloorController.kt`, `IdentityIntegrationTest.kt`, `BackendSmokeTest.kt`, `CatalogController.kt`, `MenuCatalog.tsx`, prueba del fallback, traducciones, README Web, guía de entorno local y esta bitácora. Sin cambios al contrato OpenAPI.
 
 ---
 ## 7. Conceptos para estudiar (glosario rápido de este tramo)

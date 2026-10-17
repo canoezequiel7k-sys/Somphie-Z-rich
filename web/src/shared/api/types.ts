@@ -1,0 +1,15 @@
+import type { components } from './schema'
+
+export type ApiSchemas = components['schemas']
+export type PublicTable = ApiSchemas['PublicTable']
+export type MenuResponse = ApiSchemas['MenuResponse']
+export type SessionAccessResponse = ApiSchemas['SessionAccessResponse']
+export type CurrentSession = ApiSchemas['CurrentSession']
+export type OpenSessionRequest = ApiSchemas['OpenSessionRequest']
+export type JoinSessionRequest = ApiSchemas['JoinSessionRequest']
+export type Product = ApiSchemas['Product']
+export type Option = ApiSchemas['Option']
+export type OptionGroup = ApiSchemas['OptionGroup']
+export type CreateOrderRequest = ApiSchemas['CreateOrderRequest']
+export type Order = ApiSchemas['Order']
+export type OrderPage = ApiSchemas['OrderPage']

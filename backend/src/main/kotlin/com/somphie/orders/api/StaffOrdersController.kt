@@ -6,6 +6,7 @@ import com.somphie.events.EventAggregateType
 import com.somphie.events.EventOutboxService
 import com.somphie.events.EventVersion
 import com.somphie.identity.application.IdentityService
+import com.somphie.identity.domain.StaffReadScope
 import com.somphie.identity.domain.StaffProfile
 import com.somphie.orders.domain.AcceptOrderRequest
 import com.somphie.orders.domain.ItemSnapshot
@@ -78,7 +79,7 @@ class StaffOrdersController(
             }
         }
         val after = cursor?.let(OrderCursorCodec::decode)
-        val isKitchen = "KITCHEN" in profile.roles
+        val isKitchen = StaffReadScope.isKitchenOnly(profile.roles)
         val stationIds = profile.stations.map { it.id }
         if (isKitchen && stationIds.isEmpty()) {
             return ResponseEntity.ok(mapOf("items" to emptyList<Any>(), "nextCursor" to null))
@@ -150,8 +151,8 @@ class StaffOrdersController(
                 "version" to rs.getLong("version"),
                 "createdAt" to createdAt.toString(),
                 "items" to emptyList<Any>(),
-                "totalMinor" to rs.getLong("total_minor"),
             ).apply {
+                if (!isKitchen) put("totalMinor", rs.getLong("total_minor"))
                 if (!isKitchen) {
                     if (rs.getObject("creator_user_id", UUID::class.java) != null) {
                         put("createdBy", mapOf(
@@ -175,7 +176,7 @@ class StaffOrdersController(
                 rs.getObject("decided_by", UUID::class.java)?.let {
                     put("decidedBy", mapOf("userId" to it.toString(), "displayName" to rs.getString("decider_name")))
                 }
-                rs.getString("note")?.let { put("note", it) }
+                if (!isKitchen) rs.getString("note")?.let { put("note", it) }
                 rs.getString("rejection_reason")?.let {
                     put("rejection", linkedMapOf("reasonCode" to it).apply {
                         rs.getString("rejection_text")?.let { text -> put("reasonText", text) }
@@ -188,7 +189,11 @@ class StaffOrdersController(
         val hasMore = rows.size > limit
         val page = rows.take(limit)
         if (page.isNotEmpty()) {
-            val itemFilters = if (isKitchen) "AND oi.station_id IN (:stationIds)" else ""
+            val itemFilters = if (isKitchen) {
+                "AND oi.station_id IN (:stationIds) AND oi.status IN ('QUEUED', 'IN_PREPARATION', 'READY', 'DELIVERED')"
+            } else {
+                ""
+            }
             if (isKitchen) params["stationIds"] = stationIds
             val items = jdbc.query(
                 """
@@ -216,16 +221,19 @@ class StaffOrdersController(
                     "productId" to rs.getString("product_id"),
                     "productName" to rs.getString("product_name"),
                     "productNameI18n" to objectMapper.readValue(rs.getString("product_name_i18n") ?: "{}", stringMapType),
-                    "basePriceMinor" to rs.getLong("base_price_minor"),
-                    "optionsDeltaMinor" to rs.getLong("options_delta_minor"),
-                    "unitPriceMinor" to rs.getLong("unit_price_minor"),
                     "quantity" to rs.getInt("quantity"),
-                    "lineTotalMinor" to rs.getLong("line_total_minor"),
                     "station" to rs.getString("station_code"),
                     "status" to rs.getString("status"),
-                    "options" to objectMapper.readValue(rs.getString("options_snapshot") ?: "[]", optionListType),
+                    "options" to objectMapper.readValue(rs.getString("options_snapshot") ?: "[]", optionListType)
+                        .map { option -> if (isKitchen) option - "priceDeltaMinor" else option },
                     "productCurrentlyAvailable" to rs.getBoolean("product_currently_available"),
                 ).apply {
+                    if (!isKitchen) {
+                        put("basePriceMinor", rs.getLong("base_price_minor"))
+                        put("optionsDeltaMinor", rs.getLong("options_delta_minor"))
+                        put("unitPriceMinor", rs.getLong("unit_price_minor"))
+                        put("lineTotalMinor", rs.getLong("line_total_minor"))
+                    }
                     rs.getString("note")?.let { put("note", it) }
                     listOf(
                         "queued_at" to "queuedAt",

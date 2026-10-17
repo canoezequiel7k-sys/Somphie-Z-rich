@@ -1,6 +1,7 @@
 package com.somphie.shared.api
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.AfterEach
@@ -18,6 +19,7 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
@@ -29,6 +31,8 @@ import org.testcontainers.junit.jupiter.Testcontainers
 import com.jayway.jsonpath.JsonPath
 import com.somphie.floor.api.ExpireEmptySessionsJob
 import java.security.MessageDigest
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -70,6 +74,68 @@ class BackendSmokeTest {
         createdRestaurantIds.clear()
     }
 
+    @Test
+    fun `cors accepts the configured web origin and rejects other origins`() {
+        mockMvc.perform(
+            options("/sessions/current/orders")
+                .header(HttpHeaders.ORIGIN, "http://localhost:5173")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                .header(
+                    HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS,
+                    "authorization,content-type,idempotency-key",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://localhost:5173"))
+            .andExpect { result ->
+                assertTrue(
+                    result.response.getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS)
+                        ?.contains("Idempotency-Key", ignoreCase = true) == true,
+                )
+            }
+
+        mockMvc.perform(
+            options("/sessions/current/orders")
+                .header(HttpHeaders.ORIGIN, "https://untrusted.example")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "POST"),
+        )
+            .andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun `media endpoint serves nested supported image publicly and returns not found for missing image`() {
+        val mediaRoot = Path.of("media").toAbsolutePath().normalize()
+        val rootExisted = Files.exists(mediaRoot)
+        val testDirectory = mediaRoot.resolve("smoke-${UUID.randomUUID()}")
+        val image = testDirectory.resolve("fixture.png")
+        val bytes = byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x01, 0x02, 0x03, 0x04,
+        )
+        Files.createDirectories(testDirectory)
+        try {
+            Files.write(image, bytes)
+
+            mockMvc.perform(get("/media/${testDirectory.fileName}/fixture.png"))
+                .andExpect(status().isOk)
+                .andExpect(content().contentTypeCompatibleWith("image/png"))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "public, max-age=86400"))
+                .andExpect(content().bytes(bytes))
+
+            mockMvc.perform(get("/media/${testDirectory.fileName}/missing.png"))
+                .andExpect(status().isNotFound)
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+        } finally {
+            Files.deleteIfExists(image)
+            Files.deleteIfExists(testDirectory)
+            if (!rootExisted && Files.isDirectory(mediaRoot) &&
+                Files.list(mediaRoot).use { !it.findAny().isPresent }
+            ) {
+                Files.deleteIfExists(mediaRoot)
+            }
+        }
+    }
+
     /** Verifica que la versión publicada coincida con los metadatos del build y el contrato. */
     @Test
     fun `version endpoint returns build and contract metadata`() {
@@ -77,7 +143,7 @@ class BackendSmokeTest {
             .andExpect(status().isOk)
             .andExpect(content().contentTypeCompatibleWith("application/json"))
             .andExpect(jsonPath("$.build").value("0.0.1-SNAPSHOT"))
-            .andExpect(jsonPath("$.contractVersion").value("0.4.1"))
+            .andExpect(jsonPath("$.contractVersion").value("0.4.3"))
     }
 
     /** Confirma que Actuator exponga salud sin detalles internos en el perfil de pruebas. */
@@ -154,7 +220,11 @@ class BackendSmokeTest {
             .andExpect(jsonPath("$.categories[0].products[0].name").value("Flat white"))
             .andReturn()
         val etag = menu.response.getHeader(HttpHeaders.ETAG)!!
-        assertTrue(menu.response.getHeader(HttpHeaders.VARY)!!.contains(HttpHeaders.ACCEPT_LANGUAGE))
+        val menuVaryHeaders = menu.response.getHeaders(HttpHeaders.VARY).joinToString(", ")
+        assertTrue(
+            menuVaryHeaders.contains(HttpHeaders.ACCEPT_LANGUAGE),
+            "Expected Accept-Language in Vary, got: $menuVaryHeaders",
+        )
 
         mockMvc.perform(get("/menu").param("lang", "en").header(HttpHeaders.IF_NONE_MATCH, etag))
             .andExpect(status().isNotModified)
@@ -185,7 +255,11 @@ class BackendSmokeTest {
                 .andExpect(status().isNotModified)
                 .andExpect(content().string(""))
                 .andExpect(header().string(HttpHeaders.ETAG, etag))
-                .andExpect(header().string(HttpHeaders.VARY, HttpHeaders.ACCEPT_LANGUAGE))
+                .andExpect { result ->
+                    val vary = result.response.getHeaders(HttpHeaders.VARY).joinToString(", ")
+                    assertTrue(vary.contains(HttpHeaders.ACCEPT_LANGUAGE))
+                    assertTrue(vary.contains(HttpHeaders.ORIGIN))
+                }
         }
     }
 
@@ -207,19 +281,36 @@ class BackendSmokeTest {
     @Test
     fun `opening and joining a table session persists only a hashed guest token`() {
         val tableCode = createTable()
+        val idempotencyKey = UUID.randomUUID().toString()
         mockMvc.perform(get("/public/tables/$tableCode"))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.hasActiveSession").value(false))
             .andExpect(jsonPath("$.canOpen").value(true))
 
+        mockMvc.perform(
+            post("/public/tables/$tableCode/sessions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"displayName":"Host"}"""),
+        ).andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REQUIRED"))
+        mockMvc.perform(
+            post("/public/tables/$tableCode/sessions")
+                .header("Idempotency-Key", "not-a-uuid")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"displayName":"Host"}"""),
+        ).andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+
         val opened = mockMvc.perform(
             post("/public/tables/$tableCode/sessions")
+                .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"displayName":"Host"}"""),
         ).andExpect(status().isCreated)
             .andExpect(jsonPath("$.participant.role").value("HOST"))
             .andReturn().response.contentAsString
         val token = JsonPath.read<String>(opened, "$.guestToken")
+        val sessionId = UUID.fromString(JsonPath.read<String>(opened, "$.session.id"))
         val participantId = UUID.fromString(JsonPath.read<String>(opened, "$.participant.id"))
         val tokenHash = jdbcTemplate.queryForObject(
             "SELECT token_hash FROM session_participant WHERE id = ?",
@@ -232,6 +323,46 @@ class BackendSmokeTest {
         assertTrue(token.startsWith("gt_"))
         assertEquals(expectedHash, tokenHash)
         assertNotEquals(token, tokenHash)
+
+        val replay = mockMvc.perform(
+            post("/public/tables/$tableCode/sessions")
+                .header("Idempotency-Key", idempotencyKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"displayName":"Host"}"""),
+        ).andExpect(status().isCreated)
+            .andExpect(header().string("Idempotent-Replayed", "true"))
+            .andReturn().response.contentAsString
+        assertEquals(opened, replay)
+        val storedResponse = jdbcTemplate.queryForObject(
+            "SELECT response_body::text FROM idempotency_record WHERE scope = ? AND key = ?",
+            String::class.java,
+            "floor:session:open:$tableCode",
+            idempotencyKey,
+        )!!
+        assertFalse(storedResponse.contains(token))
+        assertTrue(storedResponse.contains("enc:v1:"))
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM table_session WHERE id = ?",
+            Int::class.java,
+            sessionId,
+        ))
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM session_participant WHERE id = ?",
+            Int::class.java,
+            participantId,
+        ))
+        assertEquals(2, jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM event_log WHERE session_id = ?",
+            Int::class.java,
+            sessionId,
+        ))
+        mockMvc.perform(
+            post("/public/tables/$tableCode/sessions")
+                .header("Idempotency-Key", idempotencyKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"displayName":"Different host"}"""),
+        ).andExpect(status().isUnprocessableEntity)
+            .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REUSED"))
 
         val joinCode = JsonPath.read<String>(opened, "$.joinCode")
         mockMvc.perform(
@@ -250,6 +381,7 @@ class BackendSmokeTest {
 
         mockMvc.perform(
             post("/public/tables/$tableCode/sessions")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"displayName":"Second host"}"""),
         ).andExpect(status().isConflict)
@@ -259,10 +391,59 @@ class BackendSmokeTest {
         jdbcTemplate.update("UPDATE dining_table SET active = FALSE WHERE table_code = ?", inactiveTableCode)
         mockMvc.perform(
             post("/public/tables/$inactiveTableCode/sessions")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"displayName":"Unavailable host"}"""),
         ).andExpect(status().isConflict)
             .andExpect(jsonPath("$.code").value("TABLE_UNAVAILABLE"))
+    }
+
+    @Test
+    fun `concurrent identical QR opens replay one session and guest token`() {
+        val tableCode = createTable()
+        val idempotencyKey = UUID.randomUUID().toString()
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val attempts = (1..2).map {
+                executor.submit(Callable {
+                    ready.countDown()
+                    check(start.await(5, TimeUnit.SECONDS))
+                    mockMvc.perform(
+                        post("/public/tables/$tableCode/sessions")
+                            .header("Idempotency-Key", idempotencyKey)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""{"displayName":"Concurrent host"}"""),
+                    ).andReturn().response
+                })
+            }
+            assertTrue(ready.await(5, TimeUnit.SECONDS))
+            start.countDown()
+            val responses = attempts.map { it.get(20, TimeUnit.SECONDS) }
+
+            assertEquals(listOf(201, 201), responses.map { it.status }.sorted())
+            assertEquals(1, responses.count { it.getHeader("Idempotent-Replayed") == "true" })
+            assertEquals(responses.first().contentAsString, responses.last().contentAsString)
+            val sessionId = UUID.fromString(JsonPath.read<String>(responses.first().contentAsString, "$.session.id"))
+            assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM table_session WHERE id = ?",
+                Int::class.java,
+                sessionId,
+            ))
+            assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM session_participant WHERE session_id = ?",
+                Int::class.java,
+                sessionId,
+            ))
+            assertEquals(2, jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM event_log WHERE session_id = ?",
+                Int::class.java,
+                sessionId,
+            ))
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     @Test
@@ -561,6 +742,7 @@ class BackendSmokeTest {
         val tableCode = createTable()
         val opened = mockMvc.perform(
             post("/public/tables/$tableCode/sessions")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"displayName":"Order guest"}"""),
         ).andExpect(status().isCreated).andReturn().response.contentAsString
@@ -645,6 +827,7 @@ class BackendSmokeTest {
     private fun openSession(tableCode: String): OpenedSession {
         val response = mockMvc.perform(
             post("/public/tables/$tableCode/sessions")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"displayName":"Expiry test"}"""),
         ).andExpect(status().isCreated).andReturn().response.contentAsString

@@ -2,7 +2,7 @@
 
 > Decisión base: **SSE** con eventos "pista" (ADR-0006), aprobada por D-160. WP-BE-60 está parcialmente implementada; los consumidores mantienen polling como fallback.
 >
-> Estado al 2026-10-14: V15/V17, endpoint SSE, cursor/reanudación, filtro tenant/sesión/estación y retención están implementados y probados en PostgreSQL. Pruebas HTTP reales cubren heartbeat a 25 s, replay, revocación y 50 streams HTTP/1.1 simultáneos con entrega común; tras revocación, las tareas del scheduler no superan la línea base y los executors cliente se cierran. La prueba no representa capacidad sostenida de producción; revisar productores restantes antes de cerrar WP-BE-60.
+> Estado al 2026-10-15: V15/V17, endpoint SSE, cursor/reanudación, filtro tenant/sesión/estación y retención están implementados y probados en PostgreSQL. Pruebas HTTP reales cubren cursores malformados/futuros/vencidos, heartbeat a 25 s, replay, revocación y 50 streams HTTP/1.1 simultáneos con entrega común; tras revocación, las tareas del scheduler no superan la línea base y los executors cliente se cierran. La prueba no representa capacidad sostenida de producción; falta acordar perfil y medir antes de cerrar WP-BE-60.
 
 Se usa PostgreSQL como log durable/outbox transaccional y fuente de replay SSE; un aviso post-commit en memoria solo optimiza el despertar de lectores. El cursor se asigna con contador bloqueado por restaurante hasta commit para ordenar los eventos visibles. Ver costos, pruebas y límites en [ADR-0006](../00-gobierno/adr/ADR-0006-tiempo-real-sse.md).
 
@@ -47,7 +47,7 @@ La retención borra en lotes los eventos de más de 48 horas y avanza un waterma
 Ver `04-api/eventos.md`.
 
 ## 6. Pruebas obligatorias (QA)
-- Desconexión y reconexión con `Last-Event-ID` (sin perder ni duplicar efectos): prueba HTTP real implementada.
+- Desconexión y reconexión con `Last-Event-ID` (sin perder ni duplicar efectos): prueba HTTP real implementada; cursores malformados/futuros se rechazan y los vencidos responden 410.
 - Eventos duplicados y desordenados.
 - `EVENT_ID_TOO_OLD` → refresco completo.
 - Un participante **no** recibe eventos de otra sesión (`STREAM_SCOPE_FORBIDDEN`).

@@ -9,6 +9,8 @@ spring: # Configuración común que pueden sobrescribir las variables del entorn
     password: ${DB_PASSWORD:change-me-local-only} # El valor de reserva solo sirve para el Compose local.
     driver-class-name: org.postgresql.Driver # Declara explícitamente el driver PostgreSQL del runtime.
 server: # Evita que el manejo por defecto filtre detalles técnicos.
+  servlet:
+    context-path: /api/v1 # Mantiene las rutas HTTP alineadas con el prefijo publicado en OpenAPI.
   error: # Limita información de errores generados por Spring.
     include-message: never # Los mensajes internos no se devuelven al cliente.
     include-stacktrace: never # Las trazas se reservan para el entorno de logs.
@@ -23,7 +25,8 @@ management: # Publica solo la comprobación necesaria para liveness y readiness.
         enabled: true # Separa liveness y readiness en rutas de Actuator.
       show-details: never # No publica detalles de infraestructura fuera del perfil dev.
 somphie: # Valores del producto no inferibles desde las librerías.
-  contract-version: 0.4.1 # Debe permanecer alineada con info.version en docs/04-api/openapi.yaml.
+  contract-version: 0.4.3 # Debe permanecer alineada con info.version en docs/04-api/openapi.yaml.
+  cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
   jwt:
     secret: ${JWT_SECRET:} # La clave real se inyecta por entorno y debe contener al menos 256 bits.
   identity:

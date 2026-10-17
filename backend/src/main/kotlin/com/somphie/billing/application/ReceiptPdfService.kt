@@ -70,7 +70,9 @@ class ReceiptPdfService(
                         val amount = (payment.getValue("amountMinor") as Number).toLong()
                         pageWriter.line("$createdAt / $kind / $method / $status: ${money(receipt.currency, amount)}")
                         val tip = (payment.getValue("tipMinor") as Number).toLong()
-                        if (tip > 0) pageWriter.line("  Propina: ${money(receipt.currency, tip)}")
+                        if (status == "SUCCEEDED" && kind == "PAYMENT" && tip > 0) {
+                            pageWriter.line("  Propina: ${money(receipt.currency, tip)}")
+                        }
                     }
                     if (receipt.closeReason == "FORCED") {
                         pageWriter.line("")
@@ -134,15 +136,37 @@ class ReceiptPdfService(
             var line = ""
             text.split(WHITESPACE).forEach { word ->
                 val candidate = if (line.isEmpty()) word else "$line $word"
-                if (font.getStringWidth(candidate) * size / 1000f <= MAX_LINE_WIDTH || line.isEmpty()) {
+                if (font.getStringWidth(candidate) * size / 1000f <= MAX_LINE_WIDTH) {
                     line = candidate
                 } else {
-                    result += line
-                    line = word
+                    if (line.isNotEmpty()) result += line
+                    val pieces = splitLongWord(word, font, size)
+                    result += pieces.dropLast(1)
+                    line = pieces.last()
                 }
             }
             if (line.isNotEmpty()) result += line
             return result
+        }
+
+        private fun splitLongWord(word: String, font: PDFont, size: Float): List<String> {
+            val pieces = mutableListOf<String>()
+            var piece = ""
+            var offset = 0
+            while (offset < word.length) {
+                val codePoint = word.codePointAt(offset)
+                val character = String(Character.toChars(codePoint))
+                val candidate = piece + character
+                if (piece.isNotEmpty() && font.getStringWidth(candidate) * size / 1000f > MAX_LINE_WIDTH) {
+                    pieces += piece
+                    piece = character
+                } else {
+                    piece = candidate
+                }
+                offset += Character.charCount(codePoint)
+            }
+            if (piece.isNotEmpty()) pieces += piece
+            return pieces
         }
 
         private companion object {

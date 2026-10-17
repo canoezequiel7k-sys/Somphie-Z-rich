@@ -23,12 +23,12 @@
 
 | Credencial | Formato | Duración | Almacenamiento cliente | Almacenamiento servidor |
 |---|---|---|---|---|
-| Invitado | Opaco 256 bits | Sesión + 24 h | Web: `localStorage` (clave por mesa) | Solo hash SHA-256 |
+| Invitado | Opaco 256 bits | Sesión + 24 h | Web: `localStorage` (clave por mesa) | Solo hash SHA-256; el token de replay se cifra por 24 h |
 | Access (cuentas) | JWT firmado (claims mínimos: sub, rid, permisos resumidos, `tv`) | 15 min | Memoria (web), Keystore (Android) | — |
 | Refresh | Opaco, rotativo | 30 d (personal), configurable | Android: DataStore cifrado (Keystore/Tink). Web admin: `httpOnly` cookie si mismo sitio; si no, memoria + rotación estricta (🟡 ADR-0003) | Hash + familia + `used_at` |
 | Contraseña | Argon2id (preferido) o BCrypt ≥ 12 | — | Nunca | Solo hash |
 
-Notas: la clave de firma JWT es un secreto de entorno; rotación documentada. Los permisos efectivos se **recalculan en servidor** en cada operación crítica (el JWT no es la única fuente).
+Notas: la clave de firma JWT es un secreto de entorno; rotación documentada. Los permisos efectivos se **recalculan en servidor** en cada operación crítica (el JWT no es la única fuente). La respuesta idempotente de apertura QR cifra el guest token en la clave derivada de `JWT_SECRET`; rotar esa clave invalida los replays pendientes.
 
 ## 3. Cabeceras y configuración HTTP
 - HTTPS obligatorio (HSTS en producción).

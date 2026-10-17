@@ -24,6 +24,9 @@ import org.springframework.security.web.AuthenticationEntryPoint
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver
 import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver
+import org.springframework.web.cors.CorsConfiguration
+import org.springframework.web.cors.CorsConfigurationSource
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jose.jwk.source.ImmutableSecret
 import java.net.URI
@@ -35,6 +38,36 @@ import javax.crypto.spec.SecretKeySpec
 class IdentitySecurityConfiguration {
     @Bean
     fun passwordEncoder(): PasswordEncoder = BCryptPasswordEncoder(12)
+
+    @Bean
+    fun corsConfigurationSource(
+        @Value("\${somphie.cors-allowed-origins}") configuredOrigins: String,
+    ): CorsConfigurationSource {
+        val allowedOrigins = configuredOrigins.split(',')
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+        require(allowedOrigins.isNotEmpty()) { "CORS_ALLOWED_ORIGINS must contain at least one origin" }
+
+        val configuration = CorsConfiguration().apply {
+            this.allowedOrigins = allowedOrigins
+            allowedMethods = listOf("GET", "POST", "PATCH", "DELETE", "OPTIONS")
+            allowedHeaders = listOf(
+                "Accept",
+                "Accept-Language",
+                "Authorization",
+                "Content-Type",
+                "Idempotency-Key",
+                "If-None-Match",
+                "Last-Event-ID",
+            )
+            exposedHeaders = listOf("ETag", "Idempotent-Replayed")
+            allowCredentials = false
+            maxAge = 3600
+        }
+        return UrlBasedCorsConfigurationSource().apply {
+            registerCorsConfiguration("/**", configuration)
+        }
+    }
 
     @Bean
     fun jwtSecretKey(@Value("\${somphie.jwt.secret}") encodedSecret: String): SecretKey {
@@ -82,6 +115,7 @@ class IdentitySecurityConfiguration {
         http: HttpSecurity,
         jwtDecoder: JwtDecoder,
         jwtAuthenticationConverter: JwtAuthenticationConverter,
+        corsConfigurationSource: CorsConfigurationSource,
     ): SecurityFilterChain {
         val entryPoint = IdentityAuthenticationEntryPoint()
         val defaultBearerTokenResolver = DefaultBearerTokenResolver()
@@ -97,10 +131,12 @@ class IdentitySecurityConfiguration {
         }
         http
             .csrf { it.disable() }
+            .cors { it.configurationSource(corsConfigurationSource) }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
                 it.requestMatchers(HttpMethod.POST, "/auth/login", "/auth/refresh").permitAll()
                 it.requestMatchers(HttpMethod.GET, "/events/stream").permitAll()
+                it.requestMatchers(HttpMethod.GET, "/sessions/current").permitAll()
                 it.requestMatchers("/auth/logout", "/auth/change-password", "/me").authenticated()
                 it.requestMatchers(HttpMethod.GET, "/staff/orders", "/staff/orders/*")
                     .hasAuthority("order.read")
@@ -201,6 +237,7 @@ class IdentitySecurityConfiguration {
 
     private fun isGuestEndpoint(method: String, path: String): Boolean =
         (path == "/sessions/current/orders" && method in setOf("GET", "POST")) ||
+            (path == "/sessions/current" && method == "GET") ||
             (path == "/sessions/current/bill" && method == "GET") ||
         (path == "/sessions/current/payments" && method in setOf("GET", "POST")) ||
             (path == "/sessions/current/waiter-calls" && method in setOf("GET", "POST")) ||

@@ -5,6 +5,7 @@ import com.somphie.shared.domain.ErrorCode
 import com.somphie.floor.application.ParticipantRevocationService
 import com.somphie.floor.infrastructure.JoinCodeGenerator
 import com.somphie.events.EventOutboxService
+import com.somphie.shared.idempotency.IdempotencyService
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -26,6 +27,7 @@ class FloorControllerTest {
         mock(ParticipantRevocationService::class.java),
         Clock.systemUTC(),
         mock(EventOutboxService::class.java),
+        mock(IdempotencyService::class.java),
     )
 
     @Test

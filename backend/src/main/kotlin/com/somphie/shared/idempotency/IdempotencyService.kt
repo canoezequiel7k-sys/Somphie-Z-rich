@@ -14,6 +14,7 @@ import java.security.MessageDigest
 class IdempotencyService(
     private val jdbc: NamedParameterJdbcTemplate,
     private val objectMapper: ObjectMapper,
+    private val responseCodec: IdempotencyResponseCodec,
 ) {
 
     fun executeIdempotent(
@@ -48,7 +49,7 @@ class IdempotencyService(
         return try {
             val response = action()
             val status = response.statusCode.value()
-            val body = response.body?.let(objectMapper::writeValueAsString) ?: ""
+            val body = response.body?.let(responseCodec::encode)?.let(objectMapper::writeValueAsString) ?: ""
 
             jdbc.update(
                 "UPDATE idempotency_record SET status = 'COMPLETED', response_status = :status, response_body = :body WHERE scope = :scope AND key = :key",
@@ -104,6 +105,7 @@ class IdempotencyService(
         val responseBody = existing.responseBody
             ?.takeIf(String::isNotEmpty)
             ?.let { objectMapper.readValue(it, responseBodyType) }
+            ?.let(responseCodec::decode)
         return ResponseEntity.status(existing.responseStatus)
             .header("Idempotent-Replayed", "true")
             .body(responseBody)

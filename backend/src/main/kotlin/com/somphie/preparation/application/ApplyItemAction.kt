@@ -5,6 +5,7 @@ import com.somphie.events.DomainEventType
 import com.somphie.events.EventAggregateType
 import com.somphie.events.EventOutboxService
 import com.somphie.events.EventVersion
+import com.somphie.orders.domain.ItemStatus
 import com.somphie.orders.domain.Order
 import com.somphie.shared.domain.DomainException
 import com.somphie.shared.domain.ErrorCode
@@ -130,7 +131,15 @@ class ApplyItemAction(
         if (!locked.sessionOpen) throw DomainException(ErrorCode.SESSION_CLOSED, "Session is closed")
         val target = itemId?.let { id -> locked.order.items.firstOrNull { it.id == id } }
         if (itemId != null && target == null) throw DomainException(ErrorCode.ITEM_NOT_FOUND, "Order item not found")
-        if (action in setOf(ItemAction.START, ItemAction.READY) ||
+        if (action == ItemAction.UNDO &&
+            target?.status == ItemStatus.DELIVERED &&
+            "item.deliver" !in access.permissions
+        ) {
+            throw DomainException(ErrorCode.FORBIDDEN, "Delivery permission is required to undo delivery")
+        }
+        val undoPreparationTransition = action == ItemAction.UNDO &&
+            target?.status in setOf(ItemStatus.IN_PREPARATION, ItemStatus.READY)
+        if (action in setOf(ItemAction.START, ItemAction.READY) || undoPreparationTransition ||
             action == ItemAction.CANCEL && access.roles.any { it == "BAR" || it == "KITCHEN" }
         ) {
             if ("OWNER" !in access.roles && target!!.snapshot.stationId !in access.stationIds) {

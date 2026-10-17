@@ -18,10 +18,14 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.http.ResponseEntity
 import tools.jackson.databind.ObjectMapper
 import java.security.MessageDigest
+import javax.crypto.spec.SecretKeySpec
 
 class IdempotencyServiceTest {
     private val jdbc = mock(NamedParameterJdbcTemplate::class.java)
-    private val service = IdempotencyService(jdbc, ObjectMapper())
+    private val codec = GuestTokenIdempotencyResponseCodec(
+        SecretKeySpec(ByteArray(32) { it.toByte() }, "HmacSHA256"),
+    )
+    private val service = IdempotencyService(jdbc, ObjectMapper(), codec)
 
     @Test
     fun `missing key is rejected before invoking the action or database`() {
