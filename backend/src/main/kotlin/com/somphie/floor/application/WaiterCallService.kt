@@ -184,11 +184,11 @@ class WaiterCallService(
         return mapOf("items" to items.map(::staffWaiterCallMap))
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = [DomainException::class])
     fun acknowledge(id: UUID, restaurantId: UUID): Map<String, Any> =
         transition(id, restaurantId, expected = "OPEN", target = "ACKNOWLEDGED")
 
-    @Transactional
+    @Transactional(noRollbackFor = [DomainException::class])
     fun resolve(id: UUID, restaurantId: UUID): Map<String, Any> =
         transition(id, restaurantId, expected = "ACKNOWLEDGED", target = "RESOLVED")
 
@@ -227,7 +227,7 @@ class WaiterCallService(
 
     private fun transition(id: UUID, restaurantId: UUID, expected: String, target: String): Map<String, Any> {
         val now = clock.instant()
-        jdbc.update(
+        val expiredSessionId = jdbc.query(
             """
             UPDATE waiter_call wc
             SET status = 'EXPIRED'
@@ -235,9 +235,13 @@ class WaiterCallService(
             WHERE ts.id = wc.session_id AND ts.restaurant_id = :restaurantId
               AND wc.status IN ('OPEN', 'ACKNOWLEDGED') AND wc.expires_at <= :now
               AND wc.id = :id
+            RETURNING wc.session_id
             """.trimIndent(),
             mapOf("id" to id, "restaurantId" to restaurantId, "now" to java.sql.Timestamp.from(now)),
-        )
+        ) { rs, _ -> rs.getObject("session_id", UUID::class.java) }.firstOrNull()
+        expiredSessionId?.let {
+            appendWaiterEvent(restaurantId, it, DomainEventType.WAITER_UPDATED)
+        }
         val call = jdbc.query(
             """
             SELECT wc.id, wc.session_id, wc.reason, wc.text, wc.status, wc.created_at,

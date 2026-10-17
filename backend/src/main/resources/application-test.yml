@@ -1,3 +1,6 @@
+server:
+  servlet:
+    context-path: ""
 logging: # Reduce ruido de librerías durante las pruebas automatizadas.
   level: # Limita el nivel a errores en el entorno test.
     root: WARN # Conserva fallos importantes sin llenar la salida de Gradle.

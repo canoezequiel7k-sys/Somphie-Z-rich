@@ -627,6 +627,9 @@ class IdentityIntegrationTest {
                 }
             }
             try {
+                // El cierre HTTP debe ocurrir antes de medir las tareas del servidor;
+                // revocar al participante fuerza el siguiente sondeo a completar cada stream.
+                responses.forEach { it.body().close() }
                 mockMvc.perform(
                     delete("/sessions/current/participants/${member.first}")
                         .header("Authorization", listOf("Bearer", fixture.token).joinToString(" ")),
@@ -1916,6 +1919,87 @@ class IdentityIntegrationTest {
     }
 
     @Test
+    fun `expired waiter calls persist expiry and publish update when staff action conflicts`() {
+        val fixture = createGuestSession()
+        val guestAuthorization = listOf("Bearer", fixture.token).joinToString(" ")
+        val staffToken = json(login(OLD_PASSWORD).response.contentAsString, "$.accessToken")
+        val staffAuthorization = listOf("Bearer", staffToken).joinToString(" ")
+
+        val openCall = mockMvc.perform(
+            post("/sessions/current/waiter-calls")
+                .header("Authorization", guestAuthorization)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"reason":"WATER"}"""),
+        ).andExpect(status().isCreated)
+            .andReturn().response.contentAsString
+        val openCallId = UUID.fromString(json(openCall, "$.id"))
+        jdbc.update(
+            "UPDATE waiter_call SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id = ?",
+            openCallId,
+        )
+
+        mockMvc.perform(
+            post("/staff/waiter-calls/$openCallId/acknowledge")
+                .header("Authorization", staffAuthorization),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("STATE_CONFLICT"))
+        assertEquals(
+            "EXPIRED",
+            jdbc.queryForObject("SELECT status FROM waiter_call WHERE id = ?", String::class.java, openCallId),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE session_id = ? AND type = 'waiter.updated'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+
+        val acknowledgedCall = mockMvc.perform(
+            post("/sessions/current/waiter-calls")
+                .header("Authorization", guestAuthorization)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"reason":"HELP"}"""),
+        ).andExpect(status().isCreated)
+            .andReturn().response.contentAsString
+        val acknowledgedCallId = UUID.fromString(json(acknowledgedCall, "$.id"))
+        mockMvc.perform(
+            post("/staff/waiter-calls/$acknowledgedCallId/acknowledge")
+                .header("Authorization", staffAuthorization),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("ACKNOWLEDGED"))
+        jdbc.update(
+            "UPDATE waiter_call SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id = ?",
+            acknowledgedCallId,
+        )
+
+        mockMvc.perform(
+            post("/staff/waiter-calls/$acknowledgedCallId/resolve")
+                .header("Authorization", staffAuthorization),
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("STATE_CONFLICT"))
+        assertEquals(
+            "EXPIRED",
+            jdbc.queryForObject(
+                "SELECT status FROM waiter_call WHERE id = ?",
+                String::class.java,
+                acknowledgedCallId,
+            ),
+        )
+        assertEquals(
+            3,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM event_log WHERE session_id = ? AND type = 'waiter.updated'",
+                Int::class.java,
+                UUID.fromString(fixture.sessionId),
+            ),
+        )
+    }
+
+    @Test
     fun `concurrent waiter calls for one reason persist only one active row`() {
         val fixture = createGuestSession()
         val ready = CountDownLatch(2)
@@ -3184,6 +3268,7 @@ class IdentityIntegrationTest {
                 start.await()
                 mockMvc.perform(
                     post("/public/tables/$tableCode/sessions")
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""{"displayName":"Race guest"}"""),
                 ).andReturn().response
@@ -4364,6 +4449,64 @@ class IdentityIntegrationTest {
     }
 
     @Test
+    fun `current guest session restores access and enforces revoked and closed read windows`() {
+        val fixture = createGuestSession()
+        mockMvc.perform(
+            get("/sessions/current").header("Authorization", "Bearer ${fixture.token}"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.session.id").value(fixture.sessionId))
+            .andExpect(jsonPath("$.session.status").value("OPEN"))
+            .andExpect(jsonPath("$.session.readOnly").value(false))
+            .andExpect(jsonPath("$.participant.id").value(fixture.participantId))
+            .andExpect(jsonPath("$.participant.role").value("HOST"))
+            .andExpect(jsonPath("$.joinCode").isNotEmpty)
+
+        val (memberId, memberToken) = createMemberFixture(fixture)
+        mockMvc.perform(
+            get("/sessions/current").header("Authorization", "Bearer $memberToken"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.participant.id").value(memberId.toString()))
+            .andExpect(jsonPath("$.participant.role").value("MEMBER"))
+            .andExpect(jsonPath("$.joinCode").doesNotExist())
+
+        jdbc.update(
+            "UPDATE session_participant SET revoked_at = CURRENT_TIMESTAMP WHERE id = ?",
+            memberId,
+        )
+        mockMvc.perform(
+            get("/sessions/current").header("Authorization", "Bearer $memberToken"),
+        ).andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value("SESSION_ACCESS_REVOKED"))
+
+        val closedAt = Instant.now()
+        jdbc.update(
+            """
+            UPDATE table_session
+            SET status = 'CLOSED', closed_at = ?, close_reason = 'EMPTY', join_code = NULL
+            WHERE id = ?
+            """.trimIndent(),
+            java.sql.Timestamp.from(closedAt),
+            UUID.fromString(fixture.sessionId),
+        )
+        mockMvc.perform(
+            get("/sessions/current").header("Authorization", "Bearer ${fixture.token}"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.session.status").value("CLOSED"))
+            .andExpect(jsonPath("$.session.readOnly").value(true))
+            .andExpect(jsonPath("$.joinCode").doesNotExist())
+
+        jdbc.update(
+            "UPDATE table_session SET closed_at = ? WHERE id = ?",
+            java.sql.Timestamp.from(closedAt.minusSeconds(25 * 60 * 60)),
+            UUID.fromString(fixture.sessionId),
+        )
+        mockMvc.perform(
+            get("/sessions/current").header("Authorization", "Bearer ${fixture.token}"),
+        ).andExpect(status().isUnauthorized)
+            .andExpect(jsonPath("$.code").value("TOKEN_EXPIRED"))
+    }
+
+    @Test
     fun `session order list returns contract page with full snapshots and stable cursor`() {
         val owner = createGuestSession()
         val other = createGuestSession()
@@ -4824,6 +4967,7 @@ class IdentityIntegrationTest {
         )
         val result = mockMvc.perform(
             post("/public/tables/$tableCode/sessions")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"displayName":"Test guest"}"""),
         ).andExpect(status().isCreated)

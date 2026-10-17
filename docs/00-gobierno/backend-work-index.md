@@ -1,14 +1,15 @@
 # Índice de trabajo del backend
 
-**Estado:** ejecución activa; rama `feat/backend-preparation`, HEAD `a6a2c8d90fb60b5c7cf762aae4d67ca43965ebcc`, upstream sincronizado. **Revisión:** 2026-10-16.
+**Estado:** ejecución activa; rama `feat/backend-preparation`, HEAD `54ed68f` (sin commits en esta continuación; incluye cambios locales preexistentes de WP-BE-92). **Revisión:** 2026-10-17.
 
 ### Actualización D-160 (estado vigente)
 
 | Bloque | Estado ahora |
 |---|---|
+| CU-02 — apertura QR idempotente | Implementada localmente: UUID v4, replay del mismo token sin duplicar efectos y token cifrado en el cuerpo persistido de idempotencia; los tests unitarios pasan. Verificación HTTP/PostgreSQL y suite global pendientes porque Docker no está disponible. |
 | Q-26/27/31/32/33/34 y selección Fase 9 | Alcance aprobado por el dueño; ver [decisiones](./decisiones.md). Q-26 sigue abierta para operaciones/contratos admin y fórmulas respaldadas; Q-35 define el proceso/contrato de identidad cliente y Q-36 el envío/contrato de correo y encuesta. Q-07 resuelve retención, no estos flujos. |
 | WP-ARQ-60 | ADR-0006 aprobada: PostgreSQL outbox + SSE. |
-| Retenciones | Implementadas: idempotencia (24 h), nombres de invitados (12 meses) y llamados (30 días). Pruebas unitarias/PostgreSQL; suite global del 2026-10-16 pasó con 402 pruebas y 94,70 % de líneas. |
+| Retenciones | Implementadas: idempotencia (24 h), nombres de invitados (12 meses) y llamados (30 días). Pruebas unitarias/PostgreSQL; expiración en competencia con acción de personal conserva estado/outbox. Suite global del 2026-10-16 pasó con 403 pruebas y 94,70 % de líneas. |
 | WP-BE-60 | Parcial: además de filtros/lista/cola y OWNER global, `undo` de preparación valida estación; la regresión HTTP/PostgreSQL confirma rechazo sin mutación para estación ajena. Perfil/capacidad sostenida pendiente; desconexión TCP no reproducida de forma fiable. |
 | WP-BE-52 | Completada para el contrato vigente: mutaciones de disponibilidad, versión/ETag y comparación `If-None-Match` (lista, comparación débil y `*`) cubiertos; no hay otras mutaciones administrativas de catálogo en OpenAPI. |
 | WP-BE-51-T01 | Completada localmente: Q-31 aplicada; PostgreSQL cubre tablero/saldo firmado y HTTP SSE valida llamados, actualizaciones y refresco REST del tablero. |
@@ -75,7 +76,7 @@ Dependencias de fase y entregables se citan en [`roadmap-fases.md`](../08-agente
 |---|---|---|
 | WP-BE-90 | Registro/verificación/login de cliente, vincular participante y email | Fase 9 seleccionada por D-160; Q-35 precisa reglas/contrato de identidad y vinculación; Q-36 define el transporte de verificación sin inventar proveedor. |
 | WP-BE-91 | Email de comprobante y encuesta | Seleccionado dentro de Fase 9; depende de BE-90 y Q-36 (destinatarios, disparadores, feedback, transporte/configuración, deduplicación y reintentos). |
-| WP-BE-92 | Llamar al mozo; retiro por mostrador solo si se mantiene | Llamados y productores `waiter.*` están implementados/probados; retiro por mostrador sigue opcional según D-025. |
+| WP-BE-92 | Llamar al mozo; retiro por mostrador solo si se mantiene | Llamados y productores `waiter.*` implementados; expiración desde OPEN/ACKNOWLEDGED persiste y emite evento incluso si acknowledge/resolve responde STATE_CONFLICT. Retiro por mostrador sigue opcional según D-025. |
 
 ## Siguiente paso
 
